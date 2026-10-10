@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -6,12 +7,22 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import * as jwt from 'jsonwebtoken';
+import { registrarAuditoria } from '../auditoria/auditoria';
 import { DatabaseService } from '../database/database.service';
 
 const MAX_INTENTOS = 5;
 const MINUTOS_BLOQUEO = 15;
 const MENSAJE_ERROR = 'Usuario o contraseña incorrectos';
 const HASH_FALSO = bcrypt.hashSync('relleno-no-valido', 12);
+
+const SQL_FALLO = `UPDATE usuarios SET
+    failed_attempts = CASE WHEN failed_attempts + 1 >= $2::int
+                           THEN 0 ELSE failed_attempts + 1 END,
+    locked_until = CASE WHEN failed_attempts + 1 >= $2::int
+                        THEN now() + make_interval(mins => $3::int)
+                        ELSE locked_until END,
+    updated_at = now()
+  WHERE id = $1`;
 
 type UsuarioFila = {
   id: string;
@@ -59,17 +70,7 @@ export class AuthService {
 
     const correcta = await bcrypt.compare(clave, u.password_hash);
     if (!correcta) {
-      await this.db.query(
-        `UPDATE usuarios SET
-           failed_attempts = CASE WHEN failed_attempts + 1 >= $2::int
-                                  THEN 0 ELSE failed_attempts + 1 END,
-           locked_until = CASE WHEN failed_attempts + 1 >= $2::int
-                               THEN now() + make_interval(mins => $3::int)
-                               ELSE locked_until END,
-           updated_at = now()
-         WHERE id = $1`,
-        [u.id, MAX_INTENTOS, MINUTOS_BLOQUEO],
-      );
+      await this.db.query(SQL_FALLO, [u.id, MAX_INTENTOS, MINUTOS_BLOQUEO]);
       throw new UnauthorizedException(MENSAJE_ERROR);
     }
 
@@ -90,11 +91,17 @@ export class AuthService {
 
     return {
       token,
-      usuario: { id: u.id, username: u.username, nombre: u.nombre, apellido: u.apellido },
+      usuario: {
+        id: u.id,
+        username: u.username,
+        nombre: u.nombre,
+        apellido: u.apellido,
+      },
       debeCambiarPassword: u.must_change_password,
     };
   }
-    async perfil(usuarioId: string) {
+
+  async perfil(usuarioId: string) {
     const roles = await this.db.query<{ nombre: string }>(
       `SELECT ro.nombre
        FROM usuario_roles ur
@@ -117,5 +124,68 @@ export class AuthService {
       roles: roles.rows.map((r) => r.nombre),
       permisos: permisos.rows.map((p) => p.codigo),
     };
+  }
+
+  async cambiarPassword(
+    usuarioId: string,
+    ip: string | undefined,
+    actual: unknown,
+    nueva: unknown,
+  ) {
+    const claveActual = String(actual ?? '');
+    const claveNueva = String(nueva ?? '');
+
+    if (claveNueva.length < 10) {
+      throw new BadRequestException(
+        'La contraseña nueva debe tener al menos 10 caracteres',
+      );
+    }
+    if (claveNueva === claveActual) {
+      throw new BadRequestException(
+        'La contraseña nueva debe ser distinta a la actual',
+      );
+    }
+
+    const r = await this.db.query<{
+      password_hash: string;
+      locked_until: Date | null;
+    }>('SELECT password_hash, locked_until FROM usuarios WHERE id = $1', [
+      usuarioId,
+    ]);
+    const u = r.rows[0];
+    if (!u) throw new UnauthorizedException(MENSAJE_ERROR);
+
+    if (u.locked_until && u.locked_until > new Date()) {
+      throw new HttpException(
+        'Cuenta bloqueada temporalmente. Intente más tarde.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const correcta = await bcrypt.compare(claveActual, u.password_hash);
+    if (!correcta) {
+      await this.db.query(SQL_FALLO, [usuarioId, MAX_INTENTOS, MINUTOS_BLOQUEO]);
+      throw new BadRequestException('La contraseña actual es incorrecta');
+    }
+
+    const hash = await bcrypt.hash(claveNueva, 12);
+    await this.db.transaccion(async (c) => {
+      await c.query(
+        `UPDATE usuarios
+         SET password_hash = $2, must_change_password = false,
+             failed_attempts = 0, locked_until = NULL, updated_at = now()
+         WHERE id = $1`,
+        [usuarioId, hash],
+      );
+      await registrarAuditoria(c, {
+        usuarioId,
+        accion: 'usuario.cambiar_password',
+        entidad: 'usuarios',
+        entidadId: usuarioId,
+        ip,
+      });
+    });
+
+    return { ok: true };
   }
 }

@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -12,9 +13,11 @@ export type UsuarioActual = {
   username: string;
   nombre: string;
   apellido: string;
+  must_change_password: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RUTAS_SIN_CAMBIO = ['/auth/me', '/auth/cambiar-password'];
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -50,15 +53,22 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const r = await this.db.query<UsuarioActual>(
-      `SELECT id, username, nombre, apellido
+      `SELECT id, username, nombre, apellido, must_change_password
        FROM usuarios WHERE id = $1 AND is_active = true`,
       [id],
     );
-    if (!r.rows[0]) {
+    const usuario = r.rows[0];
+    if (!usuario) {
       throw new UnauthorizedException('Sesión inválida o vencida');
     }
 
-    req.usuario = r.rows[0];
+    if (usuario.must_change_password && !RUTAS_SIN_CAMBIO.includes(req.path)) {
+      throw new ForbiddenException(
+        'Debe cambiar su contraseña antes de continuar',
+      );
+    }
+
+    req.usuario = usuario;
     return true;
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Login from './Login'
 import Layout from './Layout'
+import CambiarPassword from './CambiarPassword'
 import { obtenerPerfil } from './api'
 import type { Perfil } from './api'
 
@@ -45,6 +46,15 @@ export default function App() {
     setToken(null)
   }
 
+  function recargarPerfil() {
+    if (!token) return
+    setCargando(true)
+    obtenerPerfil(token)
+      .then(setPerfil)
+      .catch(salir)
+      .finally(() => setCargando(false))
+  }
+
   if (cargando) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500">
@@ -55,6 +65,12 @@ export default function App() {
 
   if (!token || !perfil) {
     return <Login onEntrar={entrar} />
+  }
+
+  if (perfil.must_change_password) {
+    return (
+      <CambiarPassword token={token} onListo={recargarPerfil} onSalir={salir} />
+    )
   }
 
   return <Layout perfil={perfil} token={token} onSalir={salir} />

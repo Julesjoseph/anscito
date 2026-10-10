@@ -7,7 +7,11 @@ export type Usuario = {
   apellido: string
 }
 
-export type Perfil = Usuario & { roles: string[]; permisos: string[] }
+export type Perfil = Usuario & {
+  roles: string[]
+  permisos: string[]
+  must_change_password: boolean
+}
 
 export type FilaUsuario = {
   id: string
@@ -102,3 +106,8 @@ export async function login(username: string, password: string) {
     debeCambiarPassword: boolean
   }
 }
+export const cambiarPassword = (token: string, actual: string, nueva: string) =>
+  llamar<{ ok: boolean }>('POST', '/auth/cambiar-password', token, {
+    actual,
+    nueva,
+  })

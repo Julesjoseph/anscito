@@ -27,4 +27,19 @@ export class AuthController {
     const perfil = await this.auth.perfil(req.usuario.id);
     return { ...req.usuario, ...perfil };
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('cambiar-password')
+  @HttpCode(200)
+  cambiarPassword(
+    @Req() req: { usuario: UsuarioActual; ip?: string },
+    @Body() body: { actual?: string; nueva?: string },
+  ) {
+    return this.auth.cambiarPassword(
+      req.usuario.id,
+      req.ip,
+      body?.actual,
+      body?.nueva,
+    );
+  }
 }
