@@ -94,4 +94,28 @@ export class AuthService {
       debeCambiarPassword: u.must_change_password,
     };
   }
+    async perfil(usuarioId: string) {
+    const roles = await this.db.query<{ nombre: string }>(
+      `SELECT ro.nombre
+       FROM usuario_roles ur
+       JOIN roles ro ON ro.id = ur.rol_id AND ro.is_active = true
+       WHERE ur.usuario_id = $1
+       ORDER BY ro.nombre`,
+      [usuarioId],
+    );
+    const permisos = await this.db.query<{ codigo: string }>(
+      `SELECT DISTINCT p.codigo
+       FROM usuario_roles ur
+       JOIN roles ro ON ro.id = ur.rol_id AND ro.is_active = true
+       JOIN rol_permisos rp ON rp.rol_id = ro.id
+       JOIN permisos p ON p.id = rp.permiso_id
+       WHERE ur.usuario_id = $1
+       ORDER BY p.codigo`,
+      [usuarioId],
+    );
+    return {
+      roles: roles.rows.map((r) => r.nombre),
+      permisos: permisos.rows.map((p) => p.codigo),
+    };
+  }
 }

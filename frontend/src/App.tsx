@@ -1,41 +1,61 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Login from './Login'
-import type { Usuario } from './api'
+import Layout from './Layout'
+import { obtenerPerfil } from './api'
+import type { Perfil } from './api'
 
 export default function App() {
-  const [usuario, setUsuario] = useState<Usuario | null>(null)
+  const [token, setToken] = useState<string | null>(() =>
+    sessionStorage.getItem('token'),
+  )
+  const [perfil, setPerfil] = useState<Perfil | null>(null)
+  const [cargando, setCargando] = useState<boolean>(
+    () => sessionStorage.getItem('token') !== null,
+  )
 
-  function entrar(token: string, u: Usuario) {
-    sessionStorage.setItem('token', token)
-    setUsuario(u)
+  useEffect(() => {
+    if (!token) return
+    let activo = true
+    obtenerPerfil(token)
+      .then((p) => {
+        if (activo) setPerfil(p)
+      })
+      .catch(() => {
+        if (!activo) return
+        sessionStorage.removeItem('token')
+        setToken(null)
+      })
+      .finally(() => {
+        if (activo) setCargando(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [token])
+
+  function entrar(nuevoToken: string) {
+    sessionStorage.setItem('token', nuevoToken)
+    setCargando(true)
+    setToken(nuevoToken)
   }
 
   function salir() {
     sessionStorage.removeItem('token')
-    setUsuario(null)
+    setPerfil(null)
+    setToken(null)
   }
 
-  if (!usuario) {
+  if (cargando) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 text-gray-500">
+        Cargando…
+      </div>
+    )
+  }
+
+  if (!token || !perfil) {
     return <Login onEntrar={entrar} />
   }
 
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-100">
-      <div className="w-12 h-12 rounded-xl bg-[#C8102E] text-white flex items-center justify-center text-2xl font-medium">
-        S
-      </div>
-      <div className="text-lg font-medium">
-        Bienvenido, {usuario.nombre} {usuario.apellido}
-      </div>
-      <div className="text-sm text-gray-500">
-        Sesión iniciada como {usuario.username}
-      </div>
-      <button
-        onClick={salir}
-        className="h-10 px-4 rounded-lg border border-gray-300 bg-white text-sm hover:bg-gray-50"
-      >
-        Salir
-      </button>
-    </div>
-  )
+  return <Layout perfil={perfil} token={token} onSalir={salir} />
 }
