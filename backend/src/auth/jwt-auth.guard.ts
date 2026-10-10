@@ -16,6 +16,8 @@ export type UsuarioActual = {
   must_change_password: boolean;
 };
 
+type FilaSesion = UsuarioActual & { password_changed_at: Date };
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RUTAS_SIN_CAMBIO = ['/auth/me', '/auth/cambiar-password'];
 
@@ -38,12 +40,18 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     let id: string;
+    let emitido: number;
     try {
       const datos = jwt.verify(token, secreto, { algorithms: ['HS256'] });
-      if (typeof datos === 'string' || typeof datos.sub !== 'string') {
+      if (
+        typeof datos === 'string' ||
+        typeof datos.sub !== 'string' ||
+        typeof datos.iat !== 'number'
+      ) {
         throw new Error('token inválido');
       }
       id = datos.sub;
+      emitido = datos.iat;
     } catch {
       throw new UnauthorizedException('Sesión inválida o vencida');
     }
@@ -52,23 +60,35 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Sesión inválida o vencida');
     }
 
-    const r = await this.db.query<UsuarioActual>(
-      `SELECT id, username, nombre, apellido, must_change_password
+    const r = await this.db.query<FilaSesion>(
+      `SELECT id, username, nombre, apellido, must_change_password,
+              password_changed_at
        FROM usuarios WHERE id = $1 AND is_active = true`,
       [id],
     );
-    const usuario = r.rows[0];
-    if (!usuario) {
+    const fila = r.rows[0];
+    if (!fila) {
       throw new UnauthorizedException('Sesión inválida o vencida');
     }
 
-    if (usuario.must_change_password && !RUTAS_SIN_CAMBIO.includes(req.path)) {
+    // Un restablecimiento de contraseña invalida las sesiones anteriores.
+    if (emitido < Math.floor(fila.password_changed_at.getTime() / 1000)) {
+      throw new UnauthorizedException('Sesión inválida o vencida');
+    }
+
+    if (fila.must_change_password && !RUTAS_SIN_CAMBIO.includes(req.path)) {
       throw new ForbiddenException(
         'Debe cambiar su contraseña antes de continuar',
       );
     }
 
-    req.usuario = usuario;
+    req.usuario = {
+      id: fila.id,
+      username: fila.username,
+      nombre: fila.nombre,
+      apellido: fila.apellido,
+      must_change_password: fila.must_change_password,
+    } satisfies UsuarioActual;
     return true;
   }
 }

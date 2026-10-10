@@ -40,7 +40,7 @@ export class UsuariosService {
   async listar() {
     const r = await this.db.query(
       `SELECT u.id, u.username, u.nombre, u.apellido, u.is_active,
-              u.last_login_at,
+              u.last_login_at, u.locked_until,
               COALESCE(string_agg(ro.nombre, ', ' ORDER BY ro.nombre), '') AS roles,
               (array_agg(ur.rol_id))[1] AS rol_id
        FROM usuarios u
