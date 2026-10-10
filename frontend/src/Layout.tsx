@@ -135,7 +135,12 @@ export default function Layout({ perfil, token, onSalir }: Props) {
 
       <main className="flex-1 min-w-0 p-6">
         {pagina === 'usuarios' ? (
-          <Usuarios token={token} onSesionVencida={onSalir} />
+     <Usuarios
+  token={token}
+  permisos={perfil.permisos}
+  usuarioId={perfil.id}
+  onSesionVencida={onSalir}
+/>
         ) : (
           <Panel />
         )}

@@ -1,27 +1,62 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { UsuarioActual } from '../auth/jwt-auth.guard';
 import { PermisosGuard } from '../auth/permisos.guard';
 import { RequierePermiso } from '../auth/permisos.decorator';
-import { DatabaseService } from '../database/database.service';
+import { UsuariosService } from './usuarios.service';
+import type { DatosCrear, DatosEditar } from './usuarios.service';
+
+type Peticion = { usuario: UsuarioActual; ip?: string };
 
 @UseGuards(JwtAuthGuard, PermisosGuard)
 @Controller('usuarios')
 export class UsuariosController {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly usuarios: UsuariosService) {}
 
   @Get()
   @RequierePermiso('usuarios.ver')
-  async listar() {
-    const r = await this.db.query(
-      `SELECT u.id, u.username, u.nombre, u.apellido, u.is_active,
-              u.last_login_at,
-              COALESCE(string_agg(ro.nombre, ', ' ORDER BY ro.nombre), '') AS roles
-       FROM usuarios u
-       LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
-       LEFT JOIN roles ro ON ro.id = ur.rol_id
-       GROUP BY u.id
-       ORDER BY u.username`,
+  listar() {
+    return this.usuarios.listar();
+  }
+
+  @Post()
+  @RequierePermiso('usuarios.crear')
+  crear(@Req() req: Peticion, @Body() body: DatosCrear) {
+    return this.usuarios.crear(req.usuario.id, req.ip, body ?? {});
+  }
+
+  @Patch(':id')
+  @RequierePermiso('usuarios.editar')
+  editar(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body() body: DatosEditar,
+  ) {
+    return this.usuarios.editar(req.usuario.id, id, req.ip, body ?? {});
+  }
+
+  @Patch(':id/estado')
+  @RequierePermiso('usuarios.desactivar')
+  estado(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body() body: { is_active?: boolean; motivo?: string },
+  ) {
+    return this.usuarios.cambiarEstado(
+      req.usuario.id,
+      id,
+      body?.is_active,
+      body?.motivo,
+      req.ip,
     );
-    return r.rows;
   }
 }

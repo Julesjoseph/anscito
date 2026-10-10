@@ -17,26 +17,74 @@ export type FilaUsuario = {
   is_active: boolean
   last_login_at: string | null
   roles: string
+  rol_id: string | null
 }
+
+export type Rol = { id: string; codigo: string; nombre: string }
 
 export class SesionVencida extends Error {}
 
-async function pedir<T>(ruta: string, token: string): Promise<T> {
+async function llamar<T>(
+  metodo: string,
+  ruta: string,
+  token: string,
+  cuerpo?: unknown,
+): Promise<T> {
   const res = await fetch(`${API_URL}${ruta}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    method: metodo,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(cuerpo !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined,
   })
   if (res.status === 401) throw new SesionVencida('Sesión vencida')
-  if (res.status === 403) {
-    throw new Error('No tiene permiso para ver esta información')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    const mensaje = Array.isArray(data?.message)
+      ? data.message.join(', ')
+      : data?.message
+    throw new Error(mensaje ?? 'No se pudo completar la operación')
   }
-  if (!res.ok) throw new Error('No se pudo cargar la información')
   return (await res.json()) as T
 }
 
-export const obtenerPerfil = (token: string) => pedir<Perfil>('/auth/me', token)
+export const obtenerPerfil = (token: string) =>
+  llamar<Perfil>('GET', '/auth/me', token)
 
 export const listarUsuarios = (token: string) =>
-  pedir<FilaUsuario[]>('/usuarios', token)
+  llamar<FilaUsuario[]>('GET', '/usuarios', token)
+
+export const listarRoles = (token: string) =>
+  llamar<Rol[]>('GET', '/roles', token)
+
+export const crearUsuario = (
+  token: string,
+  datos: {
+    username: string
+    nombre: string
+    apellido: string
+    password: string
+    rolId: string
+  },
+) => llamar<{ id: string }>('POST', '/usuarios', token, datos)
+
+export const editarUsuario = (
+  token: string,
+  id: string,
+  datos: { nombre: string; apellido: string; rolId: string },
+) => llamar<{ ok: boolean }>('PATCH', `/usuarios/${id}`, token, datos)
+
+export const cambiarEstadoUsuario = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/usuarios/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
 
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_URL}/auth/login`, {
