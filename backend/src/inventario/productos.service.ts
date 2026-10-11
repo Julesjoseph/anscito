@@ -9,7 +9,11 @@ import { registrarAuditoria } from '../auditoria/auditoria';
 import { DatabaseService } from '../database/database.service';
 import { calcularItbis, normalizarMonto } from '../servicios/calculo-itbis';
 import { margenTotal, rentabilidad, restar } from './rentabilidad';
-import { SQL_TASA_VIGENTE, SQL_TOTALES_PRODUCTO } from './sql';
+import {
+  SQL_TASA_VIGENTE,
+  SQL_TOTALES_PRODUCTO,
+  STOCK_MINIMO_POR_DEFECTO,
+} from './sql';
 import {
   armarCodigo,
   esCero,
@@ -18,11 +22,6 @@ import {
 } from './cantidades';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Si un producto no tiene stock mínimo propio, la alerta usa este valor
-// (decisión del dueño). Mientras no exista una pantalla de configuración,
-// se cambia aquí.
-const STOCK_MINIMO_POR_DEFECTO = '5';
 
 // Origen común de la lista y de los totales: existencia calculada con los
 // movimientos, mínimo efectivo, alerta y precio sin ITBIS. $1 = mínimo por

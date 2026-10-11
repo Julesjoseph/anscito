@@ -90,6 +90,14 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   carta. El logo debe ser PNG o JPG. Dice "comprobante interno… no sustituye
   el comprobante fiscal".
 
+- **Panel** (`GET /panel?periodo=hoy|semana|mes|trimestre|anio`): ventas con
+  comparación contra el período anterior, cobrado por forma de pago, ganancia
+  bruta estimada (productos y servicios; servicios sin costo cuentan con
+  costo 0, decisión del dueño), ITBIS cobrado, alertas y valor del
+  inventario, más vendidos, últimas ventas y "Reponer pronto". Cada sección
+  solo llega si el usuario tiene el permiso del módulo. "Efectivo en caja" y
+  "Cuentas por cobrar" quedan como "Disponible con el módulo…".
+
 ## Pendientes y decisiones abiertas
 
 - Impuesto duplicado "ITBIS" al 16% (código `itbi`) creado en pruebas:

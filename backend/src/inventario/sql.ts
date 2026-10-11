@@ -34,3 +34,8 @@ export const SQL_TOTALES_PRODUCTO = `CROSS JOIN LATERAL (
              AS salidas,
            COALESCE(sum(m.cantidad * ${SQL_SIGNO}), 0)::numeric(14,3) AS existencia
     FROM movimientos_inventario m WHERE m.producto_id = p.id) mv`;
+
+// Si un producto no tiene stock mínimo propio, la alerta usa este valor
+// (decisión del dueño). Mientras no exista una pantalla de configuración,
+// se cambia aquí. Lo usan Inventario y el Panel.
+export const STOCK_MINIMO_POR_DEFECTO = '5';

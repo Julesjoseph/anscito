@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { EmpresaModule } from './empresa/empresa.module';
 import { HealthController } from './health/health.controller';
 import { InventarioModule } from './inventario/inventario.module';
+import { PanelModule } from './panel/panel.module';
 import { ServiciosModule } from './servicios/servicios.module';
 import { TercerosModule } from './terceros/terceros.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
@@ -23,6 +24,7 @@ import { VentasModule } from './ventas/ventas.module';
     TercerosModule,
     EmpresaModule,
     VentasModule,
+    PanelModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

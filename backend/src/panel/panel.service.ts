@@ -1,0 +1,230 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { DatabaseService } from '../database/database.service';
+import {
+  SQL_TOTALES_PRODUCTO,
+  STOCK_MINIMO_POR_DEFECTO,
+} from '../inventario/sql';
+
+// Panel (resumen del negocio). Cada sección solo se calcula y se envía si el
+// usuario tiene el permiso del módulo correspondiente: el panel nunca muestra
+// más de lo que la persona podría ver en ese módulo.
+
+export type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre' | 'anio';
+
+// Unidad de date_trunc de PostgreSQL para cada período.
+const TRUNCAR: Record<Periodo, string> = {
+  hoy: 'day',
+  semana: 'week', // la semana empieza el lunes
+  mes: 'month',
+  trimestre: 'quarter',
+  anio: 'year',
+};
+
+@Injectable()
+export class PanelService {
+  constructor(private readonly db: DatabaseService) {}
+
+  private async permisos(usuarioId: string): Promise<Set<string>> {
+    const r = await this.db.query<{ codigo: string }>(
+      `SELECT DISTINCT p.codigo
+       FROM usuario_roles ur
+       JOIN roles ro ON ro.id = ur.rol_id AND ro.is_active = true
+       JOIN rol_permisos rp ON rp.rol_id = ro.id
+       JOIN permisos p ON p.id = rp.permiso_id
+       WHERE ur.usuario_id = $1`,
+      [usuarioId],
+    );
+    return new Set(r.rows.map((f) => f.codigo));
+  }
+
+  async resumen(usuarioId: string, periodoTexto: unknown) {
+    const periodo = (
+      typeof periodoTexto === 'string' ? periodoTexto : 'hoy'
+    ) as Periodo;
+    if (!(periodo in TRUNCAR)) {
+      throw new BadRequestException(
+        'Período inválido: hoy, semana, mes, trimestre o anio',
+      );
+    }
+    const permisos = await this.permisos(usuarioId);
+    const zona = (
+      await this.db.query<{ valor: string }>(
+        `SELECT valor FROM configuracion WHERE clave = 'empresa.zona_horaria'`,
+      )
+    ).rows[0].valor;
+
+    // Inicio del período en hora local; el período anterior tiene el mismo
+    // largo (ej.: hoy hasta esta hora contra ayer hasta esta hora).
+    const rango = await this.db.query<{
+      inicio: string;
+      fin: string;
+      inicio_anterior: string;
+    }>(
+      `SELECT inicio, now() AS fin, inicio - (now() - inicio) AS inicio_anterior
+       FROM (SELECT (date_trunc($1, now() AT TIME ZONE $2) AT TIME ZONE $2) AS inicio) x`,
+      [TRUNCAR[periodo], zona],
+    );
+    const { inicio, fin, inicio_anterior } = rango.rows[0];
+
+    const resultado: Record<string, unknown> = {
+      periodo,
+      desde: inicio,
+      hasta: fin,
+    };
+
+    if (permisos.has('ventas.ver')) {
+      resultado.ventas = await this.ventas(inicio, fin, inicio_anterior);
+      if (permisos.has('inventario.ver_costos')) {
+        resultado.ganancia = await this.ganancia(inicio, fin);
+      }
+    }
+    if (permisos.has('inventario.ver')) {
+      resultado.inventario = await this.inventario(
+        permisos.has('inventario.ver_costos'),
+      );
+    }
+    return resultado;
+  }
+
+  private async ventas(inicio: string, fin: string, anterior: string) {
+    const rango = `v.estado = 'completada' AND v.fecha >= $1 AND v.fecha < $2`;
+    const [tot, prev, anuladas, pagos, top, ultimas] = await Promise.all([
+      this.db.query<{
+        cantidad: number;
+        total: string;
+        itbis: string;
+        base: string;
+        descuento: string;
+      }>(
+        `SELECT count(*)::int AS cantidad,
+                COALESCE(sum(total), 0)::numeric(16,2) AS total,
+                COALESCE(sum(itbis), 0)::numeric(16,2) AS itbis,
+                COALESCE(sum(base_imponible), 0)::numeric(16,2) AS base,
+                COALESCE(sum(descuento), 0)::numeric(16,2) AS descuento
+         FROM ventas v WHERE ${rango}`,
+        [inicio, fin],
+      ),
+      this.db.query<{ total: string }>(
+        `SELECT COALESCE(sum(total), 0)::numeric(16,2) AS total
+         FROM ventas v WHERE ${rango}`,
+        [anterior, inicio],
+      ),
+      this.db.query<{ cantidad: number; total: string }>(
+        `SELECT count(*)::int AS cantidad, COALESCE(sum(total), 0)::numeric(16,2) AS total
+         FROM ventas v
+         WHERE v.estado = 'anulada' AND v.fecha >= $1 AND v.fecha < $2`,
+        [inicio, fin],
+      ),
+      this.db.query<{ forma: string; total: string; cantidad: number }>(
+        `SELECT fp.nombre AS forma, sum(vp.monto)::numeric(16,2) AS total,
+                count(DISTINCT v.id)::int AS cantidad
+         FROM ventas v
+         JOIN venta_pagos vp ON vp.venta_id = v.id
+         JOIN formas_pago fp ON fp.id = vp.forma_pago_id
+         WHERE ${rango}
+         GROUP BY fp.nombre, fp.orden ORDER BY fp.orden`,
+        [inicio, fin],
+      ),
+      this.db.query<{
+        codigo: string;
+        descripcion: string;
+        tipo: string;
+        cantidad: string;
+        total: string;
+      }>(
+        `SELECT vl.codigo, vl.descripcion, vl.tipo,
+                sum(vl.cantidad)::numeric(14,3) AS cantidad,
+                sum(vl.total)::numeric(16,2) AS total
+         FROM venta_lineas vl JOIN ventas v ON v.id = vl.venta_id
+         WHERE ${rango}
+         GROUP BY vl.codigo, vl.descripcion, vl.tipo
+         ORDER BY sum(vl.total) DESC LIMIT 5`,
+        [inicio, fin],
+      ),
+      this.db.query(
+        `SELECT v.id, 'V-' || lpad(v.numero::text, 6, '0') AS numero, v.fecha,
+                v.total, v.estado, t.nombre AS cliente
+         FROM ventas v JOIN terceros t ON t.id = v.cliente_id
+         ORDER BY v.numero DESC LIMIT 5`,
+      ),
+    ]);
+    return {
+      ...tot.rows[0],
+      total_anterior: prev.rows[0].total,
+      anuladas: anuladas.rows[0],
+      por_forma_pago: pagos.rows,
+      mas_vendidos: top.rows,
+      ultimas: ultimas.rows,
+    };
+  }
+
+  // Ganancia bruta estimada: toda la venta sin ITBIS (productos y servicios)
+  // menos el costo copiado en cada línea. Decisión del dueño: las líneas sin
+  // costo registrado (servicios sin costo) cuentan con costo 0, y se informan
+  // aparte para saber qué parte no tiene costo descontado.
+  private async ganancia(inicio: string, fin: string) {
+    const r = await this.db.query<{
+      venta: string;
+      costo: string;
+      venta_sin_costo: string;
+      ganancia: string;
+      margen: string | null;
+    }>(
+      `SELECT venta, costo, venta_sin_costo,
+              (venta - costo)::numeric(16,2) AS ganancia,
+              CASE WHEN venta > 0
+                   THEN round((venta - costo) * 100 / venta, 1)::text END AS margen
+       FROM (
+         SELECT COALESCE(sum(vl.base), 0)::numeric(16,2) AS venta,
+                COALESCE(sum(round(vl.costo_unitario * vl.cantidad, 2)), 0)::numeric(16,2)
+                  AS costo,
+                COALESCE(sum(vl.base) FILTER (WHERE vl.costo_unitario IS NULL), 0)::numeric(16,2)
+                  AS venta_sin_costo
+         FROM venta_lineas vl JOIN ventas v ON v.id = vl.venta_id
+         WHERE v.estado = 'completada' AND v.fecha >= $1 AND v.fecha < $2
+       ) x`,
+      [inicio, fin],
+    );
+    return r.rows[0];
+  }
+
+  private async inventario(verCostos: boolean) {
+    const base = `FROM productos p ${SQL_TOTALES_PRODUCTO}
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(p.stock_minimo, $1::numeric) AS minimo) mn
+      WHERE p.is_active`;
+    const [res, criticos] = await Promise.all([
+      this.db.query<{
+        productos: number;
+        bajo: number;
+        agotado: number;
+        valor: string;
+      }>(
+        `SELECT count(*)::int AS productos,
+                count(*) FILTER (WHERE mv.existencia > 0 AND mv.existencia <= mn.minimo)::int AS bajo,
+                count(*) FILTER (WHERE mv.existencia <= 0)::int AS agotado,
+                COALESCE(sum(round(mv.existencia * p.costo, 2)), 0)::numeric(16,2) AS valor
+         ${base}`,
+        [STOCK_MINIMO_POR_DEFECTO],
+      ),
+      this.db.query<{
+        codigo: string;
+        nombre: string;
+        existencia: string;
+        minimo: string;
+      }>(
+        `SELECT p.codigo, p.nombre, mv.existencia, mn.minimo::numeric(14,3) AS minimo
+         ${base} AND mv.existencia <= mn.minimo
+         ORDER BY mv.existencia - mn.minimo, p.codigo
+         LIMIT 5`,
+        [STOCK_MINIMO_POR_DEFECTO],
+      ),
+    ]);
+    const { valor, ...resto } = res.rows[0];
+    return {
+      ...resto,
+      ...(verCostos ? { valor_al_costo: valor } : {}),
+      criticos: criticos.rows,
+    };
+  }
+}

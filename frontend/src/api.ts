@@ -1020,3 +1020,43 @@ export async function obtenerRecibo(
   }
   return res.blob()
 }
+
+// ---------- Panel ----------
+
+export type PeriodoPanel = 'hoy' | 'semana' | 'mes' | 'trimestre' | 'anio'
+
+export type ResumenPanel = {
+  periodo: PeriodoPanel
+  desde: string
+  hasta: string
+  // Cada sección solo llega si el usuario tiene el permiso del módulo.
+  ventas?: {
+    cantidad: number
+    total: string
+    itbis: string
+    base: string
+    descuento: string
+    total_anterior: string
+    anuladas: { cantidad: number; total: string }
+    por_forma_pago: { forma: string; total: string; cantidad: number }[]
+    mas_vendidos: { codigo: string; descripcion: string; tipo: string; cantidad: string; total: string }[]
+    ultimas: { id: string; numero: string; fecha: string; total: string; estado: string; cliente: string }[]
+  }
+  ganancia?: {
+    venta: string
+    costo: string
+    venta_sin_costo: string
+    ganancia: string
+    margen: string | null
+  }
+  inventario?: {
+    productos: number
+    bajo: number
+    agotado: number
+    valor_al_costo?: string
+    criticos: { codigo: string; nombre: string; existencia: string; minimo: string }[]
+  }
+}
+
+export const resumenPanel = (token: string, periodo: PeriodoPanel) =>
+  llamar<ResumenPanel>('GET', `/panel?periodo=${periodo}`, token)

@@ -21,6 +21,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { Marca, Perfil } from './api'
 import Empresa from './Empresa'
+import Panel from './Panel'
 import { LogoMarca } from './marca'
 import Categorias from './Categorias'
 import Inventario from './Inventario'
@@ -117,31 +118,6 @@ type Props = {
   marca: Marca
   onMarcaCambiada: () => void
   onSalir: () => void
-}
-
-function Panel() {
-  const tarjetas = [
-    'Ventas del día',
-    'Efectivo en caja',
-    'Comisiones MonCash / NatCash',
-    'Cuentas por cobrar',
-  ]
-  return (
-    <div>
-      <h1 className="text-xl font-medium mb-1">Resumen de hoy</h1>
-      <p className="text-sm text-gray-500 mb-4">
-        Los indicadores aparecerán cuando existan los módulos de ventas y caja.
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-        {tarjetas.map((t) => (
-          <div key={t} className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="text-sm text-gray-500">{t}</div>
-            <div className="text-2xl font-medium text-gray-300">—</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 export default function Layout({
@@ -266,7 +242,7 @@ export default function Layout({
             onSesionVencida={onSalir}
           />
         ) : (
-          <Panel />
+          <Panel token={token} onIr={setPagina} onSesionVencida={onSalir} />
         )}
       </main>
     </div>
