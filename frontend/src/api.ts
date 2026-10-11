@@ -427,10 +427,24 @@ export type FilaProducto = {
   stock_minimo: string | null
   is_active: boolean
   existencia_inicial: string
+  entradas: string
+  salidas: string
+  existencia: string
+  minimo: string
+  alerta: 'bajo' | 'agotado' | null
+  venta_total: string | null
+  calculo_precio: Desglose | null
   // Solo llegan con el permiso inventario.ver_costos.
   costo?: string
+  costo_total?: string
   calculo_costo?: Desglose | null
-  calculo_precio: Desglose | null
+  rentabilidad?: Rentabilidad | null
+}
+
+export type Rentabilidad = {
+  ganancia: string
+  margen: string | null
+  sobreCosto: string | null
 }
 
 export type PaginaProductos = {
@@ -439,12 +453,21 @@ export type PaginaProductos = {
   pagina: number
   porPagina: number
   verCostos: boolean
+  totales: {
+    venta_total: string
+    costo_total?: string
+    ganancia_total?: string
+    margen_total?: string | null
+  }
+  alertas: { bajo: number; agotado: number }
+  stockMinimoPorDefecto: string
 }
 
 export type FiltrosProductos = {
   texto: string
   categoriaId: string
   estado: 'activos' | 'inactivos' | 'todos'
+  soloAlertas: boolean
   pagina: number
 }
 
@@ -464,6 +487,7 @@ export const listarProductos = (token: string, f: FiltrosProductos) => {
   const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
   if (f.texto.trim()) q.set('texto', f.texto.trim())
   if (f.categoriaId) q.set('categoriaId', f.categoriaId)
+  if (f.soloAlertas) q.set('alerta', 'si')
   return llamar<PaginaProductos>('GET', `/productos?${q.toString()}`, token)
 }
 
@@ -500,3 +524,67 @@ export const cambiarEstadoProducto = (
     is_active: isActive,
     motivo,
   })
+
+// ---------- Inventario: entradas, salidas, ajustes y kárdex ----------
+
+export type MovimientoKardex = {
+  id: string
+  fecha: string
+  tipo: string
+  causa: string | null
+  cantidad: string
+  signo: number
+  saldo: string
+  costo_unitario?: string
+  costo_promedio?: string | null
+  proveedor: string | null
+  referencia: string | null
+  motivo: string | null
+  usuario: string
+}
+
+export type Kardex = {
+  producto: { codigo: string; nombre: string; unidad: string }
+  movimientos: MovimientoKardex[]
+  verCostos: boolean
+}
+
+export const registrarEntrada = (
+  token: string,
+  id: string,
+  datos: {
+    cantidad: string
+    costoUnitario: string
+    proveedor: string
+    referencia: string
+    nota: string
+  },
+) =>
+  llamar<{ existencia: string; costo: string }>(
+    'POST',
+    `/productos/${id}/entradas`,
+    token,
+    datos,
+  )
+
+export const registrarSalida = (
+  token: string,
+  id: string,
+  datos: { cantidad: string; causa: string; motivo: string; referencia: string },
+) =>
+  llamar<{ existencia: string }>('POST', `/productos/${id}/salidas`, token, datos)
+
+export const ajustarInventario = (
+  token: string,
+  id: string,
+  datos: { conteo: string; motivo: string },
+) =>
+  llamar<{ existencia: string; tipo: string; diferencia: string }>(
+    'POST',
+    `/productos/${id}/ajustes`,
+    token,
+    datos,
+  )
+
+export const kardexProducto = (token: string, id: string) =>
+  llamar<Kardex>('GET', `/productos/${id}/kardex`, token)

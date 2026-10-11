@@ -3,6 +3,12 @@ import type { FormEvent } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  History,
+  MoreHorizontal,
+  PackageX,
+  Scale,
   ChevronLeft,
   ChevronRight,
   Info,
@@ -40,6 +46,7 @@ import {
 import { cantidad, dinero, mensajeDe, porcentaje } from './formato'
 import { montoValido } from './itbis'
 import VistaItbis from './VistaItbis'
+import { FormAjuste, FormEntrada, FormSalida, VerKardex } from './Movimientos'
 
 type Props = {
   token: string
@@ -51,6 +58,10 @@ type Modal =
   | { tipo: 'crear' }
   | { tipo: 'editar'; fila: FilaProducto }
   | { tipo: 'estado'; fila: FilaProducto }
+  | { tipo: 'entrada'; fila: FilaProducto }
+  | { tipo: 'salida'; fila: FilaProducto }
+  | { tipo: 'ajuste'; fila: FilaProducto }
+  | { tipo: 'kardex'; fila: FilaProducto }
   | null
 
 const AVISO_FISCAL =
@@ -70,6 +81,7 @@ function FormProducto({
   catalogos,
   fila,
   verCostos,
+  minimoPorDefecto,
   onListo,
   onCancelar,
   onSesionVencida,
@@ -78,6 +90,7 @@ function FormProducto({
   catalogos: CatalogosInventario
   fila?: FilaProducto
   verCostos: boolean
+  minimoPorDefecto: string
   onListo: (codigo?: string) => void
   onCancelar: () => void
   onSesionVencida: () => void
@@ -159,9 +172,35 @@ function FormProducto({
   return (
     <form onSubmit={enviar} className="flex flex-col gap-4">
       {fila ? (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
-          Código <span className="font-mono font-medium text-gray-900">{fila.codigo}</span>{' '}
-          · no se puede cambiar. La existencia inicial tampoco se edita.
+        <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+          <div>
+            Código <span className="font-mono font-medium text-gray-900">{fila.codigo}</span>{' '}
+            · no se puede cambiar.
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>
+              En stock:{' '}
+              <span className="font-medium text-gray-900">
+                {cantidad(fila.existencia)} {fila.unidad.toLowerCase()}
+              </span>
+            </span>
+            <span>Existencia inicial: {cantidad(fila.existencia_inicial)}</span>
+            <span>Mínimo: {cantidad(fila.minimo)}</span>
+            {fila.alerta === 'agotado' && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700">
+                <PackageX size={12} /> Agotado
+              </span>
+            )}
+            {fila.alerta === 'bajo' && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                <AlertTriangle size={12} /> Stock bajo
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-gray-500">
+            El stock no se escribe a mano: cambia solo con las entradas,
+            salidas y ventas que se registren.
+          </div>
         </div>
       ) : (
         <div className="flex gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
@@ -278,9 +317,12 @@ function FormProducto({
             inputMode="decimal"
             value={stockMinimo}
             onChange={(e) => setStockMinimo(e.target.value)}
-            placeholder="Avisar cuando queden…"
+            placeholder={`Vacío = ${minimoPorDefecto}`}
             className={CAMPO}
           />
+          <span className="text-xs text-gray-400">
+            Alerta cuando queden esta cantidad o menos.
+          </span>
           {cantidadMal(stockMinimo) && (
             <span className="text-xs text-red-600">{cantidadMal(stockMinimo)}</span>
           )}
@@ -490,6 +532,101 @@ function ConfirmarEstado({
   )
 }
 
+// ---------- Acciones de cada producto ----------
+
+function Acciones({
+  fila,
+  permisos,
+  puedeEditar,
+  onAbrir,
+}: {
+  fila: FilaProducto
+  permisos: string[]
+  puedeEditar: boolean
+  onAbrir: (m: Modal) => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const activo = fila.is_active
+  const entradas = activo && permisos.includes('inventario.entradas')
+  const salidas = activo && permisos.includes('inventario.salidas')
+  const ajustar = activo && permisos.includes('inventario.ajustar')
+  const estado = permisos.includes('inventario.desactivar')
+
+  function elegir(m: Modal) {
+    setAbierto(false)
+    onAbrir(m)
+  }
+
+  const opcion =
+    'flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50'
+
+  return (
+    <div className="relative inline-flex items-center gap-1">
+      {entradas && (
+        <button
+          type="button"
+          onClick={() => onAbrir({ tipo: 'entrada', fila })}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+          title="Registrar mercancía recibida"
+        >
+          <ArrowDownToLine size={14} className="text-green-700" /> Entrada
+        </button>
+      )}
+      {salidas && (
+        <button
+          type="button"
+          onClick={() => onAbrir({ tipo: 'salida', fila })}
+          disabled={Number(fila.existencia) <= 0}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          title="Registrar daño, vencido, consumo o devolución"
+        >
+          <ArrowUpFromLine size={14} className="text-red-700" /> Salida
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => setAbierto(!abierto)}
+        className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+        aria-label={`Más acciones de ${fila.codigo}`}
+      >
+        <MoreHorizontal size={18} />
+      </button>
+      {abierto && (
+        <>
+          {/* Capa invisible: un clic fuera cierra el menú. */}
+          <button
+            type="button"
+            aria-label="Cerrar menú"
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setAbierto(false)}
+          />
+          <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+            <button type="button" className={opcion} onClick={() => elegir({ tipo: 'kardex', fila })}>
+              <History size={14} /> Ver kárdex (historial)
+            </button>
+            {ajustar && (
+              <button type="button" className={opcion} onClick={() => elegir({ tipo: 'ajuste', fila })}>
+                <Scale size={14} /> Ajustar por conteo
+              </button>
+            )}
+            {puedeEditar && (
+              <button type="button" className={opcion} onClick={() => elegir({ tipo: 'editar', fila })}>
+                <Pencil size={14} /> Editar producto
+              </button>
+            )}
+            {estado && (
+              <button type="button" className={opcion} onClick={() => elegir({ tipo: 'estado', fila })}>
+                {activo ? <PowerOff size={14} /> : <Power size={14} />}
+                {activo ? 'Desactivar' : 'Activar'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ---------- Pestaña Productos ----------
 
 function Productos({ token, permisos, onSesionVencida }: Props) {
@@ -499,6 +636,7 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
     texto: '',
     categoriaId: '',
     estado: 'activos',
+    soloAlertas: false,
     pagina: 1,
   })
   const [error, setError] = useState('')
@@ -508,7 +646,8 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
 
   const puedeCrear = permisos.includes('inventario.crear')
   const puedeEditar = permisos.includes('inventario.editar')
-  const puedeEstado = permisos.includes('inventario.desactivar')
+  const hayAcciones = true // el kárdex lo puede ver todo el que ve el inventario
+  const [mostrarGanancia, setMostrarGanancia] = useState(false)
   const verCostos = permisos.includes('inventario.ver_costos')
 
   const manejar = useCallback(
@@ -605,6 +744,13 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
           <option value="inactivos">Inactivos</option>
           <option value="todos">Todos</option>
         </select>
+        <button
+          type="button"
+          onClick={() => setMostrarGanancia(!mostrarGanancia)}
+          className={`${BOTON_SECUNDARIO} ${mostrarGanancia ? 'border-[#C8102E] text-[#C8102E]' : ''}`}
+        >
+          {mostrarGanancia ? 'Ocultar precios y ganancia' : 'Mostrar precios y ganancia'}
+        </button>
         {puedeCrear && (
           <button
             type="button"
@@ -630,6 +776,27 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
       )}
       {!datos && !error && <div className="text-gray-500">Cargando…</div>}
 
+      {datos && (datos.alertas.bajo > 0 || datos.alertas.agotado > 0 || filtros.soloAlertas) && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span className="flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            {datos.alertas.bajo > 0 &&
+              `${datos.alertas.bajo} producto${datos.alertas.bajo === 1 ? '' : 's'} con stock bajo`}
+            {datos.alertas.bajo > 0 && datos.alertas.agotado > 0 && ' · '}
+            {datos.alertas.agotado > 0 &&
+              `${datos.alertas.agotado} agotado${datos.alertas.agotado === 1 ? '' : 's'}`}
+            {datos.alertas.bajo === 0 && datos.alertas.agotado === 0 && 'Sin alertas de stock'}
+          </span>
+          <button
+            type="button"
+            onClick={() => cambiarFiltro({ soloAlertas: !filtros.soloAlertas })}
+            className="rounded-md border border-amber-300 bg-white px-3 py-1 text-xs font-medium hover:bg-amber-100"
+          >
+            {filtros.soloAlertas ? 'Ver todos los productos' : 'Ver solo estos'}
+          </button>
+        </div>
+      )}
+
       {datos && filas.length === 0 && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
           No hay productos que coincidan.
@@ -640,39 +807,71 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
       {filas.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
-            <thead className="border-b border-gray-200 text-left text-gray-500">
+            <thead className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
-                <th className="px-4 py-3 font-medium">Código</th>
-                <th className="px-4 py-3 font-medium">Producto</th>
-                <th className="px-4 py-3 font-medium">Categoría</th>
-                <th className="px-4 py-3 font-medium">Unidad</th>
-                <th className="px-4 py-3 text-right font-medium">Existencia inicial</th>
+                <th className="px-3 py-3 font-medium">Código</th>
+                <th className="px-3 py-3 font-medium">Producto</th>
+                <th className="px-3 py-3 font-medium">Categoría</th>
+                <th className="px-3 py-3 font-medium">Unidad</th>
+                <th className="px-3 py-3 text-right font-medium">Existencia inicial</th>
+                <th className="px-3 py-3 text-right font-medium">Entradas</th>
+                <th className="px-3 py-3 text-right font-medium">Salidas</th>
+                <th className="px-3 py-3 text-right font-medium">Existencia actual</th>
                 {datos?.verCostos && (
-                  <th className="px-4 py-3 text-right font-medium">Costo (DOP)</th>
+                  <th className="px-3 py-3 text-right font-medium">Costo (DOP)</th>
                 )}
-                <th className="px-4 py-3 font-medium">ITBIS (%)</th>
-                <th className="px-4 py-3 text-right font-medium">Precio cliente</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                {(puedeEditar || puedeEstado) && <th className="px-4 py-3" />}
+                <th className="px-3 py-3 font-medium">ITBIS (%)</th>
+                {mostrarGanancia && (
+                  <th className="px-3 py-3 text-right font-medium">Precio cliente</th>
+                )}
+                {mostrarGanancia && datos?.verCostos && (
+                  <th className="px-3 py-3 text-right font-medium">Ganancia por unidad</th>
+                )}
+                {mostrarGanancia && datos?.verCostos && (
+                  <th className="px-3 py-3 text-right font-medium">Costo total</th>
+                )}
+                {mostrarGanancia && (
+                  <th className="px-3 py-3 text-right font-medium">Venta total</th>
+                )}
+                <th className="px-3 py-3 font-medium">Estado</th>
+                {hayAcciones && <th className="px-3 py-3" />}
               </tr>
             </thead>
             <tbody>
               {filas.map((f) => (
                 <tr key={f.id} className="border-b border-gray-100 last:border-0">
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
-                    {f.codigo}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{f.nombre}</td>
-                  <td className="px-4 py-3">
+                  <td className="whitespace-nowrap px-3 py-3 font-mono text-xs">{f.codigo}</td>
+                  <td className="px-3 py-3 font-medium">{f.nombre}</td>
+                  <td className="px-3 py-3">
                     {f.categoria}
                     <div className="text-xs text-gray-500">{f.unidad_negocio}</div>
                   </td>
-                  <td className="px-4 py-3">{f.unidad}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <td className="px-3 py-3">{f.unidad}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right">
                     {cantidad(f.existencia_inicial)}
                   </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right text-green-700">
+                    {Number(f.entradas) > 0 ? `+${cantidad(f.entradas)}` : '0'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right text-red-700">
+                    {Number(f.salidas) > 0 ? `−${cantidad(f.salidas)}` : '0'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right">
+                    <div className="text-base font-medium">{cantidad(f.existencia)}</div>
+                    {f.alerta === 'agotado' && (
+                      <span className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700">
+                        <PackageX size={12} /> Agotado
+                      </span>
+                    )}
+                    {f.alerta === 'bajo' && (
+                      <span className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                        <AlertTriangle size={12} /> Stock bajo
+                      </span>
+                    )}
+                    <div className="text-xs text-gray-400">mín. {cantidad(f.minimo)}</div>
+                  </td>
                   {datos?.verCostos && (
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       {dinero(f.costo)}
                       {f.calculo_costo && Number(f.calculo_costo.itbis) > 0 && (
                         <div className="text-xs text-gray-500">
@@ -681,11 +880,53 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
                       )}
                     </td>
                   )}
-                  <td className="whitespace-nowrap px-4 py-3">{itbisTexto(f.tasa)}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    {f.calculo_precio ? dinero(f.calculo_precio.total) : '—'}
-                  </td>
-                  <td className="px-4 py-3">
+                  <td className="whitespace-nowrap px-3 py-3">{itbisTexto(f.tasa)}</td>
+                  {mostrarGanancia && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      {f.calculo_precio ? dinero(f.calculo_precio.total) : '—'}
+                      {f.calculo_precio && Number(f.calculo_precio.itbis) > 0 && (
+                        <div className="text-xs text-gray-500">
+                          sin ITBIS {dinero(f.calculo_precio.base)}
+                        </div>
+                      )}
+                    </td>
+                  )}
+                  {mostrarGanancia && datos?.verCostos && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      {f.rentabilidad ? (
+                        <>
+                          <div
+                            className={
+                              f.rentabilidad.ganancia.startsWith('-')
+                                ? 'font-medium text-red-700'
+                                : 'font-medium'
+                            }
+                          >
+                            {dinero(f.rentabilidad.ganancia)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            margen {f.rentabilidad.margen ?? '—'}%
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            sobre costo {f.rentabilidad.sobreCosto ?? '—'}%
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-gray-400">Sin precio</span>
+                      )}
+                    </td>
+                  )}
+                  {mostrarGanancia && datos?.verCostos && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      {dinero(f.costo_total)}
+                    </td>
+                  )}
+                  {mostrarGanancia && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      {dinero(f.venta_total)}
+                    </td>
+                  )}
+                  <td className="px-3 py-3">
                     <span
                       className={`rounded-md px-2 py-0.5 text-xs ${
                         f.is_active
@@ -696,33 +937,50 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
                       {f.is_active ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
-                  {(puedeEditar || puedeEstado) && (
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
-                      {puedeEditar && catalogos && (
-                        <button
-                          type="button"
-                          onClick={() => abrir({ tipo: 'editar', fila: f })}
-                          className="mr-3 inline-flex items-center gap-1 text-gray-600 hover:text-gray-900"
-                        >
-                          <Pencil size={14} />
-                          Editar
-                        </button>
-                      )}
-                      {puedeEstado && (
-                        <button
-                          type="button"
-                          onClick={() => abrir({ tipo: 'estado', fila: f })}
-                          className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-900"
-                        >
-                          {f.is_active ? <PowerOff size={14} /> : <Power size={14} />}
-                          {f.is_active ? 'Desactivar' : 'Activar'}
-                        </button>
-                      )}
+                  {hayAcciones && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      <Acciones
+                        fila={f}
+                        permisos={permisos}
+                        puedeEditar={puedeEditar && catalogos !== null}
+                        onAbrir={abrir}
+                      />
                     </td>
                   )}
                 </tr>
               ))}
             </tbody>
+            {datos && mostrarGanancia && (
+              <tfoot className="border-t-2 border-gray-200 bg-gray-50 font-medium">
+                <tr>
+                  <td className="px-3 py-3" colSpan={datos.verCostos ? 11 : 10}>
+                    Totales de {datos.total} producto{datos.total === 1 ? '' : 's'}
+                    <div className="text-xs font-normal text-gray-500">
+                      Existencia actual × costo y × precio, sin ITBIS
+                    </div>
+                  </td>
+                  {datos.verCostos && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      {dinero(datos.totales.ganancia_total)}
+                      {datos.totales.margen_total && (
+                        <div className="text-xs font-normal text-gray-500">
+                          margen {datos.totales.margen_total}%
+                        </div>
+                      )}
+                    </td>
+                  )}
+                  {datos.verCostos && (
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      {dinero(datos.totales.costo_total)}
+                    </td>
+                  )}
+                  <td className="whitespace-nowrap px-3 py-3 text-right">
+                    {dinero(datos.totales.venta_total)}
+                  </td>
+                  <td colSpan={hayAcciones ? 2 : 1} />
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       )}
@@ -754,8 +1012,11 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
       )}
 
       <p className="mt-4 max-w-3xl text-xs text-gray-500">
-        Entradas, salidas y existencia actual llegarán en la siguiente parte del
-        módulo y se calcularán solas a partir de los movimientos. {AVISO_FISCAL}
+        Existencia actual = existencia inicial + entradas − salidas. Se calcula
+        sola con los movimientos (entradas, salidas y ajustes por conteo) y
+        nunca se escribe a mano. Las ventas la descontarán cuando exista el
+        módulo de Ventas. La ganancia, la venta total y el costo total se
+        calculan sin ITBIS. {AVISO_FISCAL}
       </p>
 
       {modal?.tipo === 'crear' && catalogos && (
@@ -778,6 +1039,7 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
               token={token}
               catalogos={catalogos}
               verCostos={verCostos}
+              minimoPorDefecto={datos?.stockMinimoPorDefecto ?? '5'}
               onListo={(codigo) => {
                 setCreado(codigo ?? null)
                 setAviso(codigo ? `Producto ${codigo} creado` : '')
@@ -796,10 +1058,52 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
             catalogos={catalogos}
             fila={modal.fila}
             verCostos={verCostos}
+            minimoPorDefecto={datos?.stockMinimoPorDefecto ?? '5'}
             onListo={() => terminado('Cambios guardados')}
             onCancelar={() => setModal(null)}
             onSesionVencida={onSesionVencida}
           />
+        </Ventana>
+      )}
+      {modal?.tipo === 'entrada' && (
+        <Ventana titulo="Entrada de mercancía" ancho="max-w-2xl" onCerrar={() => setModal(null)}>
+          <FormEntrada
+            token={token}
+            fila={modal.fila}
+            verCostos={verCostos}
+            onListo={terminado}
+            onCancelar={() => setModal(null)}
+            onSesionVencida={onSesionVencida}
+          />
+        </Ventana>
+      )}
+      {modal?.tipo === 'salida' && (
+        <Ventana titulo="Salida de mercancía" onCerrar={() => setModal(null)}>
+          <FormSalida
+            token={token}
+            fila={modal.fila}
+            verCostos={verCostos}
+            onListo={terminado}
+            onCancelar={() => setModal(null)}
+            onSesionVencida={onSesionVencida}
+          />
+        </Ventana>
+      )}
+      {modal?.tipo === 'ajuste' && (
+        <Ventana titulo="Ajustar por conteo físico" onCerrar={() => setModal(null)}>
+          <FormAjuste
+            token={token}
+            fila={modal.fila}
+            verCostos={verCostos}
+            onListo={terminado}
+            onCancelar={() => setModal(null)}
+            onSesionVencida={onSesionVencida}
+          />
+        </Ventana>
+      )}
+      {modal?.tipo === 'kardex' && (
+        <Ventana titulo="Kárdex del producto" ancho="max-w-5xl" onCerrar={() => setModal(null)}>
+          <VerKardex token={token} fila={modal.fila} onSesionVencida={onSesionVencida} />
         </Ventana>
       )}
       {modal?.tipo === 'estado' && (
