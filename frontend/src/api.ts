@@ -122,3 +122,132 @@ export const cambiarPassword = (token: string, actual: string, nueva: string) =>
     actual,
     nueva,
   })
+
+// ---------- Servicios e impuestos ----------
+
+export type Desglose = { base: string; itbis: string; total: string }
+
+export type FilaServicio = {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  unidad_negocio_id: string
+  unidad_negocio: string
+  unidad_medida_id: string
+  unidad_medida: string
+  precio: string
+  costo: string | null
+  impuesto_id: string
+  impuesto: string
+  tasa: string | null
+  precio_incluye_itbis: boolean
+  is_active: boolean
+  calculo: Desglose | null
+}
+
+export type Opcion = { id: string; codigo: string; nombre: string }
+export type ImpuestoVigente = Opcion & { tasa: string }
+
+export type CatalogosServicios = {
+  unidadesNegocio: Opcion[]
+  unidadesMedida: Opcion[]
+  impuestos: ImpuestoVigente[]
+}
+
+export type DatosServicio = {
+  codigo: string
+  nombre: string
+  descripcion: string
+  unidadNegocioId: string
+  unidadMedidaId: string
+  precio: string
+  costo: string
+  impuestoId: string
+  precioIncluyeItbis: boolean
+}
+
+export type FiltrosServicios = {
+  texto: string
+  unidadNegocioId: string
+  estado: 'activos' | 'inactivos' | 'todos'
+}
+
+export const listarServicios = (token: string, f: FiltrosServicios) => {
+  const q = new URLSearchParams({ estado: f.estado })
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.unidadNegocioId) q.set('unidadNegocioId', f.unidadNegocioId)
+  return llamar<FilaServicio[]>('GET', `/servicios?${q.toString()}`, token)
+}
+
+export const catalogosServicios = (token: string) =>
+  llamar<CatalogosServicios>('GET', '/servicios/catalogos', token)
+
+export const calcularServicio = (
+  token: string,
+  datos: { precio: string; impuestoId: string; precioIncluyeItbis: boolean },
+) =>
+  llamar<Desglose & { tasa: string }>(
+    'POST',
+    '/servicios/calcular',
+    token,
+    datos,
+  )
+
+export const crearServicio = (token: string, datos: DatosServicio) =>
+  llamar<{ id: string }>('POST', '/servicios', token, datos)
+
+export const editarServicio = (token: string, id: string, datos: DatosServicio) =>
+  llamar<{ ok: boolean }>('PATCH', `/servicios/${id}`, token, datos)
+
+export const cambiarEstadoServicio = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/servicios/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+export type TasaHistorial = {
+  tasa: string
+  vigente_desde: string
+  vigente_hasta: string | null
+}
+
+export type FilaImpuesto = {
+  id: string
+  codigo: string
+  nombre: string
+  is_active: boolean
+  tasa_vigente: string | null
+  tasas: TasaHistorial[]
+  servicios_activos: number
+}
+
+export const listarImpuestos = (token: string) =>
+  llamar<FilaImpuesto[]>('GET', '/impuestos', token)
+
+export const crearImpuesto = (
+  token: string,
+  datos: { codigo: string; nombre: string; tasa: string; vigenteDesde: string },
+) => llamar<{ id: string }>('POST', '/impuestos', token, datos)
+
+export const nuevaTasaImpuesto = (
+  token: string,
+  id: string,
+  datos: { tasa: string; vigenteDesde: string; motivo: string },
+) => llamar<{ ok: boolean }>('POST', `/impuestos/${id}/tasas`, token, datos)
+
+export const cambiarEstadoImpuesto = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/impuestos/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })

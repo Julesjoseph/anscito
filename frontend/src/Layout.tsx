@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   BookOpen,
   Briefcase,
+  ClipboardList,
   FileText,
   Landmark,
   LayoutDashboard,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Perfil } from './api'
+import Servicios from './Servicios'
 import Usuarios from './Usuarios'
 
 type Modulo = {
@@ -27,6 +29,13 @@ type Modulo = {
 const MODULOS: Modulo[] = [
   { id: 'panel', nombre: 'Panel', Icono: LayoutDashboard, listo: true },
   { id: 'ventas', nombre: 'Ventas', Icono: ShoppingCart, listo: false },
+  {
+    id: 'servicios',
+    nombre: 'Servicios',
+    Icono: ClipboardList,
+    listo: true,
+    permiso: 'servicios.ver',
+  },
   { id: 'inventario', nombre: 'Inventario', Icono: Package, listo: false },
   { id: 'caja', nombre: 'Caja y bancos', Icono: Wallet, listo: false },
   { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
@@ -141,6 +150,12 @@ export default function Layout({ perfil, token, onSalir }: Props) {
   usuarioId={perfil.id}
   onSesionVencida={onSalir}
 />
+        ) : pagina === 'servicios' ? (
+          <Servicios
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
         ) : (
           <Panel />
         )}
