@@ -52,8 +52,8 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 
 ## En curso
 
-- **Clientes y proveedores** (migración 008 aplicada; falta backend y
-  pantalla). Decisiones del dueño:
+- **Clientes y proveedores** (migración 008 y backend listos y probados,
+  `backend/scripts/probar-clientes.ps1`; falta la pantalla). Decisiones del dueño:
   - Listas **separadas** (cada registro es cliente o proveedor).
   - Clientes: casilla "Puede comprar a crédito" (sin montos).
   - Proveedores: persona de contacto y días de plazo.
