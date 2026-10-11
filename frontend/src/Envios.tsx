@@ -351,8 +351,11 @@ function NuevoEnvio({
   const agente = activos.find((a) => a.id === agenteId)
 
   // Vista previa de los montos (con la tarifa vigente del servidor).
+  // Los envíos van en pesos enteros (decisión del dueño).
+  const montoOk = /^\d{1,12}$/.test(monto.trim()) && Number(monto.trim()) > 0
+
   useEffect(() => {
-    if (!agenteId || !positivo(monto)) {
+    if (!agenteId || !montoOk) {
       const t = setTimeout(() => setCalculo(null), 0)
       return () => clearTimeout(t)
     }
@@ -362,7 +365,7 @@ function NuevoEnvio({
         .catch(() => setCalculo(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [token, agenteId, monto])
+  }, [token, agenteId, monto, montoOk])
 
   async function buscarRemitente(e: FormEvent) {
     e.preventDefault()
@@ -411,7 +414,7 @@ function NuevoEnvio({
   if (benNuevo && !telBenNuevo) faltan.push('El teléfono del beneficiario debe ser de Haití: 509 + 8 dígitos (ej: 509-37-38-2382).')
   if (!parentesco.trim()) faltan.push('Escriba el parentesco (paso 3).')
   if (!cuentaId) faltan.push('Elija la billetera (paso 4).')
-  if (!positivo(monto)) faltan.push('Escriba el monto que envía (paso 4).')
+  if (!montoOk) faltan.push('Escriba el monto que envía en pesos enteros, sin centavos (paso 4).')
   else if (!calculo) faltan.push('Calculando el monto…')
   const listo = faltan.length === 0
 
@@ -665,7 +668,7 @@ function NuevoEnvio({
         </label>
         <label className="flex flex-col gap-1 text-gray-600">
           Monto que envía (RD$)
-          <input type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
+          <input type="text" inputMode="numeric" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[,\s]/g, ''))} placeholder="0" className={`${CAMPO} text-lg`} />
         </label>
         <dl className="flex flex-col gap-1 border-y border-gray-100 py-3">
           <div className="flex justify-between"><dt className="text-gray-500">Tasa</dt><dd>1 RD$ = {prep.tarifa.tasa.replace(/\.?0+$/, '')} HTG</dd></div>

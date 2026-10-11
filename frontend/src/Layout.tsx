@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   BookOpen,
+  Calculator,
   Briefcase,
   Building2,
   ClipboardList,
@@ -26,6 +27,7 @@ import Panel from './Panel'
 import { LogoMarca } from './marca'
 import Bancos from './Bancos'
 import Caja from './Caja'
+import Calculadora from './Calculadora'
 import Categorias from './Categorias'
 import Inventario from './Inventario'
 import Roles from './Roles'
@@ -44,6 +46,13 @@ type Modulo = {
 
 const MODULOS: Modulo[] = [
   { id: 'panel', nombre: 'Panel', Icono: LayoutDashboard, listo: true },
+  {
+    id: 'calculadora',
+    nombre: 'Calculadora',
+    Icono: Calculator,
+    listo: true,
+    permiso: 'remesas.ver',
+  },
   {
     id: 'ventas',
     nombre: 'Ventas',
@@ -257,6 +266,8 @@ export default function Layout({
             permisos={perfil.permisos}
             onSesionVencida={onSalir}
           />
+        ) : pagina === 'calculadora' ? (
+          <Calculadora token={token} onSesionVencida={onSalir} />
         ) : pagina === 'envios' ? (
           <Envios
             token={token}

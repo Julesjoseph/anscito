@@ -163,6 +163,15 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   Excel SCITOS SYSTEME 3.0; beneficiarios no. Queda preparado (origen
   `importado`) para importar el registro de operaciones del Excel cuando el
   dueño lo pida. Pruebas: `scripts/probar-envios.ps1`.
+- **Calculadora** (menú, arriba de Ventas; permiso `remesas.ver`): RD$ ↔ HTG
+  con la tarifa vigente, desde el monto a enviar, lo que trae el cliente o lo
+  que debe llegar; botón "Copiar para WhatsApp". Misma fórmula que el
+  servidor (verificada con 36,000 casos).
+- **Envíos en pesos y gourdes enteros** (decisión del dueño): el monto
+  enviado no lleva centavos; recibe, comisión y parte del agente se
+  redondean al entero (mitad hacia arriba; comisión impar: el agente recibe
+  la mitad redondeada hacia arriba). La comisión es % del monto enviado, no
+  del total pagado. Los envíos anteriores no cambian.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los

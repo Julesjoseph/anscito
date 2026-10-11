@@ -1,6 +1,7 @@
 // Cálculos de un envío con aritmética entera (sin decimales flotantes).
-// Montos con 2 decimales; tasa con hasta 6; porcentajes con hasta 2.
-// Redondeo: mitad hacia arriba, como en el resto del sistema.
+// Decisión del dueño: los envíos se manejan en pesos y gourdes ENTEROS.
+// El monto enviado no lleva centavos; lo que recibe, la comisión y la parte
+// del agente se redondean al entero más cercano (la mitad hacia arriba).
 
 export type Tarifa = {
   tasa: string; // HTG por 1 RD$
@@ -34,8 +35,13 @@ function dividir(a: bigint, b: bigint): bigint {
   return (a * 2n + b) / (b * 2n);
 }
 
-function texto2(centavos: bigint): string {
-  return `${centavos / 100n}.${String(centavos % 100n).padStart(2, '0')}`;
+function texto2(unidades: bigint): string {
+  return `${unidades}.00`;
+}
+
+// Verdadero si el monto (ya normalizado, "1000.00") no tiene centavos.
+export function esEntero(monto: string): boolean {
+  return monto.endsWith('.00');
 }
 
 export function calcularEnvio(
@@ -43,13 +49,13 @@ export function calcularEnvio(
   tarifa: Tarifa,
   propio: boolean,
 ): CalculoEnvio {
-  const enviado = escalar(montoEnviado, 2); // centavos de RD$
+  const enviado = escalar(montoEnviado, 0); // pesos enteros
   const tasa = escalar(tarifa.tasa, 6);
   const pct = escalar(tarifa.comision_pct, 2); // 10.00 -> 1000
   const pctAgente = propio ? 0n : escalar(tarifa.comision_agente_pct, 2);
 
-  const recibir = dividir(enviado * tasa, 1_000_000n); // centavos de HTG
-  const comision = dividir(enviado * pct, 10_000n);
+  const recibir = dividir(enviado * tasa, 1_000_000n); // gourdes enteras
+  const comision = dividir(enviado * pct, 10_000n); // pesos enteros
   const comisionAgente = dividir(comision * pctAgente, 10_000n);
   return {
     monto_enviado: texto2(enviado),

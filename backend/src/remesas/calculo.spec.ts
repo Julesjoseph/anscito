@@ -1,4 +1,4 @@
-import { calcularEnvio, numeroEnvio, telefonoHaiti } from './calculo';
+import { calcularEnvio, esEntero, numeroEnvio, telefonoHaiti } from './calculo';
 
 const tarifa = {
   tasa: '2.050000',
@@ -6,7 +6,7 @@ const tarifa = {
   comision_agente_pct: '50.00',
 };
 
-describe('calcularEnvio', () => {
+describe('calcularEnvio (pesos y gourdes enteros)', () => {
   it('envío de un agente autorizado (ejemplo del Excel)', () => {
     expect(calcularEnvio('1000.00', tarifa, false)).toEqual({
       monto_enviado: '1000.00',
@@ -28,25 +28,35 @@ describe('calcularEnvio', () => {
     expect(r.comision_scito).toBe('100.00');
   });
 
-  it('redondea la mitad hacia arriba', () => {
-    // 875 x 10% = 87.50; la mitad = 43.75. 1838 x 2.05 = 3767.90.
+  it('redondea al entero, la mitad hacia arriba', () => {
+    // 875 x 10% = 87.5 -> 88; la mitad 44. 1838 x 2.05 = 3767.9 -> 3768.
     const r = calcularEnvio('875.00', tarifa, false);
-    expect(r.comision).toBe('87.50');
-    expect(r.comision_agente).toBe('43.75');
+    expect(r.comision).toBe('88.00');
+    expect(r.comision_agente).toBe('44.00');
+    expect(r.total_pagar).toBe('963.00');
     expect(calcularEnvio('1838.00', tarifa, false).monto_recibir).toBe(
-      '3767.90',
+      '3768.00',
     );
-    // 0.05 x 10% = 0.005 -> 0.01; su mitad 0.005 -> 0.01.
-    const p = calcularEnvio('0.05', tarifa, false);
-    expect(p.comision).toBe('0.01');
-    expect(p.comision_agente).toBe('0.01');
+    // 1464 x 2.05 = 3001.2 -> 3001; 146.4 -> 146; mitad 73.
+    const e = calcularEnvio('1464.00', tarifa, false);
+    expect([
+      e.monto_recibir,
+      e.comision,
+      e.total_pagar,
+      e.comision_agente,
+    ]).toEqual(['3001.00', '146.00', '1610.00', '73.00']);
+    // Comisión impar: 145 x 50% = 72.5 -> 73 para el agente, 72 para SCITO.
+    const i = calcularEnvio('1450.00', tarifa, false);
+    expect([i.comision, i.comision_agente, i.comision_scito]).toEqual([
+      '145.00',
+      '73.00',
+      '72.00',
+    ]);
   });
 
-  it('total = enviado + comisión con montos con centavos', () => {
-    const r = calcularEnvio('919.99', tarifa, false);
-    expect(r.comision).toBe('92.00');
-    expect(r.total_pagar).toBe('1011.99');
-    expect(r.monto_recibir).toBe('1885.98');
+  it('esEntero', () => {
+    expect(esEntero('1000.00')).toBe(true);
+    expect(esEntero('1000.50')).toBe(false);
   });
 });
 

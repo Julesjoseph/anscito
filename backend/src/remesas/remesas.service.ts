@@ -11,7 +11,7 @@ import { SQL_ESPERADO } from '../caja/sql';
 import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { enmascarar } from '../terceros/documentos';
-import { calcularEnvio, numeroEnvio, telefonoHaiti } from './calculo';
+import { calcularEnvio, esEntero, numeroEnvio, telefonoHaiti } from './calculo';
 import { generarReciboEnvio } from './recibo-envio-pdf';
 import type { DatosReciboEnvio } from './recibo-envio-pdf';
 import type { Formato } from '../ventas/recibo-pdf';
@@ -49,6 +49,16 @@ function montoPositivo(v: unknown, que = 'Monto'): string {
       `${que} inválido: mayor que 0, con hasta 2 decimales`,
     );
   }
+  return m;
+}
+
+// Los envíos se hacen en pesos enteros (decisión del dueño).
+function montoEntero(v: unknown): string {
+  const m = montoPositivo(v, 'Monto enviado');
+  if (!esEntero(m))
+    throw new BadRequestException(
+      'El monto enviado va en pesos enteros, sin centavos (ej: 1500)',
+    );
   return m;
 }
 
@@ -188,7 +198,7 @@ export class RemesasService {
 
   // Vista previa de los montos con la tarifa vigente.
   async calcular(datos: { agenteId?: unknown; montoEnviado?: unknown }) {
-    const monto = montoPositivo(datos.montoEnviado, 'Monto enviado');
+    const monto = montoEntero(datos.montoEnviado);
     const agenteId = texto(datos.agenteId).toLowerCase();
     let propio = false;
     if (UUID.test(agenteId)) {
@@ -530,7 +540,7 @@ export class RemesasService {
     const motivoId = texto(datos.motivoEnvioId).toLowerCase();
     if (!UUID.test(motivoId))
       throw new BadRequestException('Seleccione el motivo del envío');
-    const monto = montoPositivo(datos.montoEnviado, 'Monto enviado');
+    const monto = montoEntero(datos.montoEnviado);
     const parentesco = opcional(datos.parentesco, 40, 'Parentesco');
     if (!parentesco)
       throw new BadRequestException(
