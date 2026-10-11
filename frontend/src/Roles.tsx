@@ -47,6 +47,7 @@ const NOMBRES_MODULO: Record<string, string> = {
   servicios: 'Servicios',
   impuestos: 'Impuestos',
   categorias: 'Categorías',
+  inventario: 'Inventario',
 }
 
 function nombreModulo(modulo: string): string {

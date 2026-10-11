@@ -17,3 +17,9 @@ export function dinero(monto: string | null | undefined): string {
 export function porcentaje(tasa: string): string {
   return `${tasa.replace(/\.?0+$/, '')}%`
 }
+
+// "25.000" -> "25", "2.500" -> "2.5" (solo para mostrar).
+export function cantidad(valor: string | null | undefined): string {
+  if (valor === null || valor === undefined || valor === '') return '—'
+  return valor.includes('.') ? valor.replace(/\.?0+$/, '') : valor
+}

@@ -34,6 +34,8 @@ type Props = {
   token: string
   permisos: string[]
   onSesionVencida: () => void
+  // Dentro de otra pantalla (Inventario) no repite el título.
+  incrustada?: boolean
 }
 
 type Modal =
@@ -62,9 +64,15 @@ function Insignia({ activo }: { activo: boolean }) {
   )
 }
 
-function enUso(n: number): string {
-  if (n === 0) return 'Sin servicios activos'
-  return n === 1 ? '1 servicio activo' : `${n} servicios activos`
+function enUso(servicios: number, productos: number): string {
+  const partes: string[] = []
+  if (servicios > 0) {
+    partes.push(servicios === 1 ? '1 servicio activo' : `${servicios} servicios activos`)
+  }
+  if (productos > 0) {
+    partes.push(productos === 1 ? '1 producto activo' : `${productos} productos activos`)
+  }
+  return partes.length ? partes.join(' · ') : 'Sin servicios ni productos activos'
 }
 
 // Ejecuta una acción del formulario mostrando errores y estado "guardando".
@@ -179,12 +187,22 @@ function FormCategoria({
   const [unidad, setUnidad] = useState(unidadId)
   const [nombre, setNombre] = useState(categoria?.nombre ?? '')
   const [descripcion, setDescripcion] = useState(categoria?.descripcion ?? '')
+  const [prefijo, setPrefijo] = useState(categoria?.prefijo ?? '')
   const { error, guardando, enviar } = useEnvio(onSesionVencida)
+
+  // Con productos, el prefijo queda fijo: ya forma parte de sus códigos.
+  const prefijoFijo = (categoria?.productos ?? 0) > 0
+  const prefijoValido = /^[A-Z0-9]{2,5}$/.test(prefijo)
+  const proximo = prefijoFijo
+    ? categoria?.proximo
+    : prefijoValido
+      ? `${prefijo}-${String((categoria?.productos ?? 0) + 1).padStart(4, '0')}`
+      : null
 
   function guardar(e: FormEvent) {
     e.preventDefault()
     void enviar(async () => {
-      const datos = { unidadNegocioId: unidad, nombre, descripcion }
+      const datos = { unidadNegocioId: unidad, nombre, descripcion, prefijo }
       if (categoria) await editarCategoria(token, categoria.id, datos)
       else await crearCategoria(token, datos)
       onListo(categoria ? 'Categoría actualizada' : 'Categoría creada')
@@ -227,6 +245,31 @@ function FormCategoria({
           rows={2}
           className={AREA}
         />
+      </label>
+      <label className="flex flex-col gap-1 text-sm text-gray-600">
+        Prefijo para códigos de productos (opcional)
+        <input
+          type="text"
+          value={prefijo}
+          onChange={(e) =>
+            setPrefijo(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+          }
+          maxLength={5}
+          disabled={prefijoFijo}
+          placeholder="Ej: CUA"
+          className={`${CAMPO} font-mono uppercase disabled:bg-gray-100 disabled:text-gray-500`}
+        />
+        <span className="text-xs text-gray-400">
+          {prefijoFijo
+            ? 'No se puede cambiar: la categoría ya tiene productos con este prefijo.'
+            : '2 a 5 letras o números. Solo hace falta si la categoría tendrá productos de inventario.'}
+        </span>
+        {proximo && (
+          <span className="text-xs text-gray-600">
+            Próximo código:{' '}
+            <span className="font-mono font-medium text-gray-900">{proximo}</span>
+          </span>
+        )}
       </label>
       {error && <CajaError>{error}</CajaError>}
       <Botones
@@ -290,8 +333,9 @@ function ConfirmarEstado({
         <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <span>
-            La usan {enUso(enUsoPor).toLowerCase()}. Primero desactive esos
-            servicios o cámbielos de {tipo === 'unidad' ? 'unidad' : 'categoría'}.
+            Está en uso por {enUsoPor === 1 ? '1 registro activo' : `${enUsoPor} registros activos`}{' '}
+            (servicios o productos). Primero desactívelos o cámbielos de{' '}
+            {tipo === 'unidad' ? 'unidad' : 'categoría'}.
           </span>
         </div>
       )}
@@ -319,7 +363,12 @@ function ConfirmarEstado({
 
 // ---------- Página ----------
 
-export default function Categorias({ token, permisos, onSesionVencida }: Props) {
+export default function Categorias({
+  token,
+  permisos,
+  onSesionVencida,
+  incrustada = false,
+}: Props) {
   const [unidades, setUnidades] = useState<UnidadArbol[] | null>(null)
   const [verInactivas, setVerInactivas] = useState(false)
   const [error, setError] = useState('')
@@ -366,10 +415,10 @@ export default function Categorias({ token, permisos, onSesionVencida }: Props) 
     <div>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="mb-1 text-xl font-medium">Categorías</h1>
+          {!incrustada && <h1 className="mb-1 text-xl font-medium">Categorías</h1>}
           <p className="text-sm text-gray-500">
-            Unidades de negocio y sus categorías. Se usan en Servicios y, más
-            adelante, en Inventario.
+            Unidades de negocio y sus categorías. Son las mismas para Servicios
+            e Inventario. El prefijo arma el código de los productos.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -426,7 +475,7 @@ export default function Categorias({ token, permisos, onSesionVencida }: Props) 
                     <Insignia activo={u.is_active} />
                   </div>
                   <div className="text-xs text-gray-500">
-                    {enUso(u.servicios_activos)}
+                    {enUso(u.servicios_activos, u.productos_activos)}
                   </div>
                 </div>
                 {puedeGestionar && (
@@ -476,13 +525,21 @@ export default function Categorias({ token, permisos, onSesionVencida }: Props) 
                       className="flex flex-wrap items-center justify-between gap-2 py-2"
                     >
                       <div className={c.is_active ? '' : 'text-gray-400'}>
-                        <div className="flex items-center gap-2 text-sm">
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
                           {c.nombre}
+                          {c.prefijo && (
+                            <span
+                              className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700"
+                              title={`Próximo código: ${c.proximo}`}
+                            >
+                              {c.prefijo} · próximo {c.proximo}
+                            </span>
+                          )}
                           {!c.is_active && <Insignia activo={false} />}
                         </div>
                         <div className="text-xs text-gray-500">
                           {c.descripcion ? `${c.descripcion} · ` : ''}
-                          {enUso(c.servicios_activos)}
+                          {enUso(c.servicios_activos, c.productos_activos)}
                         </div>
                       </div>
                       {puedeGestionar && (
@@ -558,7 +615,7 @@ export default function Categorias({ token, permisos, onSesionVencida }: Props) 
             id={modal.unidad.id}
             nombre={modal.unidad.nombre}
             activo={modal.unidad.is_active}
-            enUsoPor={modal.unidad.servicios_activos}
+            enUsoPor={modal.unidad.servicios_activos + modal.unidad.productos_activos}
           />
         </Ventana>
       )}
@@ -573,7 +630,9 @@ export default function Categorias({ token, permisos, onSesionVencida }: Props) 
             id={modal.categoria.id}
             nombre={modal.categoria.nombre}
             activo={modal.categoria.is_active}
-            enUsoPor={modal.categoria.servicios_activos}
+            enUsoPor={
+              modal.categoria.servicios_activos + modal.categoria.productos_activos
+            }
           />
         </Ventana>
       )}

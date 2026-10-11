@@ -322,7 +322,11 @@ export type CategoriaArbol = {
   nombre: string
   descripcion: string | null
   is_active: boolean
+  prefijo: string | null
+  proximo: string | null
   servicios_activos: number
+  productos_activos: number
+  productos: number
 }
 
 export type UnidadArbol = {
@@ -331,6 +335,7 @@ export type UnidadArbol = {
   nombre: string
   is_active: boolean
   servicios_activos: number
+  productos_activos: number
   categorias: CategoriaArbol[]
 }
 
@@ -338,6 +343,7 @@ export type DatosCategoria = {
   unidadNegocioId: string
   nombre: string
   descripcion: string
+  prefijo: string
 }
 
 export const arbolCategorias = (token: string) =>
@@ -376,6 +382,121 @@ export const estadoCategoria = (
   motivo?: string,
 ) =>
   llamar<{ ok: boolean }>('PATCH', `/categorias/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+// ---------- Inventario: productos ----------
+
+export type CategoriaProducto = {
+  id: string
+  nombre: string
+  prefijo: string | null
+  unidad_negocio: string
+  proximo: string | null
+}
+
+export type UnidadMedida = {
+  id: string
+  codigo: string
+  nombre: string
+  permite_decimales: boolean
+}
+
+export type CatalogosInventario = {
+  categorias: CategoriaProducto[]
+  unidades: UnidadMedida[]
+  impuestos: ImpuestoVigente[]
+}
+
+export type FilaProducto = {
+  id: string
+  codigo: string
+  nombre: string
+  categoria_id: string
+  categoria: string
+  unidad_negocio: string
+  unidad_id: string
+  unidad: string
+  permite_decimales: boolean
+  impuesto_id: string
+  impuesto: string
+  tasa: string | null
+  precio_venta: string | null
+  precio_incluye_itbis: boolean
+  stock_minimo: string | null
+  is_active: boolean
+  existencia_inicial: string
+  // Solo llegan con el permiso inventario.ver_costos.
+  costo?: string
+  calculo_costo?: Desglose | null
+  calculo_precio: Desglose | null
+}
+
+export type PaginaProductos = {
+  filas: FilaProducto[]
+  total: number
+  pagina: number
+  porPagina: number
+  verCostos: boolean
+}
+
+export type FiltrosProductos = {
+  texto: string
+  categoriaId: string
+  estado: 'activos' | 'inactivos' | 'todos'
+  pagina: number
+}
+
+export type DatosProducto = {
+  nombre: string
+  categoriaId: string
+  unidadId: string
+  costo: string
+  impuestoId: string
+  precioVenta: string
+  precioIncluyeItbis: boolean
+  stockMinimo: string
+  existenciaInicial?: string
+}
+
+export const listarProductos = (token: string, f: FiltrosProductos) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.categoriaId) q.set('categoriaId', f.categoriaId)
+  return llamar<PaginaProductos>('GET', `/productos?${q.toString()}`, token)
+}
+
+export const catalogosInventario = (token: string) =>
+  llamar<CatalogosInventario>('GET', '/productos/catalogos', token)
+
+export const calcularMonto = (
+  token: string,
+  datos: { monto: string; impuestoId: string; incluyeItbis: boolean },
+) =>
+  llamar<Desglose & { tasa: string }>(
+    'POST',
+    '/productos/calcular',
+    token,
+    datos,
+  )
+
+export const crearProducto = (token: string, datos: DatosProducto) =>
+  llamar<{ id: string; codigo: string }>('POST', '/productos', token, datos)
+
+export const editarProducto = (
+  token: string,
+  id: string,
+  datos: DatosProducto,
+) => llamar<{ ok: boolean }>('PATCH', `/productos/${id}`, token, datos)
+
+export const cambiarEstadoProducto = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/productos/${id}/estado`, token, {
     is_active: isActive,
     motivo,
   })
