@@ -24,6 +24,7 @@ export type DatosServicio = {
   nombre?: unknown;
   descripcion?: unknown;
   unidadNegocioId?: unknown;
+  categoriaId?: unknown;
   unidadMedidaId?: unknown;
   precio?: unknown;
   costo?: unknown;
@@ -34,6 +35,7 @@ export type DatosServicio = {
 export type Filtros = {
   texto?: string;
   unidadNegocioId?: string;
+  categoriaId?: string;
   estado?: string;
 };
 
@@ -42,6 +44,7 @@ type Limpio = {
   nombre: string;
   descripcion: string | null;
   unidad_negocio_id: string;
+  categoria_id: string | null;
   unidad_medida_id: string;
   precio: string;
   costo: string | null;
@@ -52,6 +55,7 @@ type Limpio = {
 type FilaServicio = Limpio & {
   id: string;
   unidad_negocio: string;
+  categoria: string | null;
   unidad_medida: string;
   impuesto: string;
   is_active: boolean;
@@ -71,6 +75,7 @@ export class ServiciosService {
     const nombre = texto(datos.nombre);
     const descripcion = texto(datos.descripcion);
     const unidadNegocioId = texto(datos.unidadNegocioId).toLowerCase();
+    const categoriaId = texto(datos.categoriaId).toLowerCase();
     const unidadMedidaId = texto(datos.unidadMedidaId).toLowerCase();
     const impuestoId = texto(datos.impuestoId).toLowerCase();
 
@@ -91,6 +96,9 @@ export class ServiciosService {
     }
     if (!UUID.test(unidadNegocioId)) {
       throw new BadRequestException('Seleccione la unidad de negocio');
+    }
+    if (categoriaId && !UUID.test(categoriaId)) {
+      throw new BadRequestException('Categoría inválida');
     }
     if (!UUID.test(unidadMedidaId)) {
       throw new BadRequestException('Seleccione la unidad de medida');
@@ -127,6 +135,7 @@ export class ServiciosService {
       nombre,
       descripcion: descripcion || null,
       unidad_negocio_id: unidadNegocioId,
+      categoria_id: categoriaId || null,
       unidad_medida_id: unidadMedidaId,
       precio,
       costo,
@@ -154,6 +163,14 @@ export class ServiciosService {
       params.push(unidad);
       condiciones.push(`s.unidad_negocio_id = $${params.length}`);
     }
+    const categoria = texto(filtros.categoriaId);
+    if (categoria) {
+      if (!UUID.test(categoria)) {
+        throw new BadRequestException('Categoría inválida');
+      }
+      params.push(categoria);
+      condiciones.push(`s.categoria_id = $${params.length}`);
+    }
     const estado = texto(filtros.estado) || 'activos';
     if (estado === 'activos') condiciones.push('s.is_active = true');
     else if (estado === 'inactivos') condiciones.push('s.is_active = false');
@@ -164,12 +181,14 @@ export class ServiciosService {
     const r = await this.db.query<FilaServicio & { tasa: string | null }>(
       `SELECT s.id, s.codigo, s.nombre, s.descripcion,
               s.unidad_negocio_id, un.nombre AS unidad_negocio,
+              s.categoria_id, cat.nombre AS categoria,
               s.unidad_medida_id, um.nombre AS unidad_medida,
               s.precio, s.costo, s.impuesto_id, i.nombre AS impuesto,
               ${SQL_TASA_VIGENTE} AS tasa,
               s.precio_incluye_itbis, s.is_active
        FROM servicios s
        JOIN unidades_negocio un ON un.id = s.unidad_negocio_id
+       LEFT JOIN categorias cat ON cat.id = s.categoria_id
        JOIN unidades_medida um ON um.id = s.unidad_medida_id
        JOIN impuestos i ON i.id = s.impuesto_id
        ${condiciones.length ? 'WHERE ' + condiciones.join(' AND ') : ''}
@@ -188,24 +207,34 @@ export class ServiciosService {
   }
 
   async catalogos() {
-    const [unidadesNegocio, unidadesMedida, impuestos] = await Promise.all([
-      this.db.query(
-        `SELECT id, codigo, nombre FROM unidades_negocio
+    const [unidadesNegocio, categorias, unidadesMedida, impuestos] =
+      await Promise.all([
+        this.db.query(
+          `SELECT id, codigo, nombre FROM unidades_negocio
          WHERE is_active = true ORDER BY nombre`,
-      ),
-      this.db.query(
-        `SELECT id, codigo, nombre FROM unidades_medida
+        ),
+        this.db.query(
+          `SELECT c.id, c.nombre, c.unidad_negocio_id
+         FROM categorias c
+         JOIN unidades_negocio un ON un.id = c.unidad_negocio_id
+           AND un.is_active = true
+         WHERE c.is_active = true
+         ORDER BY lower(c.nombre)`,
+        ),
+        this.db.query(
+          `SELECT id, codigo, nombre FROM unidades_medida
          WHERE is_active = true ORDER BY nombre`,
-      ),
-      this.db.query(
-        `SELECT i.id, i.codigo, i.nombre, ${SQL_TASA_VIGENTE} AS tasa
+        ),
+        this.db.query(
+          `SELECT i.id, i.codigo, i.nombre, ${SQL_TASA_VIGENTE} AS tasa
          FROM impuestos i
          WHERE i.is_active = true
          ORDER BY i.nombre`,
-      ),
-    ]);
+        ),
+      ]);
     return {
       unidadesNegocio: unidadesNegocio.rows,
+      categorias: categorias.rows,
       unidadesMedida: unidadesMedida.rows,
       impuestos: impuestos.rows.filter(
         (i: { tasa: string | null }) => i.tasa !== null,
@@ -240,6 +269,18 @@ export class ServiciosService {
     );
     if (un.rowCount === 0) {
       throw new BadRequestException('La unidad de negocio no existe');
+    }
+    if (d.categoria_id) {
+      const cat = await c.query(
+        `SELECT 1 FROM categorias
+         WHERE id = $1 AND unidad_negocio_id = $2 AND is_active = true`,
+        [d.categoria_id, d.unidad_negocio_id],
+      );
+      if (cat.rowCount === 0) {
+        throw new BadRequestException(
+          'La categoría no existe, está inactiva o no pertenece a esa unidad de negocio',
+        );
+      }
     }
     const um = await c.query(
       'SELECT 1 FROM unidades_medida WHERE id = $1 AND is_active = true',
@@ -280,8 +321,9 @@ export class ServiciosService {
         const r = await c.query<{ id: string }>(
           `INSERT INTO servicios
              (codigo, nombre, descripcion, unidad_negocio_id, unidad_medida_id,
-              precio, costo, impuesto_id, precio_incluye_itbis, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              precio, costo, impuesto_id, precio_incluye_itbis, created_by,
+              categoria_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            RETURNING id`,
           [
             d.codigo,
@@ -294,6 +336,7 @@ export class ServiciosService {
             d.impuesto_id,
             d.precio_incluye_itbis,
             actorId,
+            d.categoria_id,
           ],
         );
         const id = r.rows[0].id;
@@ -328,7 +371,7 @@ export class ServiciosService {
       return await this.db.transaccion(async (c) => {
         const r = await c.query<Limpio>(
           `SELECT codigo, nombre, descripcion, unidad_negocio_id,
-                  unidad_medida_id, precio, costo, impuesto_id,
+                  categoria_id, unidad_medida_id, precio, costo, impuesto_id,
                   precio_incluye_itbis
            FROM servicios WHERE id = $1 FOR UPDATE`,
           [id],
@@ -344,7 +387,8 @@ export class ServiciosService {
            SET codigo = $2, nombre = $3, descripcion = $4,
                unidad_negocio_id = $5, unidad_medida_id = $6,
                precio = $7, costo = $8, impuesto_id = $9,
-               precio_incluye_itbis = $10, updated_at = now()
+               precio_incluye_itbis = $10, categoria_id = $11,
+               updated_at = now()
            WHERE id = $1`,
           [
             id,
@@ -357,6 +401,7 @@ export class ServiciosService {
             d.costo,
             d.impuesto_id,
             d.precio_incluye_itbis,
+            d.categoria_id,
           ],
         );
 
@@ -376,6 +421,7 @@ export class ServiciosService {
               'nombre',
               'descripcion',
               'unidad_negocio_id',
+              'categoria_id',
               'unidad_medida_id',
             ],
           },

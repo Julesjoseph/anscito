@@ -29,9 +29,15 @@ export class ServiciosController {
   listar(
     @Query('texto') texto?: string,
     @Query('unidadNegocioId') unidadNegocioId?: string,
+    @Query('categoriaId') categoriaId?: string,
     @Query('estado') estado?: string,
   ) {
-    return this.servicios.listar({ texto, unidadNegocioId, estado });
+    return this.servicios.listar({
+      texto,
+      unidadNegocioId,
+      categoriaId,
+      estado,
+    });
   }
 
   @Get('catalogos')

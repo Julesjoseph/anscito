@@ -49,3 +49,23 @@ describe('ServiciosService.validar', () => {
     );
   });
 });
+
+describe('ServiciosService.validar con categoría', () => {
+  const servicio = new ServiciosService({} as DatabaseService);
+
+  it('la categoría es opcional', () => {
+    expect(servicio.validar(valido).categoria_id).toBeNull();
+    expect(
+      servicio.validar({ ...valido, categoriaId: '' }).categoria_id,
+    ).toBeNull();
+  });
+
+  it('acepta una categoría válida y rechaza una inválida', () => {
+    expect(servicio.validar({ ...valido, categoriaId: ID }).categoria_id).toBe(
+      ID,
+    );
+    expect(() =>
+      servicio.validar({ ...valido, categoriaId: 'papeleria' }),
+    ).toThrow(BadRequestException);
+  });
+});
