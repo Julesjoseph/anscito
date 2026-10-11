@@ -92,11 +92,16 @@ docs/       Documentación (vacío por ahora)
 
 - Archivo nuevo `database/NNN_descripcion.sql` con el siguiente número libre,
   envuelto en `BEGIN; ... COMMIT;`. Nunca editar una migración ya aplicada.
-- El dueño las ejecuta a mano, una sola vez, en el Query Tool de pgAdmin
-  sobre `anscito_dev` (no hay herramienta ni tabla de control de
-  migraciones, y `psql` no está en el PATH). No ejecutarlas sin autorización.
-  Si una transacción queda rota en pgAdmin, se arregla con `ROLLBACK;`.
-- Aplicadas hasta ahora: 001 a 005.
+- No hay herramienta ni tabla de control de migraciones, y `psql` no está
+  en el PATH. Desde la 005, por decisión del dueño, **Claude las aplica**:
+  1. probarlas antes en una transacción que termina en `ROLLBACK`;
+  2. mostrarle al dueño qué hacen y esperar su visto bueno;
+  3. comprobar que no estén aplicadas, ejecutarlas una sola vez con `node`
+     usando la conexión de `backend/.env` (sin mostrar credenciales) y
+     enseñarle la consulta de comprobación.
+  Si el dueño las ejecuta en pgAdmin y una transacción queda rota, se
+  arregla con `ROLLBACK;`.
+- Aplicadas hasta ahora: 001 a 006.
 - Prohibido sin autorización explícita: `DROP`, `TRUNCATE`, `DELETE` masivo,
   `ALTER ... DROP COLUMN`, cambios de tipo con pérdida, desactivar triggers.
 
