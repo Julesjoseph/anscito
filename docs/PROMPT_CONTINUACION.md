@@ -35,6 +35,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 010 | Ventas, líneas, pagos, formas de pago, configuración y contadores |
 | 011 | Ganancia de servicios por costo o por comisión %; % copiado en cada venta |
 | 012 | Caja: cajas fijas, sesiones con arqueo, movimientos inmutables, categorías de gasto |
+| 013 | Bancos: monedas (DOP, USD, HTG), cuentas y billeteras, movimientos con tasa, confirmaciones, transferencias entre cuentas y caja |
 
 ## Módulos terminados
 

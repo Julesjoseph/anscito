@@ -12,7 +12,10 @@ commits se escriben **en español**. Marca visible en pantalla:
   Donde el documento esté desactualizado (rutas, estado del proyecto), manda
   el estado real del repositorio.
 - Empresa multiservicios en **República Dominicana**; moneda principal
-  **RD$ (DOP)**. Pendiente confirmar la moneda de MonCash/NatCash.
+  **RD$ (DOP)**. Hay cuentas en US$, y las billeteras MonCash/NatCash del
+  negocio están en gourdes (HTG): recargarlas es transferencia entre cuentas
+  propias, no gasto. Cada movimiento en otra moneda guarda su tasa y su valor
+  en RD$.
 - Las 12 áreas del sistema: 01 Dashboard, 02 Administración (empresa,
   sucursales, configuración fiscal y bancaria, clientes, proveedores,
   usuarios y roles), 03 Ventas y servicios, 04 Inventario, 05 Caja y bancos,
@@ -101,7 +104,7 @@ docs/       Documentación (vacío por ahora)
      enseñarle la consulta de comprobación.
   Si el dueño las ejecuta en pgAdmin y una transacción queda rota, se
   arregla con `ROLLBACK;`.
-- Aplicadas hasta ahora: 001 a 012.
+- Aplicadas hasta ahora: 001 a 013.
 - Prohibido sin autorización explícita: `DROP`, `TRUNCATE`, `DELETE` masivo,
   `ALTER ... DROP COLUMN`, cambios de tipo con pérdida, desactivar triggers.
 
