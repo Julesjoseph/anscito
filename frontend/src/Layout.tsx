@@ -28,6 +28,7 @@ import Roles from './Roles'
 import Servicios from './Servicios'
 import Terceros from './Terceros'
 import Usuarios from './Usuarios'
+import Ventas from './Ventas'
 
 type Modulo = {
   id: string
@@ -39,7 +40,13 @@ type Modulo = {
 
 const MODULOS: Modulo[] = [
   { id: 'panel', nombre: 'Panel', Icono: LayoutDashboard, listo: true },
-  { id: 'ventas', nombre: 'Ventas', Icono: ShoppingCart, listo: false },
+  {
+    id: 'ventas',
+    nombre: 'Ventas',
+    Icono: ShoppingCart,
+    listo: true,
+    permiso: 'ventas.ver',
+  },
   {
     id: 'servicios',
     nombre: 'Servicios',
@@ -212,6 +219,12 @@ export default function Layout({
   usuarioId={perfil.id}
   onSesionVencida={onSalir}
 />
+        ) : pagina === 'ventas' ? (
+          <Ventas
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
         ) : pagina === 'empresa' ? (
           <Empresa
             token={token}

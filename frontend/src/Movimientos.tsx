@@ -52,6 +52,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   salida: 'Salida',
   ajuste_entrada: 'Ajuste (+) por conteo',
   ajuste_salida: 'Ajuste (−) por conteo',
+  venta: 'Venta',
+  anulacion_venta: 'Devolución por venta anulada',
 }
 
 // Cantidades en milésimas (enteros) para las vistas previas.

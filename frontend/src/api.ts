@@ -809,3 +809,214 @@ export type SucursalOpcion = {
 
 export const sucursalesParaUsuarios = (token: string) =>
   llamar<SucursalOpcion[]>('GET', '/usuarios/sucursales', token)
+
+// ---------- Ventas ----------
+
+export type FormaPago = {
+  id: string
+  codigo: string
+  nombre: string
+  calcula_devuelta: boolean
+  requiere_referencia: boolean
+}
+
+export type PrepararVenta = {
+  formasPago: FormaPago[]
+  descuentoMaximoPct: string
+  puedeDescontar: boolean
+  consumidorFinal: { id: string; nombre: string } | null
+}
+
+export type ArticuloVenta = {
+  tipo: 'producto' | 'servicio'
+  id: string
+  codigo: string
+  nombre: string
+  unidad: string
+  permite_decimales: boolean
+  precio: string
+  precio_incluye_itbis: boolean
+  impuesto: string
+  tasa: string
+  existencia: string | null
+}
+
+export type ClienteVenta = {
+  id: string
+  nombre: string
+  nombre_comercial: string | null
+  numero_documento: string | null
+  es_protegido: boolean
+}
+
+export type LineaVentaEntrada = {
+  tipo: 'producto' | 'servicio'
+  id: string
+  cantidad: string
+  descuento: string
+}
+
+export type TotalesVenta = {
+  subtotal: string
+  descuento: string
+  base_imponible: string
+  itbis: string
+  total: string
+}
+
+export type PrevisualizacionVenta = {
+  lineas: (Desglose & { codigo: string; bruto: string; descuento: string; cantidad: string })[]
+  totales: TotalesVenta
+}
+
+export type DatosVenta = {
+  clienteId: string
+  lineas: LineaVentaEntrada[]
+  motivoDescuento: string
+  pago: { formaPagoId: string; recibido?: string; referencia?: string }
+  comprobanteFiscal: string
+  notas: string
+}
+
+export type FilaVenta = {
+  id: string
+  numero: string
+  numero_texto: string
+  fecha: string
+  estado: 'completada' | 'anulada'
+  total: string
+  descuento: string
+  comprobante_fiscal: string | null
+  cliente: string
+  vendedor: string
+  forma_pago: string | null
+}
+
+export type PaginaVentas = {
+  filas: FilaVenta[]
+  total: number
+  pagina: number
+  porPagina: number
+  resumen: { cantidad: number; total: string; itbis: string }
+}
+
+export type FiltrosVentas = {
+  texto: string
+  desde: string
+  hasta: string
+  estado: 'todas' | 'completadas' | 'anuladas'
+  pagina: number
+}
+
+export type LineaDetalle = {
+  id: string
+  tipo: string
+  codigo: string
+  descripcion: string
+  unidad: string
+  cantidad: string
+  precio_unitario: string
+  precio_incluye_itbis: boolean
+  impuesto: string
+  tasa: string
+  bruto: string
+  descuento: string
+  base: string
+  itbis: string
+  total: string
+  costo_unitario?: string | null
+}
+
+export type DetalleVenta = {
+  id: string
+  numero_texto: string
+  fecha: string
+  estado: 'completada' | 'anulada'
+  cliente: string
+  cliente_documento: string | null
+  vendedor: string
+  sucursal: string
+  subtotal: string
+  descuento: string
+  motivo_descuento: string | null
+  base_imponible: string
+  itbis: string
+  total: string
+  comprobante_fiscal: string | null
+  notas: string | null
+  anulada_en: string | null
+  anulada_por_usuario: string | null
+  motivo_anulacion: string | null
+  lineas: LineaDetalle[]
+  pagos: {
+    monto: string
+    recibido: string | null
+    devuelta: string | null
+    referencia: string | null
+    forma_pago: string
+  }[]
+}
+
+export const prepararVenta = (token: string) =>
+  llamar<PrepararVenta>('GET', '/ventas/preparar', token)
+
+export const buscarArticulos = (token: string, texto: string) =>
+  llamar<ArticuloVenta[]>(
+    'GET',
+    `/ventas/catalogo?${new URLSearchParams({ texto }).toString()}`,
+    token,
+  )
+
+export const buscarClientesVenta = (token: string, texto: string) =>
+  llamar<ClienteVenta[]>(
+    'GET',
+    `/ventas/clientes?${new URLSearchParams({ texto }).toString()}`,
+    token,
+  )
+
+export const previsualizarVenta = (token: string, datos: DatosVenta) =>
+  llamar<PrevisualizacionVenta>('POST', '/ventas/calcular', token, datos)
+
+export const registrarVenta = (token: string, datos: DatosVenta) =>
+  llamar<{ id: string; numero: string; total: string; devuelta: string | null }>(
+    'POST',
+    '/ventas',
+    token,
+    datos,
+  )
+
+export const listarVentas = (token: string, f: FiltrosVentas) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.desde) q.set('desde', f.desde)
+  if (f.hasta) q.set('hasta', f.hasta)
+  return llamar<PaginaVentas>('GET', `/ventas?${q.toString()}`, token)
+}
+
+export const detalleVenta = (token: string, id: string) =>
+  llamar<DetalleVenta>('GET', `/ventas/${id}`, token)
+
+export const anotarComprobante = (token: string, id: string, comprobante: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/ventas/${id}/comprobante`, token, { comprobante })
+
+export const anularVenta = (token: string, id: string, motivo: string) =>
+  llamar<{ ok: boolean }>('POST', `/ventas/${id}/anular`, token, { motivo })
+
+export type FormatoRecibo = '80' | '58' | 'carta'
+
+// El PDF del comprobante interno (se pide con la sesión del usuario).
+export async function obtenerRecibo(
+  token: string,
+  id: string,
+  formato: FormatoRecibo,
+): Promise<Blob> {
+  const res = await fetch(`${API_URL}/ventas/${id}/recibo?formato=${formato}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el comprobante')
+  }
+  return res.blob()
+}

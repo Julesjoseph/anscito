@@ -74,6 +74,22 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   (obligatoria en el formulario de Usuarios). El inventario por sucursal y los
   traslados se construirán cuando el dueño abra la segunda sucursal.
 
+- **Ventas** (menú Ventas): pestañas "Nueva venta" (buscar artículo, cantidad,
+  descuento %, cliente, efectivo con devuelta o transferencia con referencia)
+  e "Historial" (filtros por fecha, total vendido e ITBIS, detalle, comprobante
+  fiscal y anulación). Número interno V-000001 sin huecos; NO es comprobante
+  fiscal (el NCF/e-CF lo emite el sistema actual del dueño y se anota como
+  referencia). Cada venta copia precio, costo, impuesto y tasa del día;
+  descuenta inventario (movimiento `venta`) sin permitir stock negativo;
+  descuento máximo configurable (`configuracion.ventas.descuento_maximo_pct`,
+  10%) con permiso y motivo; anular el mismo día con `ventas.anular`, días
+  anteriores con `ventas.anular_anteriores` (la mercancía vuelve con
+  `anulacion_venta`). Sin caja, asientos, cuentas por cobrar ni e-CF todavía.
+- **Comprobante en PDF** (`GET /ventas/:id/recibo?formato=80|58|carta`, con
+  PDFKit 0.20.2): rollo de 80 o 58 mm con largo ajustado al contenido, u hoja
+  carta. El logo debe ser PNG o JPG. Dice "comprobante interno… no sustituye
+  el comprobante fiscal".
+
 ## Pendientes y decisiones abiertas
 
 - Impuesto duplicado "ITBIS" al 16% (código `itbi`) creado en pruebas:

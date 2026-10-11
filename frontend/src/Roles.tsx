@@ -53,6 +53,7 @@ const NOMBRES_MODULO: Record<string, string> = {
   terceros: 'Datos personales de clientes y proveedores',
   empresa: 'Empresa',
   sucursales: 'Sucursales',
+  ventas: 'Ventas',
 }
 
 function nombreModulo(modulo: string): string {
