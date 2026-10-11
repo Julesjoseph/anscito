@@ -5,3 +5,5 @@ dist/
 !.env.example
 *.log
 *.tsbuildinfo
+# PDF que generan los scripts de prueba
+backend/scripts/*.pdf

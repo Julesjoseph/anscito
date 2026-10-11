@@ -119,8 +119,14 @@ export class VentasController {
   anular(
     @Req() req: Peticion,
     @Param('id') id: string,
-    @Body() body: { motivo?: unknown },
+    @Body() body: { motivo?: unknown; cajaId?: unknown },
   ) {
-    return this.ventas.anular(req.usuario.id, id, req.ip, body?.motivo);
+    return this.ventas.anular(
+      req.usuario.id,
+      id,
+      req.ip,
+      body?.motivo,
+      body?.cajaId,
+    );
   }
 }

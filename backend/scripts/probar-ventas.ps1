@@ -4,6 +4,8 @@
 # Crea un producto de prueba con 5 unidades, registra 2 ventas de prueba y
 # luego las ANULA (la mercancia vuelve). Las ventas anuladas quedan en la
 # base de desarrollo (nada se borra) y usan 2 numeros de venta.
+# El efectivo pasa por una CAJA DE PRUEBA que se abre en 0, se cierra en 0
+# y se desactiva al final (no toca la Caja 1).
 
 $API = 'http://localhost:3000'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
@@ -93,22 +95,28 @@ $cf = $prep.consumidorFinal.id
 Ok 'formas de pago:' (($prep.formasPago | ForEach-Object { $_.nombre }) -join ', ')
 Ok 'descuento maximo:' "$($prep.descuentoMaximoPct)%"
 
+$caja = Llamar 'Post' '/caja/cajas' $admin @{ codigo = "PRUEBA-$sello"; nombre = "Caja prueba ventas $sello" }
+$sesion = Llamar 'Post' "/caja/cajas/$($caja.id)/abrir" $admin @{ fondoInicial = '0' }
+Ok 'caja de prueba abierta en RD$0:' $sesion.sesion
+
 # La coma evita que PowerShell desarme la lista de un solo elemento.
 function Linea($cantidad, $descuento) { return ,@(@{ tipo = 'producto'; id = $prod.id; cantidad = $cantidad; descuento = $descuento }) }
 function Existencia { ((Llamar 'Get' "/productos?texto=$($prod.codigo)" $admin).filas | Where-Object { $_.id -eq $prod.id }).existencia }
 
 Write-Host "`n== Venta 1: 3 unidades en efectivo ==" -ForegroundColor Cyan
-$venta1 = @{ clienteId = $cf; lineas = (Linea '3' ''); pago = @{ formaPagoId = $efectivo; recibido = '200' } }
+$venta1 = @{ clienteId = $cf; lineas = (Linea '3' ''); pago = @{ formaPagoId = $efectivo; recibido = '200'; cajaId = $caja.id } }
 $previa = Llamar 'Post' '/ventas/calcular' $admin $venta1
 Comparar 'vista previa: base / ITBIS / total' "$($previa.totales.base_imponible) / $($previa.totales.itbis) / $($previa.totales.total)" '150.00 / 27.00 / 177.00'
 $v1 = Llamar 'Post' '/ventas' $admin $venta1
 Ok 'venta registrada:' $v1.numero
 Comparar 'devuelta de RD$200' $v1.devuelta '23.00'
 Comparar 'existencia despues de vender 3 (habia 5)' (Existencia) '2.000'
+Comparar 'en la caja de prueba (entro el total, no lo recibido)' (Llamar 'Get' "/caja/sesiones/$($sesion.id)" $admin).esperado '177.00'
 
 Write-Host "`n== Errores esperados ==" -ForegroundColor Cyan
 EsperarError 'vender 3 cuando quedan 2' 400 { Llamar 'Post' '/ventas' $admin $venta1 }
-EsperarError 'efectivo recibido menor que el total' 400 { Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = (Linea '1' ''); pago = @{ formaPagoId = $efectivo; recibido = '10' } } }
+EsperarError 'efectivo recibido menor que el total' 400 { Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = (Linea '1' ''); pago = @{ formaPagoId = $efectivo; recibido = '10'; cajaId = $caja.id } } }
+EsperarError 'efectivo sin caja asignada' 400 { Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = (Linea '1' ''); pago = @{ formaPagoId = $efectivo; recibido = '100' } } }
 EsperarError 'transferencia sin referencia' 400 { Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = (Linea '1' ''); pago = @{ formaPagoId = $transferencia } } }
 EsperarError 'descuento de 11% (maximo 10%)' 400 { Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = (Linea '1' '5.50'); motivoDescuento = 'Prueba de descuento'; pago = @{ formaPagoId = $transferencia; referencia = 'X1' } } }
 EsperarError 'descuento sin motivo' 400 { Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = (Linea '1' '5'); pago = @{ formaPagoId = $transferencia; referencia = 'X1' } } }
@@ -125,8 +133,10 @@ Comparar 'comprobante fiscal anotado (en mayusculas)' $d2.comprobante_fiscal 'PR
 Comparar 'existencia (quedaba 2, se vendio 1)' (Existencia) '1.000'
 
 Write-Host "`n== Anular (la mercancia vuelve) ==" -ForegroundColor Cyan
-EsperarError 'anular sin motivo' 400 { Llamar 'Post' "/ventas/$($v1.id)/anular" $admin @{ motivo = '' } }
-Llamar 'Post' "/ventas/$($v1.id)/anular" $admin @{ motivo = 'Venta de prueba' } | Out-Null
+EsperarError 'anular sin motivo' 400 { Llamar 'Post' "/ventas/$($v1.id)/anular" $admin @{ motivo = ''; cajaId = $caja.id } }
+EsperarError 'anular venta en efectivo sin caja' 400 { Llamar 'Post' "/ventas/$($v1.id)/anular" $admin @{ motivo = 'Venta de prueba' } }
+Llamar 'Post' "/ventas/$($v1.id)/anular" $admin @{ motivo = 'Venta de prueba'; cajaId = $caja.id } | Out-Null
+Comparar 'caja de prueba despues de devolver el efectivo' (Llamar 'Get' "/caja/sesiones/$($sesion.id)" $admin).esperado '0.00'
 Llamar 'Post' "/ventas/$($v2.id)/anular" $admin @{ motivo = 'Venta de prueba' } | Out-Null
 Comparar 'existencia despues de anular las dos (vuelve a 5)' (Existencia) '5.000'
 EsperarError 'anular otra vez' 400 { Llamar 'Post' "/ventas/$($v1.id)/anular" $admin @{ motivo = 'Otra vez' } }
@@ -134,10 +144,13 @@ $d1 = Llamar 'Get' "/ventas/$($v1.id)" $admin
 Comparar 'estado de la venta 1' $d1.estado 'anulada'
 
 Write-Host "`n== Limpiar ==" -ForegroundColor Cyan
+$cierre = Llamar 'Post' "/caja/sesiones/$($sesion.id)/cerrar" $admin @{ conteo = @{} }
+Comparar 'caja de prueba cerrada sin diferencia' $cierre.diferencia '0.00'
+Llamar 'Patch' "/caja/cajas/$($caja.id)/estado" $admin @{ is_active = $false; motivo = 'Caja de prueba' } | Out-Null
 Llamar 'Patch' "/productos/$($prod.id)/estado" $admin @{ is_active = $false; motivo = 'Producto de prueba' } | Out-Null
 Llamar 'Patch' "/categorias/$catId/estado" $admin @{ is_active = $false; motivo = 'Categoria de prueba' } | Out-Null
 Llamar 'Patch' "/unidades-negocio/$($unidad.id)/estado" $admin @{ is_active = $false; motivo = 'Unidad de prueba' } | Out-Null
-Ok 'producto, categoria y unidad de prueba desactivados' ''
+Ok 'caja, producto, categoria y unidad de prueba desactivados' ''
 
 Write-Host "`n== Usuario sin permisos (debe dar 403) ==" -ForegroundColor Cyan
 $otro = Read-Host 'Usuario SIN permisos de ventas (ej: pedro)'

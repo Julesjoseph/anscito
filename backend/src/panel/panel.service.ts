@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { SQL_SIGNO_CAJA } from '../caja/sql';
 import {
   SQL_TOTALES_PRODUCTO,
   STOCK_MINIMO_POR_DEFECTO,
@@ -80,6 +81,9 @@ export class PanelService {
       if (permisos.has('inventario.ver_costos')) {
         resultado.ganancia = await this.ganancia(inicio, fin);
       }
+    }
+    if (permisos.has('caja.ver')) {
+      resultado.caja = await this.caja();
     }
     if (permisos.has('inventario.ver')) {
       resultado.inventario = await this.inventario(
@@ -202,6 +206,32 @@ export class PanelService {
       [inicio, fin],
     );
     return r.rows[0];
+  }
+
+  // Lo que debería haber ahora en cada caja abierta (no depende del período).
+  private async caja() {
+    const r = await this.db.query<{
+      caja: string;
+      usuario: string;
+      abierta_en: string;
+      esperado: string;
+    }>(
+      `SELECT c.nombre AS caja, u.username AS usuario, s.abierta_en,
+              (s.fondo_inicial + COALESCE((SELECT sum(m.monto * ${SQL_SIGNO_CAJA})
+                 FROM caja_movimientos m WHERE m.sesion_id = s.id), 0))::numeric(14,2)
+                AS esperado
+       FROM caja_sesiones s
+       JOIN cajas c ON c.id = s.caja_id
+       JOIN usuarios u ON u.id = s.abierta_por
+       WHERE s.estado = 'abierta'
+       ORDER BY lower(c.nombre)`,
+    );
+    const total = await this.db.query<{ total: string }>(
+      `SELECT COALESCE(sum(x), 0)::numeric(16,2) AS total
+       FROM unnest($1::numeric[]) x`,
+      [r.rows.map((f) => f.esperado)],
+    );
+    return { abiertas: r.rows, total: total.rows[0].total };
   }
 
   private async inventario(verCostos: boolean) {

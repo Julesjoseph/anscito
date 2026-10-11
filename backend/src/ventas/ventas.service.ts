@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
 import { DatabaseService } from '../database/database.service';
 import { esEntera, normalizarCantidad } from '../inventario/cantidades';
 import { SQL_EXISTENCIA, SQL_SIGNO, SQL_TASA_VIGENTE } from '../inventario/sql';
@@ -44,7 +45,12 @@ export type DatosVenta = {
   clienteId?: unknown;
   lineas?: unknown;
   motivoDescuento?: unknown;
-  pago?: { formaPagoId?: unknown; recibido?: unknown; referencia?: unknown };
+  pago?: {
+    formaPagoId?: unknown;
+    recibido?: unknown;
+    referencia?: unknown;
+    cajaId?: unknown;
+  };
   comprobanteFiscal?: unknown;
   notas?: unknown;
 };
@@ -128,7 +134,7 @@ export class VentasService {
   async preparar(actorId: string) {
     const [formas, maximo, descontar] = await Promise.all([
       this.db.query(
-        `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia
+        `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia, usa_caja
          FROM formas_pago WHERE is_active = true ORDER BY orden, nombre`,
       ),
       this.config(this.db, 'ventas.descuento_maximo_pct'),
@@ -138,8 +144,18 @@ export class VentasService {
       `SELECT id, nombre FROM terceros
        WHERE rol = 'cliente' AND es_protegido AND is_active LIMIT 1`,
     );
+    // Cajas activas con su sesión abierta (si tienen), para que cada
+    // computadora sepa si su caja está abierta.
+    const cajas = await this.db.query(
+      `SELECT c.id, c.nombre, s.id AS sesion_id
+       FROM cajas c
+       LEFT JOIN caja_sesiones s ON s.caja_id = c.id AND s.estado = 'abierta'
+       WHERE c.is_active
+       ORDER BY lower(c.nombre)`,
+    );
     return {
       formasPago: formas.rows,
+      cajas: cajas.rows,
       descuentoMaximoPct: maximo,
       puedeDescontar: descontar,
       consumidorFinal: cf.rows[0] ?? null,
@@ -440,8 +456,10 @@ export class VentasService {
         nombre: string;
         calcula_devuelta: boolean;
         requiere_referencia: boolean;
+        usa_caja: boolean;
       }>(
-        'SELECT nombre, calcula_devuelta, requiere_referencia FROM formas_pago WHERE id = $1 AND is_active',
+        `SELECT nombre, calcula_devuelta, requiere_referencia, usa_caja
+         FROM formas_pago WHERE id = $1 AND is_active`,
         [formaId],
       );
       if (fp.rowCount === 0)
@@ -471,6 +489,33 @@ export class VentasService {
         throw new BadRequestException(
           `Escriba la referencia de la ${forma.nombre.toLowerCase()}`,
         );
+      }
+
+      // El efectivo entra a la caja de esta computadora, que debe estar
+      // abierta. FOR SHARE: varias ventas a la vez, pero nadie la cierra
+      // mientras se registra esta.
+      let sesionCaja: { id: string; caja: string; numero: string } | null =
+        null;
+      if (forma.usa_caja) {
+        const cajaId = texto(datos.pago?.cajaId).toLowerCase();
+        if (!UUID.test(cajaId)) {
+          throw new BadRequestException(
+            'Esta computadora no tiene una caja asignada: elíjala en la pantalla de Ventas',
+          );
+        }
+        const s = await c.query<{ id: string; caja: string; numero: string }>(
+          `SELECT s.id, c.nombre AS caja, s.numero
+           FROM caja_sesiones s JOIN cajas c ON c.id = s.caja_id
+           WHERE s.caja_id = $1 AND s.estado = 'abierta'
+           FOR SHARE OF s`,
+          [cajaId],
+        );
+        if (s.rowCount === 0) {
+          throw new BadRequestException(
+            'La caja de esta computadora no está abierta. Ábrala en Caja antes de cobrar en efectivo.',
+          );
+        }
+        sesionCaja = s.rows[0];
       }
 
       // Sucursal del vendedor (o la principal si no tiene).
@@ -568,6 +613,14 @@ export class VentasService {
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [ventaId, formaId, totales.total, recibido, devuelta, referencia],
       );
+      if (sesionCaja) {
+        // Entra a la caja lo cobrado (la devuelta ya salió de lo recibido).
+        await c.query(
+          `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, usuario_id)
+           VALUES ($1, 'venta', $2, $3, $4)`,
+          [sesionCaja.id, totales.total, ventaId, actorId],
+        );
+      }
 
       await registrarAuditoria(c, {
         usuarioId: actorId,
@@ -580,6 +633,9 @@ export class VentasService {
           lineas: lineas.length,
           ...totales,
           forma_pago: forma.nombre,
+          caja: sesionCaja
+            ? `${sesionCaja.caja} (${numeroSesion(sesionCaja.numero)})`
+            : null,
           comprobante_fiscal: comprobante,
         },
         motivo:
@@ -814,6 +870,7 @@ export class VentasService {
     id: string,
     ip: string | undefined,
     motivo: unknown,
+    cajaIdTexto?: unknown,
   ) {
     if (!UUID.test(id)) throw new NotFoundException('Venta no encontrada');
     const textoMotivo = texto(motivo);
@@ -848,6 +905,55 @@ export class VentasService {
         throw new ForbiddenException(
           'Solo se pueden anular ventas del mismo día. Para días anteriores hace falta el permiso "Anular ventas de días anteriores".',
         );
+      }
+
+      // El efectivo cobrado se le devuelve al cliente desde la caja abierta
+      // de esta computadora.
+      const ef = await c.query<{ monto: string }>(
+        `SELECT COALESCE(sum(vp.monto), 0)::numeric(14,2) AS monto
+         FROM venta_pagos vp JOIN formas_pago fp ON fp.id = vp.forma_pago_id
+         WHERE vp.venta_id = $1 AND fp.usa_caja`,
+        [id],
+      );
+      const efectivo = ef.rows[0].monto;
+      let cajaDevolucion: string | null = null;
+      if (efectivo !== '0.00') {
+        const cajaId = texto(cajaIdTexto).toLowerCase();
+        if (!UUID.test(cajaId)) {
+          throw new BadRequestException(
+            'La venta se cobró en efectivo: esta computadora necesita una caja asignada para devolver el dinero',
+          );
+        }
+        const s = await c.query<{ id: string; caja: string; numero: string }>(
+          `SELECT s.id, c.nombre AS caja, s.numero
+           FROM caja_sesiones s JOIN cajas c ON c.id = s.caja_id
+           WHERE s.caja_id = $1 AND s.estado = 'abierta'
+           FOR UPDATE OF s`,
+          [cajaId],
+        );
+        if (s.rowCount === 0) {
+          throw new BadRequestException(
+            'La caja de esta computadora no está abierta: ábrala para devolver el efectivo',
+          );
+        }
+        const hay = (
+          await c.query<{ esperado: string }>(SQL_ESPERADO, [s.rows[0].id])
+        ).rows[0].esperado;
+        const ok = await c.query<{ ok: boolean }>(
+          'SELECT $1::numeric >= $2::numeric AS ok',
+          [hay, efectivo],
+        );
+        if (!ok.rows[0].ok) {
+          throw new BadRequestException(
+            `No hay suficiente efectivo en ${s.rows[0].caja} para devolver RD$${efectivo} (hay RD$${hay})`,
+          );
+        }
+        await c.query(
+          `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, motivo, usuario_id)
+           VALUES ($1, 'devolucion', $2, $3, $4, $5)`,
+          [s.rows[0].id, efectivo, id, textoMotivo, actorId],
+        );
+        cajaDevolucion = `${s.rows[0].caja} (${numeroSesion(s.rows[0].numero)})`;
       }
 
       // La mercancía vuelve al inventario.
@@ -900,6 +1006,8 @@ export class VentasService {
           estado: 'anulada',
           productos_devueltos: lineas.rowCount,
           mismo_dia: v.mismo_dia,
+          efectivo_devuelto: efectivo,
+          caja: cajaDevolucion,
         },
         motivo: textoMotivo,
         ip,
