@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Post,
   Req,
@@ -29,6 +30,7 @@ export class MovimientosController {
     body: {
       cantidad?: unknown;
       costoUnitario?: unknown;
+      costoTotal?: unknown;
       proveedor?: unknown;
       referencia?: unknown;
       nota?: unknown;
@@ -61,6 +63,22 @@ export class MovimientosController {
     @Body() body: { conteo?: unknown; motivo?: unknown },
   ) {
     return this.movimientos.ajuste(req.usuario.id, id, req.ip, body ?? {});
+  }
+
+  @Post(':id/corregir-costo')
+  @HttpCode(200)
+  @RequierePermiso('inventario.ajustar')
+  corregirCosto(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body() body: { costo?: unknown; motivo?: unknown },
+  ) {
+    return this.movimientos.corregirCosto(
+      req.usuario.id,
+      id,
+      req.ip,
+      body ?? {},
+    );
   }
 
   @Get(':id/kardex')

@@ -5,6 +5,7 @@ import {
   SesionVencida,
   ajustarInventario,
   calcularMonto,
+  corregirCosto,
   kardexProducto,
   registrarEntrada,
   registrarSalida,
@@ -163,7 +164,8 @@ export function FormEntrada({
   onSesionVencida,
 }: PropsMov) {
   const [cant, setCant] = useState('')
-  const [costo, setCosto] = useState('')
+  const [modo, setModo] = useState<'total' | 'unidad'>('total')
+  const [escrito, setEscrito] = useState('')
   const [proveedor, setProveedor] = useState('')
   const [factura, setFactura] = useState('')
   const [nota, setNota] = useState('')
@@ -178,6 +180,18 @@ export function FormEntrada({
   const mCant = milesimas(cant)
   const mExist = milesimas(fila.existencia) ?? 0n
   const despues = mCant !== null ? deMilesimas(mExist + mCant) : null
+
+  // Costo por unidad: el escrito, o total ÷ cantidad (vista previa; el
+  // servidor hace el cálculo definitivo con el mismo redondeo).
+  let costo = ''
+  if (montoValido(escrito)) {
+    if (modo === 'unidad') costo = escrito.trim()
+    else if (mCant && mCant > 0n) {
+      const num = centavos(escrito) * 1000n
+      const r = (2n * num + mCant) / (2n * mCant)
+      costo = `${r / 100n}.${(r % 100n).toString().padStart(2, '0')}`
+    }
+  }
 
   // Vista previa del costo promedio (el servidor calcula el definitivo).
   let promedio: string | null = null
@@ -198,7 +212,9 @@ export function FormEntrada({
     void enviar(async () => {
       const r = await registrarEntrada(token, fila.id, {
         cantidad: cant.trim(),
-        costoUnitario: costo.trim(),
+        ...(modo === 'unidad'
+          ? { costoUnitario: escrito.trim() }
+          : { costoTotal: escrito.trim() }),
         proveedor,
         referencia: factura,
         nota,
@@ -227,17 +243,47 @@ export function FormEntrada({
             <span className="text-xs text-red-600">{errorCantidad(cant, fila)}</span>
           )}
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
-          Costo por {fila.unidad.toLowerCase()} (DOP, sin ITBIS)
+        <div className="flex flex-col gap-1 text-sm text-gray-600">
+          <div className="flex gap-3">
+            {(
+              [
+                ['total', 'Total de la factura'],
+                ['unidad', `Costo por ${fila.unidad.toLowerCase()}`],
+              ] as const
+            ).map(([id, nombre]) => (
+              <label key={id} className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="modo-costo"
+                  checked={modo === id}
+                  onChange={() => setModo(id)}
+                  className="accent-[#C8102E]"
+                />
+                {nombre}
+              </label>
+            ))}
+          </div>
           <input
             type="text"
             inputMode="decimal"
-            value={costo}
-            onChange={(e) => setCosto(e.target.value)}
-            placeholder="Según la factura del proveedor"
+            value={escrito}
+            onChange={(e) => setEscrito(e.target.value)}
+            placeholder={
+              modo === 'total'
+                ? 'Subtotal de la factura, sin ITBIS'
+                : 'Costo de una unidad, sin ITBIS'
+            }
+            aria-label="Costo sin ITBIS"
             className={CAMPO}
           />
-        </label>
+          {modo === 'total' && costo && mCant && (
+            <span className="text-xs text-gray-700">
+              {dinero(escrito.trim())} ÷ {cantidad(cant)} ={' '}
+              <span className="font-medium">{dinero(costo)}</span> por{' '}
+              {fila.unidad.toLowerCase()}
+            </span>
+          )}
+        </div>
         <label className="flex flex-col gap-1 text-sm text-gray-600">
           Proveedor (opcional)
           <input
@@ -258,7 +304,7 @@ export function FormEntrada({
         </label>
       </div>
 
-      {fila.tasa !== null && costo.trim() !== '' && (
+      {fila.tasa !== null && costo !== '' && (
         <VistaItbis
           titulo="Costo por unidad, como en la factura del proveedor"
           etiquetas={['Costo (sin ITBIS)', 'ITBIS', 'Costo con ITBIS']}
@@ -492,6 +538,73 @@ export function FormAjuste({
   )
 }
 
+// ---------- Corregir costo ----------
+
+export function FormCorregirCosto({
+  token,
+  fila,
+  onListo,
+  onCancelar,
+  onSesionVencida,
+}: PropsMov) {
+  const [costo, setCosto] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const { error, guardando, enviar } = useEnvio(onSesionVencida)
+
+  function guardar(e: FormEvent) {
+    e.preventDefault()
+    void enviar(async () => {
+      const r = await corregirCosto(token, fila.id, { costo: costo.trim(), motivo })
+      onListo(`Costo de ${fila.codigo} corregido a ${dinero(r.costo)}.`)
+    })
+  }
+
+  return (
+    <form onSubmit={guardar} className="flex flex-col gap-4">
+      <Cabecera fila={fila} />
+      <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <span>
+          El costo normalmente lo calculan las entradas (costo promedio). Use
+          esto solo para corregir un error, por ejemplo una entrada registrada
+          con el costo equivocado. Quedará en la auditoría y en el kárdex con su
+          motivo.
+        </span>
+      </div>
+      <div className="text-sm text-gray-600">
+        Costo actual: <span className="font-medium text-gray-900">{dinero(fila.costo)}</span> por{' '}
+        {fila.unidad.toLowerCase()} (sin ITBIS)
+      </div>
+      <label className="flex flex-col gap-1 text-sm text-gray-600">
+        Costo correcto por {fila.unidad.toLowerCase()} (DOP, sin ITBIS)
+        <input
+          type="text"
+          inputMode="decimal"
+          value={costo}
+          onChange={(e) => setCosto(e.target.value)}
+          className={CAMPO}
+          autoFocus
+        />
+        {costo.trim() !== '' && !montoValido(costo) && (
+          <span className="text-xs text-red-600">Use solo números y punto, con hasta 2 decimales</span>
+        )}
+      </label>
+      <label className="flex flex-col gap-1 text-sm text-gray-600">
+        Motivo de la corrección
+        <textarea
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          rows={3}
+          placeholder="Ej: la entrada se registró con el total como si fuera el costo por unidad"
+          className={AREA}
+        />
+      </label>
+      {error && <CajaError>{error}</CajaError>}
+      <Botones guardando={guardando} texto="Corregir costo" onCancelar={onCancelar} peligro />
+    </form>
+  )
+}
+
 // ---------- Kárdex ----------
 
 export function VerKardex({
@@ -587,6 +700,20 @@ export function VerKardex({
           </tbody>
         </table>
       </div>
+      {datos.correcciones.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+          <div className="mb-1 font-medium text-amber-900">Correcciones de costo</div>
+          <ul className="flex flex-col gap-1 text-amber-900">
+            {datos.correcciones.map((c) => (
+              <li key={c.fecha}>
+                {new Date(c.fecha).toLocaleString('es-DO')} · {dinero(c.anterior)} →{' '}
+                <span className="font-medium">{dinero(c.nuevo)}</span> · {c.motivo} ·{' '}
+                {c.usuario}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <p className="text-xs text-gray-500">
         El kárdex muestra todos los movimientos del producto, del más reciente
         al más antiguo. Ninguno se puede borrar ni modificar.

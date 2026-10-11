@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -126,13 +127,23 @@ export class MovimientosService {
     datos: {
       cantidad?: unknown;
       costoUnitario?: unknown;
+      costoTotal?: unknown;
       proveedor?: unknown;
       referencia?: unknown;
       nota?: unknown;
     },
   ) {
-    const costoUnitario = normalizarMonto(datos.costoUnitario);
-    if (costoUnitario === null) {
+    // El costo llega por unidad o como total de la factura (uno de los dos).
+    const porUnidad = texto(datos.costoUnitario) !== '';
+    if (porUnidad === (texto(datos.costoTotal) !== '')) {
+      throw new BadRequestException(
+        'Escriba el costo por unidad o el total de la factura (solo uno de los dos), sin ITBIS',
+      );
+    }
+    const costoEscrito = normalizarMonto(
+      porUnidad ? datos.costoUnitario : datos.costoTotal,
+    );
+    if (costoEscrito === null) {
       throw new BadRequestException(
         'Costo inválido: debe ser un número no negativo con hasta 2 decimales (sin ITBIS)',
       );
@@ -144,6 +155,16 @@ export class MovimientosService {
     return this.db.transaccion(async (c) => {
       const p = await this.bloquear(c, id);
       const cantidad = this.cantidad(datos.cantidad, p, 'Cantidad');
+
+      // Si escribió el total de la factura, el costo por unidad es total ÷ cantidad.
+      const costoUnitario = porUnidad
+        ? costoEscrito
+        : (
+            await c.query<{ unitario: string }>(
+              'SELECT round($1::numeric / $2::numeric, 2)::numeric(14,2) AS unitario',
+              [costoEscrito, cantidad],
+            )
+          ).rows[0].unitario;
 
       // Costo promedio ponderado: lo que había a su costo + lo que entra a
       // su costo, entre el total. Si no había existencia, vale el nuevo.
@@ -195,6 +216,7 @@ export class MovimientosService {
           codigo: p.codigo,
           cantidad,
           costo_unitario: costoUnitario,
+          costo_total_factura: porUnidad ? undefined : costoEscrito,
           proveedor,
           referencia,
           existencia,
@@ -203,7 +225,59 @@ export class MovimientosService {
         motivo: nota ?? undefined,
         ip,
       });
-      return { existencia, costo: costoNuevo };
+      return { existencia, costo: costoNuevo, costoUnitario };
+    });
+  }
+
+  // ---------- Corregir costo (errores de registro) ----------
+
+  // El costo normalmente lo calculan las entradas. Esto es solo para corregir
+  // un error, siempre con motivo y queda en la auditoría y en el kárdex.
+  async corregirCosto(
+    actorId: string,
+    id: string,
+    ip: string | undefined,
+    datos: { costo?: unknown; motivo?: unknown },
+  ) {
+    if (
+      !(await this.productos.tienePermiso(actorId, 'inventario.ver_costos'))
+    ) {
+      throw new ForbiddenException(
+        'No tiene permiso para ver ni corregir costos',
+      );
+    }
+    const costo = normalizarMonto(datos.costo);
+    if (costo === null) {
+      throw new BadRequestException(
+        'Costo inválido: debe ser un número no negativo con hasta 2 decimales (sin ITBIS)',
+      );
+    }
+    const motivo = motivoObligatorio(datos.motivo);
+
+    return this.db.transaccion(async (c) => {
+      const p = await this.bloquear(c, id);
+      if (p.costo === costo) {
+        throw new BadRequestException('Ese ya es el costo actual del producto');
+      }
+      await c.query(
+        'UPDATE productos SET costo = $2, updated_at = now() WHERE id = $1',
+        [id, costo],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'producto.corregir_costo',
+        entidad: 'productos',
+        entidadId: id,
+        anterior: {
+          codigo: p.codigo,
+          costo: p.costo,
+          existencia: p.existencia,
+        },
+        nuevo: { codigo: p.codigo, costo },
+        motivo,
+        ip,
+      });
+      return { costo };
     });
   }
 
@@ -402,6 +476,29 @@ export class MovimientosService {
       const { costo_unitario: _c, costo_promedio: _p, ...resto } = m;
       return { ...resto, causa };
     });
-    return { producto: prod.rows[0], movimientos, verCostos };
+
+    // Correcciones de costo (solo para quien puede ver costos).
+    const correcciones = verCostos
+      ? (
+          await this.db.query<{
+            fecha: string;
+            anterior: string;
+            nuevo: string;
+            motivo: string | null;
+            usuario: string;
+          }>(
+            `SELECT a.created_at AS fecha,
+                    a.valor_anterior->>'costo' AS anterior,
+                    a.valor_nuevo->>'costo' AS nuevo,
+                    a.motivo, u.username AS usuario
+             FROM auditoria a JOIN usuarios u ON u.id = a.usuario_id
+             WHERE a.entidad = 'productos' AND a.entidad_id = $1
+               AND a.accion = 'producto.corregir_costo'
+             ORDER BY a.created_at DESC`,
+            [id],
+          )
+        ).rows
+      : [];
+    return { producto: prod.rows[0], movimientos, correcciones, verCostos };
   }
 }

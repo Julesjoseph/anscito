@@ -558,6 +558,20 @@ export class ProductosService {
         // Quien no puede ver el costo tampoco puede cambiarlo.
         if (!verCostos) d.costo = antes.costo;
 
+        // Con movimientos, el costo lo calculan las entradas; un error se
+        // corrige con "Corregir costo", que exige motivo.
+        if (d.costo !== antes.costo) {
+          const movs = await c.query<{ n: number }>(
+            'SELECT count(*)::int AS n FROM movimientos_inventario WHERE producto_id = $1',
+            [id],
+          );
+          if (movs.rows[0].n > 0) {
+            throw new BadRequestException(
+              'El costo de un producto con movimientos no se edita aquí: use "Corregir costo" e indique el motivo',
+            );
+          }
+        }
+
         if (antes.categoria_id !== d.categoria_id) {
           await this.categoriaActiva(c, d.categoria_id);
         }

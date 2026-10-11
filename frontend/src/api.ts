@@ -543,24 +543,42 @@ export type MovimientoKardex = {
   usuario: string
 }
 
+export type CorreccionCosto = {
+  fecha: string
+  anterior: string
+  nuevo: string
+  motivo: string | null
+  usuario: string
+}
+
 export type Kardex = {
   producto: { codigo: string; nombre: string; unidad: string }
   movimientos: MovimientoKardex[]
+  correcciones: CorreccionCosto[]
   verCostos: boolean
 }
+
+export const corregirCosto = (
+  token: string,
+  id: string,
+  datos: { costo: string; motivo: string },
+) =>
+  llamar<{ costo: string }>('POST', `/productos/${id}/corregir-costo`, token, datos)
 
 export const registrarEntrada = (
   token: string,
   id: string,
   datos: {
     cantidad: string
-    costoUnitario: string
+    // Uno de los dos, sin ITBIS.
+    costoUnitario?: string
+    costoTotal?: string
     proveedor: string
     referencia: string
     nota: string
   },
 ) =>
-  llamar<{ existencia: string; costo: string }>(
+  llamar<{ existencia: string; costo: string; costoUnitario: string }>(
     'POST',
     `/productos/${id}/entradas`,
     token,

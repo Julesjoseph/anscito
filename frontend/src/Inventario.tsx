@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   PackageX,
   Scale,
+  Wrench,
   ChevronLeft,
   ChevronRight,
   Info,
@@ -46,7 +47,13 @@ import {
 import { cantidad, dinero, mensajeDe, porcentaje } from './formato'
 import { montoValido } from './itbis'
 import VistaItbis from './VistaItbis'
-import { FormAjuste, FormEntrada, FormSalida, VerKardex } from './Movimientos'
+import {
+  FormAjuste,
+  FormCorregirCosto,
+  FormEntrada,
+  FormSalida,
+  VerKardex,
+} from './Movimientos'
 
 type Props = {
   token: string
@@ -62,6 +69,7 @@ type Modal =
   | { tipo: 'salida'; fila: FilaProducto }
   | { tipo: 'ajuste'; fila: FilaProducto }
   | { tipo: 'kardex'; fila: FilaProducto }
+  | { tipo: 'costo'; fila: FilaProducto }
   | null
 
 const AVISO_FISCAL =
@@ -111,6 +119,12 @@ function FormProducto({
 
   // Al crear, el costo siempre se escribe; al editar, solo con ver_costos.
   const mostrarCosto = !fila || verCostos
+  // Con movimientos, el costo lo calculan las entradas (se corrige aparte).
+  const costoBloqueado =
+    fila !== undefined &&
+    (Number(fila.existencia_inicial) > 0 ||
+      Number(fila.entradas) > 0 ||
+      Number(fila.salidas) > 0)
   const categoria = catalogos.categorias.find((c) => c.id === categoriaId)
   const unidad = catalogos.unidades.find((u) => u.id === unidadId)
   const impuesto = catalogos.impuestos.find((i) => i.id === impuestoId)
@@ -353,9 +367,16 @@ function FormProducto({
               inputMode="decimal"
               value={costo}
               onChange={(e) => setCosto(e.target.value)}
+              disabled={costoBloqueado}
               placeholder="0.00"
-              className={CAMPO}
+              className={`${CAMPO} disabled:bg-gray-100 disabled:text-gray-500`}
             />
+            {costoBloqueado && (
+              <span className="text-xs text-gray-500">
+                Es el costo promedio: lo calculan las entradas. Si hay un error,
+                use "Corregir costo" en el menú ⋯ del producto.
+              </span>
+            )}
             {costo.trim() !== '' && !montoValido(costo) && (
               <span className="text-xs text-red-600">
                 Use solo números y punto, con hasta 2 decimales
@@ -550,6 +571,7 @@ function Acciones({
   const entradas = activo && permisos.includes('inventario.entradas')
   const salidas = activo && permisos.includes('inventario.salidas')
   const ajustar = activo && permisos.includes('inventario.ajustar')
+  const corregir = ajustar && permisos.includes('inventario.ver_costos')
   const estado = permisos.includes('inventario.desactivar')
 
   function elegir(m: Modal) {
@@ -607,6 +629,11 @@ function Acciones({
             {ajustar && (
               <button type="button" className={opcion} onClick={() => elegir({ tipo: 'ajuste', fila })}>
                 <Scale size={14} /> Ajustar por conteo
+              </button>
+            )}
+            {corregir && (
+              <button type="button" className={opcion} onClick={() => elegir({ tipo: 'costo', fila })}>
+                <Wrench size={14} /> Corregir costo
               </button>
             )}
             {puedeEditar && (
@@ -1092,6 +1119,18 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
       {modal?.tipo === 'ajuste' && (
         <Ventana titulo="Ajustar por conteo físico" onCerrar={() => setModal(null)}>
           <FormAjuste
+            token={token}
+            fila={modal.fila}
+            verCostos={verCostos}
+            onListo={terminado}
+            onCancelar={() => setModal(null)}
+            onSesionVencida={onSesionVencida}
+          />
+        </Ventana>
+      )}
+      {modal?.tipo === 'costo' && (
+        <Ventana titulo="Corregir costo" onCerrar={() => setModal(null)}>
+          <FormCorregirCosto
             token={token}
             fila={modal.fila}
             verCostos={verCostos}
