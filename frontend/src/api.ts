@@ -20,6 +20,7 @@ export type FilaUsuario = {
   apellido: string
   is_active: boolean
   last_login_at: string | null
+  locked_until: string | null
   roles: string
   rol_id: string | null
 }
@@ -89,6 +90,16 @@ export const cambiarEstadoUsuario = (
     is_active: isActive,
     motivo,
   })
+
+export const resetearPassword = (token: string, id: string) =>
+  llamar<{ username: string; passwordTemporal: string }>(
+    'POST',
+    `/usuarios/${id}/resetear-password`,
+    token,
+  )
+
+export const desbloquearUsuario = (token: string, id: string) =>
+  llamar<{ ok: boolean }>('POST', `/usuarios/${id}/desbloquear`, token)
 
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_URL}/auth/login`, {

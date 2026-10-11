@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { AlertTriangle, Pencil, Plus, UserCheck, UserX, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  KeyRound,
+  Lock,
+  LockOpen,
+  Pencil,
+  Plus,
+  UserCheck,
+  UserX,
+  X,
+} from 'lucide-react'
 import {
   SesionVencida,
   cambiarEstadoUsuario,
   crearUsuario,
+  desbloquearUsuario,
   editarUsuario,
   listarRoles,
   listarUsuarios,
+  resetearPassword,
 } from './api'
 import type { FilaUsuario, Rol } from './api'
 
@@ -25,7 +39,13 @@ type Modal =
   | { tipo: 'crear' }
   | { tipo: 'editar'; fila: FilaUsuario }
   | { tipo: 'estado'; fila: FilaUsuario }
+  | { tipo: 'password'; fila: FilaUsuario }
+  | { tipo: 'desbloquear'; fila: FilaUsuario }
   | null
+
+function estaBloqueado(f: FilaUsuario): boolean {
+  return f.locked_until !== null && new Date(f.locked_until) > new Date()
+}
 
 function Ventana({
   titulo,
@@ -286,6 +306,176 @@ function ConfirmarEstado({
   )
 }
 
+// La clave temporal solo vive en el estado de esta ventana: al cerrarla se pierde.
+function RestablecerPassword({
+  token,
+  fila,
+  onListo,
+  onCancelar,
+  onSesionVencida,
+}: PropsEstado) {
+  const [temporal, setTemporal] = useState('')
+  const [copiada, setCopiada] = useState(false)
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  async function confirmar(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setGuardando(true)
+    try {
+      const r = await resetearPassword(token, fila.id)
+      setTemporal(r.passwordTemporal)
+    } catch (err) {
+      if (err instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(temporal)
+      setCopiada(true)
+    } catch {
+      setError('No se pudo copiar. Selecciónela y cópiela a mano.')
+    }
+  }
+
+  if (temporal) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-gray-600">
+          Contraseña temporal de <span className="font-medium">{fila.username}</span>:
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 select-all rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-lg tracking-wider text-gray-900">
+            {temporal}
+          </code>
+          <button
+            type="button"
+            onClick={copiar}
+            className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm hover:bg-gray-50"
+          >
+            {copiada ? <Check size={16} /> : <Copy size={16} />}
+            {copiada ? 'Copiada' : 'Copiar'}
+          </button>
+        </div>
+        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            Esta contraseña se muestra una sola vez. Entréguela en persona al
+            usuario. Al entrar, el sistema le pedirá cambiarla.
+          </span>
+        </div>
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onListo}
+            className="h-10 rounded-lg bg-[#C8102E] px-4 text-sm font-medium text-white hover:bg-[#a80d26]"
+          >
+            Listo, ya la entregué
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={confirmar} className="flex flex-col gap-4">
+      <p className="text-sm text-gray-600">
+        ¿Restablecer la contraseña de {fila.username}? Se generará una
+        contraseña temporal, la actual dejará de funcionar y se cerrarán sus
+        sesiones abiertas. Quedará registrado quién lo hizo.
+      </p>
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm hover:bg-gray-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={guardando}
+          className="flex h-10 items-center gap-2 rounded-lg border border-red-300 bg-white px-4 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+        >
+          <AlertTriangle size={16} />
+          {guardando ? 'Restableciendo…' : 'Restablecer'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function ConfirmarDesbloqueo({
+  token,
+  fila,
+  onListo,
+  onCancelar,
+  onSesionVencida,
+}: PropsEstado) {
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  async function confirmar(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setGuardando(true)
+    try {
+      await desbloquearUsuario(token, fila.id)
+      onListo()
+    } catch (err) {
+      if (err instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <form onSubmit={confirmar} className="flex flex-col gap-4">
+      <p className="text-sm text-gray-600">
+        ¿Desbloquear a {fila.username}? Podrá volver a intentar entrar de
+        inmediato con su contraseña actual. Quedará registrado quién lo hizo.
+      </p>
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm hover:bg-gray-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={guardando}
+          className="h-10 rounded-lg bg-[#C8102E] px-4 text-sm font-medium text-white hover:bg-[#a80d26] disabled:opacity-60"
+        >
+          {guardando ? 'Desbloqueando…' : 'Desbloquear'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 export default function Usuarios({
   token,
   permisos,
@@ -301,6 +491,8 @@ export default function Usuarios({
   const puedeCrear = permisos.includes('usuarios.crear')
   const puedeEditar = permisos.includes('usuarios.editar')
   const puedeEstado = permisos.includes('usuarios.desactivar')
+  const puedeSeguridad = permisos.includes('usuarios.resetear_password')
+  const hayAcciones = puedeEditar || puedeEstado || puedeSeguridad
 
   const manejar = useCallback(
     (e: unknown) => {
@@ -378,7 +570,7 @@ export default function Usuarios({
                 <th className="px-4 py-3 font-medium">Rol</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
                 <th className="px-4 py-3 font-medium">Último acceso</th>
-                {(puedeEditar || puedeEstado) && <th className="px-4 py-3" />}
+                {hayAcciones && <th className="px-4 py-3" />}
               </tr>
             </thead>
             <tbody>
@@ -399,13 +591,19 @@ export default function Usuarios({
                     >
                       {f.is_active ? 'Activo' : 'Inactivo'}
                     </span>
+                    {estaBloqueado(f) && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
+                        <Lock size={12} />
+                        Bloqueado
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-500">
                     {f.last_login_at
                       ? new Date(f.last_login_at).toLocaleString('es-DO')
                       : 'Nunca'}
                   </td>
-                  {(puedeEditar || puedeEstado) && (
+                  {hayAcciones && (
                     <td className="whitespace-nowrap px-4 py-3 text-right">
                       {puedeEditar && (
                         <button
@@ -431,6 +629,32 @@ export default function Usuarios({
                         >
                           {f.is_active ? <UserX size={14} /> : <UserCheck size={14} />}
                           {f.is_active ? 'Desactivar' : 'Activar'}
+                        </button>
+                      )}
+                      {puedeSeguridad && f.id !== usuarioId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAviso('')
+                            setModal({ tipo: 'password', fila: f })
+                          }}
+                          className="ml-3 inline-flex items-center gap-1 text-gray-600 hover:text-gray-900"
+                        >
+                          <KeyRound size={14} />
+                          Contraseña
+                        </button>
+                      )}
+                      {puedeSeguridad && f.id !== usuarioId && estaBloqueado(f) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAviso('')
+                            setModal({ tipo: 'desbloquear', fila: f })
+                          }}
+                          className="ml-3 inline-flex items-center gap-1 text-amber-800 hover:text-amber-900"
+                        >
+                          <LockOpen size={14} />
+                          Desbloquear
                         </button>
                       )}
                     </td>
@@ -476,6 +700,36 @@ export default function Usuarios({
             onListo={() =>
               terminado(modal.fila.is_active ? 'Usuario desactivado' : 'Usuario activado')
             }
+            onCancelar={() => setModal(null)}
+            onSesionVencida={onSesionVencida}
+          />
+        </Ventana>
+      )}
+      {modal?.tipo === 'password' && (
+        <Ventana
+          titulo="Restablecer contraseña"
+          onCerrar={() => {
+            setModal(null)
+            void cargar()
+          }}
+        >
+          <RestablecerPassword
+            token={token}
+            fila={modal.fila}
+            onListo={() =>
+              terminado(`Contraseña restablecida para ${modal.fila.username}`)
+            }
+            onCancelar={() => setModal(null)}
+            onSesionVencida={onSesionVencida}
+          />
+        </Ventana>
+      )}
+      {modal?.tipo === 'desbloquear' && (
+        <Ventana titulo="Desbloquear usuario" onCerrar={() => setModal(null)}>
+          <ConfirmarDesbloqueo
+            token={token}
+            fila={modal.fila}
+            onListo={() => terminado(`${modal.fila.username} fue desbloqueado`)}
             onCancelar={() => setModal(null)}
             onSesionVencida={onSesionVencida}
           />
