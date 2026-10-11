@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import {
   AlertTriangle,
   ArrowDownRight,
+  Landmark,
   ArrowUpRight,
   Package,
   PackageX,
@@ -119,6 +120,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
   const g = datos?.ganancia
   const inv = datos?.inventario
   const caja = datos?.caja
+  const bancos = datos?.bancos
   const cambio = v ? variacion(v.total, v.total_anterior) : null
 
   return (
@@ -163,7 +165,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
       {error && <CajaError>{error}</CajaError>}
       {!datos && !error && <div className="text-gray-500">Cargando…</div>}
 
-      {datos && !v && !inv && !caja && (
+      {datos && !v && !inv && !caja && !bancos && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
           Su usuario no tiene permisos para ver indicadores de ventas, caja ni
           inventario. Pídale al administrador que se los asigne en Roles y
@@ -171,7 +173,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
         </div>
       )}
 
-      {(v || inv || caja) && (
+      {(v || inv || caja || bancos) && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {v && (
             <Tarjeta
@@ -273,6 +275,34 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               </button>
             </Tarjeta>
           )}
+          {bancos && (
+            <Tarjeta
+              titulo="Dinero en bancos"
+              alerta={bancos.no_llegaron > 0}
+              icono={<Landmark size={16} />}
+              valor={
+                bancos.monedas.length === 0
+                  ? 'Sin cuentas'
+                  : dinero(bancos.monedas.find((m) => m.moneda === 'DOP')?.confirmado ?? '0.00')
+              }
+              detalle={
+                <>
+                  {bancos.monedas
+                    .filter((m) => m.moneda !== 'DOP')
+                    .map((m) => `${m.simbolo} ${dinero(m.confirmado).slice(3)}`)
+                    .join(' · ')}
+                  {bancos.monedas.some((m) => m.moneda !== 'DOP') && ' · '}
+                  Confirmado (ahora, no depende del período)
+                  {bancos.pendientes > 0 && <span className="block text-amber-700">{bancos.pendientes} movimiento(s) por confirmar</span>}
+                  {bancos.no_llegaron > 0 && <span className="block text-red-700">{bancos.no_llegaron} no llegaron: revíselos</span>}
+                </>
+              }
+            >
+              <button type="button" onClick={() => onIr('bancos')} className="self-start text-xs text-[#C8102E] hover:underline">
+                Ver bancos
+              </button>
+            </Tarjeta>
+          )}
           <Proximamente titulo="Cuentas por cobrar" modulo="Cuentas por cobrar" />
         </div>
       )}
@@ -363,8 +393,8 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
         sin ITBIS: productos al costo promedio del momento de la venta, y
         servicios según su comisión % o su costo registrado (costo 0 si no
         tienen ninguno). El efectivo en caja es lo que debería haber ahora en
-        las cajas abiertas. Los indicadores contables y de bancos llegarán con
-        sus módulos.
+        las cajas abiertas; el de bancos, lo confirmado contra el estado de
+        cuenta. Los indicadores contables llegarán con su módulo.
       </p>
     </div>
   )

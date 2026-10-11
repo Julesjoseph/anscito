@@ -825,11 +825,14 @@ export type FormaPago = {
   requiere_referencia: boolean
   // El efectivo entra a la caja abierta de la computadora.
   usa_caja: boolean
+  // La transferencia llega a una cuenta (por confirmar).
+  usa_cuenta: boolean
 }
 
 export type PrepararVenta = {
   formasPago: FormaPago[]
   cajas: { id: string; nombre: string; sesion_id: string | null }[]
+  cuentasVenta: { id: string; nombre: string }[]
   descuentoMaximoPct: string
   puedeDescontar: boolean
   consumidorFinal: { id: string; nombre: string } | null
@@ -886,6 +889,7 @@ export type DatosVenta = {
     recibido?: string
     referencia?: string
     cajaId?: string
+    cuentaId?: string
   }
   comprobanteFiscal: string
   notas: string
@@ -1073,6 +1077,11 @@ export type ResumenPanel = {
     ganancia: string
     margen: string | null
   }
+  bancos?: {
+    monedas: { moneda: string; simbolo: string; confirmado: string; por_confirmar: string; cuentas: number }[]
+    pendientes: number
+    no_llegaron: number
+  }
   caja?: {
     abiertas: { caja: string; usuario: string; abierta_en: string; esperado: string }[]
     total: string
@@ -1109,9 +1118,17 @@ export type FilaCaja = {
 export type PrepararCaja = {
   categoriasGasto: { id: string; codigo: string; nombre: string }[]
   denominaciones: string[]
+  cuentas: { id: string; nombre: string; moneda: string; simbolo: string }[]
 }
 
-export type TipoMovimientoCaja = 'venta' | 'devolucion' | 'gasto' | 'retiro' | 'ingreso'
+export type TipoMovimientoCaja =
+  | 'venta'
+  | 'devolucion'
+  | 'gasto'
+  | 'retiro'
+  | 'ingreso'
+  | 'deposito'
+  | 'desde_cuenta'
 
 export type MovimientoCaja = {
   id: string
@@ -1124,6 +1141,8 @@ export type MovimientoCaja = {
   usuario: string
   venta: string | null
   venta_id: string | null
+  // Cuenta del depósito o de donde vino el efectivo.
+  cuenta: string | null
 }
 
 export type TotalesCaja = {
@@ -1132,6 +1151,8 @@ export type TotalesCaja = {
   gastos: string
   retiros: string
   devoluciones: string
+  depositos: string
+  desde_cuentas: string
   cantidad_ventas: number
 }
 
@@ -1269,3 +1290,227 @@ export async function obtenerCuadre(
   }
   return res.blob()
 }
+
+// Llevar efectivo de la caja a una cuenta (depósito o recarga) o traerlo.
+export type DatosEfectivoCuenta = {
+  cuentaId: string
+  monto: string
+  montoEntra?: string
+  cambiadoPor?: string
+  referencia?: string
+  motivo?: string
+}
+
+export const depositarDesdeCaja = (token: string, cajaId: string, datos: DatosEfectivoCuenta) =>
+  llamar<{ id: string; numero: string }>('POST', `/caja/cajas/${cajaId}/depositar`, token, datos)
+
+export const traerACaja = (token: string, cajaId: string, datos: DatosEfectivoCuenta) =>
+  llamar<{ id: string; numero: string }>('POST', `/caja/cajas/${cajaId}/traer`, token, datos)
+
+// ---------- Bancos ----------
+
+export type Moneda = { codigo: string; nombre: string; simbolo: string }
+
+export type FilaCuenta = {
+  id: string
+  codigo: string
+  tipo: 'banco' | 'billetera'
+  entidad: string
+  nombre: string
+  tipo_cuenta: 'corriente' | 'ahorro' | null
+  moneda: string
+  simbolo: string
+  ultimos_digitos: string | null
+  recibe_ventas: boolean
+  is_active: boolean
+  confirmado: string
+  por_confirmar: string
+  disponible: string
+  disponible_dop: string
+  pendientes: number
+  no_llegaron: number
+  tiene_saldo_inicial: boolean
+}
+
+export type CuentaOpcion = {
+  id: string
+  nombre: string
+  tipo: string
+  moneda: string
+  simbolo: string
+  recibe_ventas: boolean
+}
+
+export type PrepararBancos = {
+  monedas: Moneda[]
+  categoriasGasto: { id: string; codigo: string; nombre: string }[]
+  cuentas: CuentaOpcion[]
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
+}
+
+export type EstadoMovimiento = 'confirmado' | 'por_confirmar' | 'no_llego'
+
+export type MovimientoCuenta = {
+  id: string
+  cuenta_id: string
+  cuenta: string
+  moneda: string
+  simbolo: string
+  tipo: string
+  signo: number
+  monto: string
+  tasa: string
+  monto_dop: string
+  fecha: string
+  created_at: string
+  estado: EstadoMovimiento
+  fecha_banco: string | null
+  motivo_confirmacion: string | null
+  beneficiario: string | null
+  comprobante: string | null
+  referencia: string | null
+  motivo: string | null
+  reverso_de: string | null
+  categoria: string | null
+  usuario: string
+  venta: string | null
+  transferencia: string | null
+  contraparte: string | null
+  monto_sale: string | null
+  monto_entra: string | null
+  cambiado_por: string | null
+  reversado: boolean
+}
+
+export type PaginaMovimientosCuenta = {
+  cuenta: {
+    id: string
+    nombre: string
+    entidad: string
+    moneda: string
+    simbolo: string
+    is_active: boolean
+    confirmado: string
+    por_confirmar: string
+    disponible: string
+  }
+  filas: MovimientoCuenta[]
+  total: number
+  pagina: number
+  porPagina: number
+}
+
+export type DatosCuenta = {
+  codigo?: string
+  tipo?: 'banco' | 'billetera'
+  moneda?: string
+  entidad: string
+  nombre: string
+  tipoCuenta: string
+  ultimosDigitos: string
+  recibeVentas: boolean
+}
+
+export type DatosMovimientoCuenta = {
+  tipo: 'pago' | 'cargo' | 'interes' | 'ingreso'
+  monto: string
+  tasa?: string
+  fecha?: string
+  categoriaGastoId?: string
+  beneficiario?: string
+  comprobante?: string
+  referencia?: string
+  motivo: string
+}
+
+export type DatosTransferencia = {
+  origenCuentaId?: string
+  origenCajaId?: string
+  destinoCuentaId?: string
+  destinoCajaId?: string
+  montoSale: string
+  montoEntra?: string
+  tasa?: string
+  cambiadoPor?: string
+  referencia?: string
+  motivo?: string
+  fecha?: string
+}
+
+export const prepararBancos = (token: string) =>
+  llamar<PrepararBancos>('GET', '/bancos/preparar', token)
+
+export const listarCuentas = (token: string) =>
+  llamar<FilaCuenta[]>('GET', '/bancos/cuentas', token)
+
+export const crearCuenta = (token: string, datos: DatosCuenta) =>
+  llamar<{ id: string }>('POST', '/bancos/cuentas', token, datos)
+
+export const editarCuenta = (token: string, id: string, datos: DatosCuenta) =>
+  llamar<{ ok: boolean }>('PATCH', `/bancos/cuentas/${id}`, token, datos)
+
+export const estadoCuenta = (token: string, id: string, isActive: boolean, motivo?: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/bancos/cuentas/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+export const saldoInicialCuenta = (
+  token: string,
+  id: string,
+  datos: { monto: string; tasa?: string; fecha?: string },
+) => llamar<{ id: string }>('POST', `/bancos/cuentas/${id}/saldo-inicial`, token, datos)
+
+export type FiltrosMovimientosCuenta = {
+  desde: string
+  hasta: string
+  estado: 'todos' | EstadoMovimiento
+  pagina: number
+}
+
+export const movimientosCuenta = (token: string, id: string, f: FiltrosMovimientosCuenta) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.desde) q.set('desde', f.desde)
+  if (f.hasta) q.set('hasta', f.hasta)
+  return llamar<PaginaMovimientosCuenta>(
+    'GET',
+    `/bancos/cuentas/${id}/movimientos?${q.toString()}`,
+    token,
+  )
+}
+
+export const registrarMovimientoCuenta = (
+  token: string,
+  id: string,
+  datos: DatosMovimientoCuenta,
+) =>
+  llamar<{ id: string; disponible: string }>(
+    'POST',
+    `/bancos/cuentas/${id}/movimientos`,
+    token,
+    datos,
+  )
+
+export const pendientesBancos = (token: string) =>
+  llamar<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[] }>(
+    'GET',
+    '/bancos/pendientes',
+    token,
+  )
+
+export const confirmarMovimiento = (
+  token: string,
+  id: string,
+  datos: { resultado: 'confirmado' | 'no_llego'; fechaBanco?: string; motivo?: string },
+) => llamar<{ ok: boolean }>('POST', `/bancos/movimientos/${id}/confirmar`, token, datos)
+
+export const reversarMovimiento = (token: string, id: string, motivo: string) =>
+  llamar<{ id: string }>('POST', `/bancos/movimientos/${id}/reversar`, token, { motivo })
+
+export const transferirDinero = (token: string, datos: DatosTransferencia) =>
+  llamar<{ id: string; numero: string; montoDop: string }>(
+    'POST',
+    '/bancos/transferencias',
+    token,
+    datos,
+  )

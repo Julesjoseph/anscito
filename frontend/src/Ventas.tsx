@@ -208,6 +208,14 @@ function NuevaVenta({
   const [guardando, setGuardando] = useState(false)
   const [hecha, setHecha] = useState<{ id: string; numero: string; total: string; devuelta: string | null } | null>(null)
   const [cajaId, setCajaId] = useState<string | null>(cajaDeEstaComputadora)
+  // Última cuenta usada para transferencias en esta computadora.
+  const [cuentaId, setCuentaId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('anscito.cuentaVenta') ?? ''
+    } catch {
+      return ''
+    }
+  })
 
   const manejar = useCallback(
     (e: unknown) => {
@@ -287,6 +295,20 @@ function NuevaVenta({
   const miCaja = prep?.cajas.find((c) => c.id === cajaId)
   // El efectivo solo se cobra con la caja de esta computadora abierta.
   const cajaLista = !forma?.usa_caja || (miCaja !== undefined && miCaja.sesion_id !== null)
+  // Si solo hay una cuenta para ventas, se usa esa.
+  const cuentaVenta =
+    prep?.cuentasVenta.find((x) => x.id === cuentaId) ??
+    (prep?.cuentasVenta.length === 1 ? prep.cuentasVenta[0] : undefined)
+  const cuentaLista = !forma?.usa_cuenta || cuentaVenta !== undefined
+
+  function elegirCuenta(id: string) {
+    setCuentaId(id)
+    try {
+      localStorage.setItem('anscito.cuentaVenta', id)
+    } catch {
+      // No pasa nada si no se puede recordar.
+    }
+  }
 
   // Líneas listas para el servidor (con el descuento en RD$).
   const entrada = useMemo(
@@ -393,6 +415,7 @@ function NuevaVenta({
           recibido: forma.calcula_devuelta ? recibido.trim() : undefined,
           referencia: referencia.trim() || undefined,
           cajaId: forma.usa_caja && miCaja ? miCaja.id : undefined,
+          cuentaId: forma.usa_cuenta && cuentaVenta ? cuentaVenta.id : undefined,
         },
         comprobanteFiscal: comprobante,
         notas,
@@ -413,6 +436,7 @@ function NuevaVenta({
     cliente !== null &&
     forma !== undefined &&
     cajaLista &&
+    cuentaLista &&
     (!forma.calcula_devuelta || (devuelta !== null && devuelta >= 0n)) &&
     (!forma.requiere_referencia || referencia.trim() !== '') &&
     (!hayDescuento || motivoDescuento.trim().length >= 5)
@@ -696,6 +720,26 @@ function NuevaVenta({
             )}
           </label>
         )}
+        {forma?.usa_cuenta &&
+          (prep.cuentasVenta.length === 0 ? (
+            <div className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              No hay cuentas que reciban ventas. En Bancos, edite una cuenta en RD$ y marque “Recibe transferencias de ventas”.
+            </div>
+          ) : (
+            <label className="flex flex-col gap-1 text-sm text-gray-600">
+              ¿A qué cuenta llegó?
+              <select value={cuentaVenta?.id ?? ''} onChange={(e) => elegirCuenta(e.target.value)} className={CAMPO}>
+                <option value="">Seleccione…</option>
+                {prep.cuentasVenta.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.nombre}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-gray-500">Queda “por confirmar” hasta verla en el estado de cuenta.</span>
+            </label>
+          ))}
         {forma?.requiere_referencia && (
           <label className="flex flex-col gap-1 text-sm text-gray-600">
             Referencia de la {forma.nombre.toLowerCase()}
@@ -914,7 +958,7 @@ function VerDetalle({
           </div>
           <div className="flex gap-2 text-gray-600">
             <Wallet size={16} className="mt-0.5 shrink-0" />
-            Si se cobró en efectivo, el dinero se le devuelve al cliente desde la caja de esta computadora, que debe estar abierta.
+            Si se cobró en efectivo, el dinero se le devuelve al cliente desde la caja de esta computadora, que debe estar abierta. Si fue por transferencia, la devolución sale de la misma cuenta (por confirmar).
           </div>
           <label className="flex flex-col gap-1 text-gray-600">
             Motivo de la anulación

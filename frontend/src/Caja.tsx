@@ -19,6 +19,7 @@ import {
   abrirCaja,
   cerrarCaja,
   crearCaja,
+  depositarDesdeCaja,
   detalleSesionCaja,
   editarCaja,
   estadoCaja,
@@ -27,6 +28,7 @@ import {
   movimientoCaja,
   obtenerCuadre,
   prepararCaja,
+  traerACaja,
 } from './api'
 import type {
   FiltrosSesionesCaja,
@@ -62,6 +64,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   gasto: 'Gasto',
   retiro: 'Retiro',
   ingreso: 'Ingreso',
+  deposito: 'Depósito a cuenta',
+  desde_cuenta: 'Traído de cuenta',
 }
 
 // ---------- Dinero con enteros (solo para el conteo en pantalla) ----------
@@ -361,6 +365,137 @@ function FormMovimiento({
   )
 }
 
+// ---------- Depositar en una cuenta o traer efectivo ----------
+
+const CAMBIADO_POR: [string, string][] = [
+  ['casa_cambio', 'Casa de cambio'],
+  ['agente', 'Agente o MonCash/NatCash'],
+  ['banco', 'El banco'],
+  ['otro', 'Otro'],
+]
+
+function FormCuenta({
+  token,
+  cajaId,
+  sentido,
+  esperado,
+  prep,
+  onListo,
+  onSesionVencida,
+}: {
+  token: string
+  cajaId: string
+  sentido: 'depositar' | 'traer'
+  esperado: string
+  prep: PrepararCaja
+  onListo: () => void
+  onSesionVencida: () => void
+}) {
+  const [cuentaId, setCuentaId] = useState('')
+  const [monto, setMonto] = useState('')
+  const [montoEntra, setMontoEntra] = useState('')
+  const [cambiadoPor, setCambiadoPor] = useState('')
+  const [referencia, setReferencia] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const cuenta = prep.cuentas.find((x) => x.id === cuentaId)
+  const cambia = cuenta !== undefined && cuenta.moneda !== 'DOP'
+  // Al depositar sale RD$ de la caja; al traer sale de la cuenta.
+  const simboloSale = sentido === 'depositar' ? 'RD$' : (cuenta?.simbolo ?? '')
+  const simboloEntra = sentido === 'depositar' ? (cuenta?.simbolo ?? '') : 'RD$'
+  const valido = MONTO.test(monto.trim()) && centavos(monto.trim()) > 0n
+  const pasa = sentido === 'depositar' && valido && centavos(monto.trim()) > centavos(esperado)
+  const listo =
+    cuenta !== undefined &&
+    valido &&
+    !pasa &&
+    (!cambia || (MONTO.test(montoEntra.trim()) && centavos(montoEntra.trim()) > 0n && cambiadoPor !== ''))
+
+  async function enviar(e: FormEvent) {
+    e.preventDefault()
+    setGuardando(true)
+    setError('')
+    const datos = {
+      cuentaId,
+      monto: monto.trim(),
+      montoEntra: cambia ? montoEntra.trim() : undefined,
+      cambiadoPor: cambia ? cambiadoPor : undefined,
+      referencia: referencia.trim() || undefined,
+      motivo: motivo.trim() || undefined,
+    }
+    try {
+      if (sentido === 'depositar') await depositarDesdeCaja(token, cajaId, datos)
+      else await traerACaja(token, cajaId, datos)
+      onListo()
+    } catch (err) {
+      if (err instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <form onSubmit={enviar} className="flex flex-col gap-3 text-sm">
+      <p className="text-gray-600">
+        {sentido === 'depositar'
+          ? `El efectivo sale de la caja ahora (hay ${dinero(esperado)}); en la cuenta queda por confirmar hasta verlo en el estado de cuenta. También sirve para recargar MonCash / NatCash.`
+          : 'Efectivo que se saca de una cuenta y se pone en la caja, por ejemplo para tener cambio.'}
+      </p>
+      <label className="flex flex-col gap-1 text-gray-600">
+        {sentido === 'depositar' ? 'Cuenta donde se deposita' : 'Cuenta de donde sale'}
+        <select value={cuentaId} onChange={(e) => setCuentaId(e.target.value)} className={CAMPO} autoFocus>
+          <option value="">Seleccione…</option>
+          {prep.cuentas.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.nombre} ({x.simbolo})
+            </option>
+          ))}
+        </select>
+      </label>
+      {prep.cuentas.length === 0 && <span className="text-xs text-amber-800">No hay cuentas: créelas en Bancos.</span>}
+      <label className="flex flex-col gap-1 text-gray-600">
+        Monto que sale ({simboloSale || '—'})
+        <input type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
+        {pasa && <span className="text-xs text-red-600">Es más de lo que hay en la caja ({dinero(esperado)}).</span>}
+      </label>
+      {cambia && (
+        <>
+          <label className="flex flex-col gap-1 text-gray-600">
+            Monto que entra ({simboloEntra})
+            <input type="text" inputMode="decimal" value={montoEntra} onChange={(e) => setMontoEntra(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
+          </label>
+          <label className="flex flex-col gap-1 text-gray-600">
+            ¿Quién hizo el cambio de moneda?
+            <select value={cambiadoPor} onChange={(e) => setCambiadoPor(e.target.value)} className={CAMPO}>
+              <option value="">Seleccione…</option>
+              {CAMBIADO_POR.map(([id, t]) => (
+                <option key={id} value={id}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+      <label className="flex flex-col gap-1 text-gray-600">
+        Referencia (opcional)
+        <input type="text" value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Número de la boleta" className={CAMPO} />
+      </label>
+      <label className="flex flex-col gap-1 text-gray-600">
+        Nota (opcional)
+        <input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} className={CAMPO} />
+      </label>
+      {error && <CajaError>{error}</CajaError>}
+      <button type="submit" disabled={guardando || !listo} className={BOTON_PRINCIPAL}>
+        {guardando ? 'Guardando…' : sentido === 'depositar' ? 'Depositar' : 'Traer a la caja'}
+      </button>
+    </form>
+  )
+}
+
 // ---------- Cerrar contando billetes y monedas ----------
 
 function FormCerrar({
@@ -485,7 +620,7 @@ function VerSesion({
 }) {
   const [s, setS] = useState<SesionCaja | null>(null)
   const [error, setError] = useState('')
-  const [accion, setAccion] = useState<'movimiento' | 'cerrar' | null>(null)
+  const [accion, setAccion] = useState<'movimiento' | 'cerrar' | 'depositar' | 'traer' | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -519,6 +654,8 @@ function VerSesion({
         </button>
         {accion === 'movimiento' ? (
           <FormMovimiento token={token} sesionId={s.id} esperado={s.esperado} prep={prep} onListo={listo} onSesionVencida={onSesionVencida} />
+        ) : accion === 'depositar' || accion === 'traer' ? (
+          <FormCuenta token={token} cajaId={s.caja_id} sentido={accion} esperado={s.esperado} prep={prep} onListo={listo} onSesionVencida={onSesionVencida} />
         ) : (
           <FormCerrar token={token} sesion={s} prep={prep} onListo={listo} onSesionVencida={onSesionVencida} />
         )}
@@ -547,9 +684,11 @@ function VerSesion({
         <div className="flex justify-between"><dt className="text-gray-500">Fondo inicial</dt><dd>{dinero(s.fondo_inicial)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">+ Ventas en efectivo ({t.cantidad_ventas})</dt><dd>{dinero(t.ventas)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">+ Ingresos</dt><dd>{dinero(t.ingresos)}</dd></div>
+        <div className="flex justify-between"><dt className="text-gray-500">+ Traído de cuentas</dt><dd>{dinero(t.desde_cuentas)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Gastos</dt><dd>{dinero(t.gastos)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Retiros</dt><dd>{dinero(t.retiros)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Devoluciones</dt><dd>{dinero(t.devoluciones)}</dd></div>
+        <div className="flex justify-between"><dt className="text-gray-500">− Depósitos a cuentas</dt><dd>{dinero(t.depositos)}</dd></div>
       </dl>
       <div className="flex flex-col gap-1 rounded-lg bg-gray-50 p-3">
         <div className="flex justify-between text-base font-medium"><span>Debería haber</span><span>{dinero(s.esperado)}</span></div>
@@ -570,6 +709,16 @@ function VerSesion({
         {abierta && permisos.includes('caja.movimientos') && (
           <button type="button" onClick={() => setAccion('movimiento')} disabled={!prep} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
             <Plus size={16} /> Gasto, retiro o ingreso
+          </button>
+        )}
+        {abierta && permisos.includes('caja.movimientos') && (
+          <button type="button" onClick={() => setAccion('depositar')} disabled={!prep} className={BOTON_SECUNDARIO}>
+            Depositar en banco
+          </button>
+        )}
+        {abierta && permisos.includes('caja.movimientos') && (
+          <button type="button" onClick={() => setAccion('traer')} disabled={!prep} className={BOTON_SECUNDARIO}>
+            Traer de una cuenta
           </button>
         )}
         {abierta && permisos.includes('caja.cerrar') && (
@@ -598,13 +747,13 @@ function VerSesion({
               </thead>
               <tbody>
                 {s.movimientos.map((m) => {
-                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso'
+                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta'
                   return (
                     <tr key={m.id} className="border-t border-gray-100 align-top">
                       <td className="py-1.5 pr-2 whitespace-nowrap text-gray-500">{new Date(m.fecha).toLocaleTimeString('es-DO', { hour: 'numeric', minute: '2-digit' })}</td>
                       <td className="py-1.5 pr-2">{NOMBRE_TIPO[m.tipo] ?? m.tipo}</td>
                       <td className="py-1.5 pr-2 text-gray-600">
-                        {[m.venta, m.categoria, m.comprobante, m.motivo].filter(Boolean).join(' · ')}
+                        {[m.venta, m.cuenta, m.categoria, m.comprobante, m.motivo].filter(Boolean).join(' · ')}
                         <span className="block text-xs text-gray-400">{m.usuario}</span>
                       </td>
                       <td className={`py-1.5 pr-2 text-right whitespace-nowrap font-medium ${suma ? 'text-green-700' : 'text-red-700'}`}>
@@ -755,6 +904,8 @@ function Cajas({
   const [local, setLocal] = useState<string | null>(cajaDeEstaComputadora)
   const [modal, setModal] = useState<Modal | null>(null)
   const gestionar = permisos.includes('caja.gestionar')
+  // Las cajas desactivadas se ocultan salvo que se pidan.
+  const [verInactivas, setVerInactivas] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -783,7 +934,8 @@ function Cajas({
 
   if (!cajas) return error ? <CajaError>{error}</CajaError> : <div className="text-gray-500">Cargando…</div>
   const activas = cajas.filter((c) => c.is_active)
-  const visibles = gestionar ? cajas : activas
+  const inactivas = cajas.length - activas.length
+  const visibles = gestionar && verInactivas ? cajas : activas
   const miCaja = activas.find((c) => c.id === local)
 
   return (
@@ -811,7 +963,12 @@ function Cajas({
       </section>
 
       {gestionar && (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-3">
+          {gestionar && inactivas > 0 && (
+            <button type="button" onClick={() => setVerInactivas(!verInactivas)} className="text-sm text-gray-500 hover:underline">
+              {verInactivas ? 'Ocultar inactivas' : `Mostrar inactivas (${inactivas})`}
+            </button>
+          )}
           <button type="button" onClick={() => setModal({ tipo: 'caja', caja: null })} className={BOTON_SECUNDARIO}>
             <span className="inline-flex items-center gap-2"><Plus size={16} /> Nueva caja</span>
           </button>

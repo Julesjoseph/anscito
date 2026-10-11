@@ -90,16 +90,23 @@ export class CajaService {
   }
 
   async preparar() {
-    const [cats, denom] = await Promise.all([
+    const [cats, denom, cuentas] = await Promise.all([
       this.db.query(
         `SELECT id, codigo, nombre FROM categorias_gasto
          WHERE is_active ORDER BY orden, nombre`,
       ),
       this.config('caja.denominaciones'),
+      // Para depositar o traer efectivo (solo nombre y moneda, sin saldos).
+      this.db.query(
+        `SELECT ct.id, ct.nombre, ct.moneda, mo.simbolo
+         FROM cuentas ct JOIN monedas mo ON mo.codigo = ct.moneda
+         WHERE ct.is_active ORDER BY ct.tipo, lower(ct.nombre)`,
+      ),
     ]);
     return {
       categoriasGasto: cats.rows,
       denominaciones: denom.split(',').map((d) => d.trim()),
+      cuentas: cuentas.rows,
     };
   }
 

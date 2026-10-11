@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-import { SQL_SALDOS } from '../bancos/sql';
+import {
+  SQL_MOVS_CON_ESTADO,
+  SQL_NO_LLEGO_PENDIENTE,
+  SQL_SALDOS,
+} from '../bancos/sql';
 import { SQL_SIGNO_CAJA } from '../caja/sql';
 import {
   SQL_TOTALES_PRODUCTO,
@@ -262,9 +266,11 @@ export class PanelService {
       pendientes: number;
       no_llegaron: number;
     }>(
-      `SELECT COALESCE(sum(s.pendientes), 0)::int AS pendientes,
-              COALESCE(sum(s.no_llegaron), 0)::int AS no_llegaron
-       FROM (${SQL_SALDOS}) s`,
+      `SELECT count(*) FILTER (WHERE x.estado = 'por_confirmar' AND ct.is_active)::int AS pendientes,
+              count(*) FILTER (WHERE ${SQL_NO_LLEGO_PENDIENTE})::int AS no_llegaron
+       FROM ${SQL_MOVS_CON_ESTADO} x
+       JOIN cuentas ct ON ct.id = x.cuenta_id
+       LEFT JOIN ventas v ON v.id = x.venta_id`,
     );
     return { monedas: r.rows, ...avisos.rows[0] };
   }

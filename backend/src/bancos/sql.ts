@@ -28,6 +28,12 @@ export const SQL_DISPONIBLE = `SELECT COALESCE(sum(x.signo * x.monto)
     FILTER (WHERE x.estado <> 'no_llego'), 0)::numeric(14,2) AS disponible
   FROM ${SQL_MOVS_CON_ESTADO} x WHERE x.cuenta_id = $1`;
 
+// "No llegó" que todavía hay que atender: la cuenta sigue activa y, si es
+// el cobro de una venta, la venta no se ha anulado. Usa los alias x
+// (movimiento con estado), ct (cuenta) y v (venta).
+export const SQL_NO_LLEGO_PENDIENTE = `x.estado = 'no_llego' AND ct.is_active
+  AND (v.id IS NULL OR v.estado <> 'anulada')`;
+
 export function numeroTransferencia(n: number | string): string {
   return `T-${String(n).padStart(6, '0')}`;
 }

@@ -118,6 +118,21 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   una venta en efectivo devuelve el dinero desde esa caja (`devolucion`), si
   alcanza. Movimientos inmutables y auditados. Pruebas:
   `scripts/probar-caja.ps1` (caja de prueba que se desactiva al final).
+- **Bancos (Parte 2 de Caja y bancos)** (`/bancos`, pantalla `Bancos.tsx`):
+  cuentas de banco (corriente/ahorro) y billeteras MonCash/NatCash en RD$,
+  US$ o HTG; solo se guardan los últimos 4 dígitos. Saldo inicial (uno por
+  cuenta); pagos con categoría, cargos, intereses y otros ingresos con motivo;
+  errores con reverso (no se reversan cobros de ventas ni transferencias).
+  Cada movimiento guarda tasa (RD$ por unidad) y valor en RD$. Estados:
+  confirmado, por confirmar y "no llegó" (no cuenta en el saldo); se confirma
+  contra el estado de cuenta. Transferencias T-000001 entre cuentas y caja
+  (depósitos, traer efectivo, recargas MonCash con quién hizo el cambio);
+  lo que entra desde caja o con cambio de moneda queda por confirmar. Ventas
+  por transferencia: el cajero elige la cuenta (solo RD$ que `recibe_ventas`),
+  entra por confirmar; al anular se devuelve desde esa cuenta (salvo "no
+  llegó"). Caja: botones "Depositar en banco" y "Traer de una cuenta". Panel:
+  "Dinero en bancos" confirmado por moneda. Pruebas:
+  `scripts/probar-bancos.ps1` (cuentas de prueba que terminan en cero).
 
 ## Pendientes y decisiones abiertas
 
@@ -133,6 +148,9 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   descuenten inventario (ver `docs/notas-ventas.md`).
 - Caja: falta pantalla para administrar las categorías de gasto (hoy fijas
   desde la migración 012) y su cuenta contable (`cuenta_contable_id`).
-- Siguiente: Parte 2 de Caja y bancos, **Bancos** (cuentas bancarias,
-  depósitos desde la caja, transferencias recibidas). Después, según la
-  sección 26: plan de cuentas y motor contable.
+- Bancos: la diferencia cambiaria (valor en RD$ de US$/HTG a tasas
+  distintas) y la "Compra de mercancía" pagada por banco deben validarse con
+  el contador al llegar Contabilidad. Cheques: no se usan por ahora.
+- Siguiente según la sección 26: plan de cuentas y motor contable (requiere
+  validación del contador), o el módulo MonCash/NatCash (07), que usará las
+  billeteras en HTG ya creadas.

@@ -23,6 +23,7 @@ import type { Marca, Perfil } from './api'
 import Empresa from './Empresa'
 import Panel from './Panel'
 import { LogoMarca } from './marca'
+import Bancos from './Bancos'
 import Caja from './Caja'
 import Categorias from './Categorias'
 import Inventario from './Inventario'
@@ -77,7 +78,13 @@ const MODULOS: Modulo[] = [
     listo: true,
     permiso: 'caja.ver',
   },
-  { id: 'bancos', nombre: 'Bancos', Icono: Landmark, listo: false },
+  {
+    id: 'bancos',
+    nombre: 'Bancos',
+    Icono: Landmark,
+    listo: true,
+    permiso: 'bancos.ver',
+  },
   { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
   { id: 'moncash', nombre: 'MonCash / NatCash', Icono: Smartphone, listo: false },
   { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
@@ -239,6 +246,12 @@ export default function Layout({
           />
         ) : pagina === 'roles' ? (
           <Roles
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'bancos' ? (
+          <Bancos
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

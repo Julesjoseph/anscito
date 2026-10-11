@@ -13,6 +13,7 @@ import {
   numeroTransferencia,
   SQL_DISPONIBLE,
   SQL_MOVS_CON_ESTADO,
+  SQL_NO_LLEGO_PENDIENTE,
   SQL_SALDOS,
 } from './sql';
 
@@ -885,14 +886,15 @@ export class BancosService {
     };
   }
 
-  // Lo que falta confirmar y lo que "no llegó" (para revisar).
+  // Lo que falta confirmar y lo que "no llegó" y todavía hay que atender
+  // (el historial completo queda en los movimientos de cada cuenta).
   async pendientes() {
     const [pend, nollego] = await Promise.all([
       this.db.query(
         `${this.SQL_LISTA} WHERE x.estado = 'por_confirmar' ORDER BY x.fecha, x.id LIMIT 300`,
       ),
       this.db.query(
-        `${this.SQL_LISTA} WHERE x.estado = 'no_llego' ORDER BY x.confirmado_en DESC LIMIT 100`,
+        `${this.SQL_LISTA} WHERE ${SQL_NO_LLEGO_PENDIENTE} ORDER BY x.confirmado_en DESC LIMIT 100`,
       ),
     ]);
     return { porConfirmar: pend.rows, noLlegaron: nollego.rows };
