@@ -1,0 +1,453 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import type { PoolClient } from 'pg';
+import { registrarAuditoria } from '../auditoria/auditoria';
+import { DatabaseService } from '../database/database.service';
+import { calcularItbis, normalizarMonto } from './calculo-itbis';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CODIGO = /^[A-Z0-9._-]{2,30}$/;
+
+// Tasa vigente hoy de un impuesto (subconsulta reutilizable).
+const SQL_TASA_VIGENTE = `(SELECT t.tasa FROM impuesto_tasas t
+   WHERE t.impuesto_id = i.id
+     AND t.vigente_desde <= current_date
+     AND (t.vigente_hasta IS NULL OR t.vigente_hasta >= current_date)
+   ORDER BY t.vigente_desde DESC LIMIT 1)`;
+
+export type DatosServicio = {
+  codigo?: unknown;
+  nombre?: unknown;
+  descripcion?: unknown;
+  unidadNegocioId?: unknown;
+  unidadMedidaId?: unknown;
+  precio?: unknown;
+  costo?: unknown;
+  impuestoId?: unknown;
+  precioIncluyeItbis?: unknown;
+};
+
+export type Filtros = {
+  texto?: string;
+  unidadNegocioId?: string;
+  estado?: string;
+};
+
+type Limpio = {
+  codigo: string;
+  nombre: string;
+  descripcion: string | null;
+  unidad_negocio_id: string;
+  unidad_medida_id: string;
+  precio: string;
+  costo: string | null;
+  impuesto_id: string;
+  precio_incluye_itbis: boolean;
+};
+
+type FilaServicio = Limpio & {
+  id: string;
+  unidad_negocio: string;
+  unidad_medida: string;
+  impuesto: string;
+  is_active: boolean;
+};
+
+function texto(v: unknown): string {
+  return typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
+}
+
+@Injectable()
+export class ServiciosService {
+  constructor(private readonly db: DatabaseService) {}
+
+  // Valida y normaliza lo que llega de la pantalla.
+  validar(datos: DatosServicio): Limpio {
+    const codigo = texto(datos.codigo).toUpperCase();
+    const nombre = texto(datos.nombre);
+    const descripcion = texto(datos.descripcion);
+    const unidadNegocioId = texto(datos.unidadNegocioId).toLowerCase();
+    const unidadMedidaId = texto(datos.unidadMedidaId).toLowerCase();
+    const impuestoId = texto(datos.impuestoId).toLowerCase();
+
+    if (!CODIGO.test(codigo)) {
+      throw new BadRequestException(
+        'Código inválido: use 2 a 30 letras, números, punto, guion o guion bajo (ej: IMP-BN-01)',
+      );
+    }
+    if (!nombre || nombre.length > 150) {
+      throw new BadRequestException(
+        'El nombre es obligatorio (máximo 150 caracteres)',
+      );
+    }
+    if (descripcion.length > 1000) {
+      throw new BadRequestException(
+        'La descripción no puede pasar de 1000 caracteres',
+      );
+    }
+    if (!UUID.test(unidadNegocioId)) {
+      throw new BadRequestException('Seleccione la unidad de negocio');
+    }
+    if (!UUID.test(unidadMedidaId)) {
+      throw new BadRequestException('Seleccione la unidad de medida');
+    }
+    if (!UUID.test(impuestoId)) {
+      throw new BadRequestException('Seleccione el impuesto');
+    }
+
+    const precio = normalizarMonto(datos.precio);
+    if (precio === null) {
+      throw new BadRequestException(
+        'Precio inválido: debe ser un número no negativo con hasta 2 decimales',
+      );
+    }
+
+    let costo: string | null = null;
+    if (texto(datos.costo) !== '') {
+      costo = normalizarMonto(datos.costo);
+      if (costo === null) {
+        throw new BadRequestException(
+          'Costo inválido: debe ser un número no negativo con hasta 2 decimales',
+        );
+      }
+    }
+
+    if (typeof datos.precioIncluyeItbis !== 'boolean') {
+      throw new BadRequestException(
+        'Indique si el precio incluye ITBIS (sí o no)',
+      );
+    }
+
+    return {
+      codigo,
+      nombre,
+      descripcion: descripcion || null,
+      unidad_negocio_id: unidadNegocioId,
+      unidad_medida_id: unidadMedidaId,
+      precio,
+      costo,
+      impuesto_id: impuestoId,
+      precio_incluye_itbis: datos.precioIncluyeItbis,
+    };
+  }
+
+  async listar(filtros: Filtros) {
+    const condiciones: string[] = [];
+    const params: unknown[] = [];
+
+    const buscar = texto(filtros.texto);
+    if (buscar) {
+      params.push(`%${buscar.replace(/[\\%_]/g, (c) => '\\' + c)}%`);
+      condiciones.push(
+        `(s.codigo ILIKE $${params.length} OR s.nombre ILIKE $${params.length})`,
+      );
+    }
+    const unidad = texto(filtros.unidadNegocioId);
+    if (unidad) {
+      if (!UUID.test(unidad)) {
+        throw new BadRequestException('Unidad de negocio inválida');
+      }
+      params.push(unidad);
+      condiciones.push(`s.unidad_negocio_id = $${params.length}`);
+    }
+    const estado = texto(filtros.estado) || 'activos';
+    if (estado === 'activos') condiciones.push('s.is_active = true');
+    else if (estado === 'inactivos') condiciones.push('s.is_active = false');
+    else if (estado !== 'todos') {
+      throw new BadRequestException('Estado inválido');
+    }
+
+    const r = await this.db.query<FilaServicio & { tasa: string | null }>(
+      `SELECT s.id, s.codigo, s.nombre, s.descripcion,
+              s.unidad_negocio_id, un.nombre AS unidad_negocio,
+              s.unidad_medida_id, um.nombre AS unidad_medida,
+              s.precio, s.costo, s.impuesto_id, i.nombre AS impuesto,
+              ${SQL_TASA_VIGENTE} AS tasa,
+              s.precio_incluye_itbis, s.is_active
+       FROM servicios s
+       JOIN unidades_negocio un ON un.id = s.unidad_negocio_id
+       JOIN unidades_medida um ON um.id = s.unidad_medida_id
+       JOIN impuestos i ON i.id = s.impuesto_id
+       ${condiciones.length ? 'WHERE ' + condiciones.join(' AND ') : ''}
+       ORDER BY s.codigo`,
+      params,
+    );
+
+    // El servidor calcula base, ITBIS y total; nunca la pantalla.
+    return r.rows.map((f) => ({
+      ...f,
+      calculo:
+        f.tasa === null
+          ? null
+          : calcularItbis(f.precio, f.tasa, f.precio_incluye_itbis),
+    }));
+  }
+
+  async catalogos() {
+    const [unidadesNegocio, unidadesMedida, impuestos] = await Promise.all([
+      this.db.query(
+        `SELECT id, codigo, nombre FROM unidades_negocio
+         WHERE is_active = true ORDER BY nombre`,
+      ),
+      this.db.query(
+        `SELECT id, codigo, nombre FROM unidades_medida
+         WHERE is_active = true ORDER BY nombre`,
+      ),
+      this.db.query(
+        `SELECT i.id, i.codigo, i.nombre, ${SQL_TASA_VIGENTE} AS tasa
+         FROM impuestos i
+         WHERE i.is_active = true
+         ORDER BY i.nombre`,
+      ),
+    ]);
+    return {
+      unidadesNegocio: unidadesNegocio.rows,
+      unidadesMedida: unidadesMedida.rows,
+      impuestos: impuestos.rows.filter(
+        (i: { tasa: string | null }) => i.tasa !== null,
+      ),
+    };
+  }
+
+  // Para que la pantalla verifique su vista previa contra el servidor.
+  async calcular(datos: {
+    precio?: unknown;
+    impuestoId?: unknown;
+    precioIncluyeItbis?: unknown;
+  }) {
+    const precio = normalizarMonto(datos.precio);
+    if (precio === null) throw new BadRequestException('Precio inválido');
+    const impuestoId = texto(datos.impuestoId);
+    if (!UUID.test(impuestoId)) {
+      throw new BadRequestException('Seleccione el impuesto');
+    }
+    if (typeof datos.precioIncluyeItbis !== 'boolean') {
+      throw new BadRequestException('Indique si el precio incluye ITBIS');
+    }
+    const tasa = await this.tasaVigente(this.db, impuestoId);
+    return { tasa, ...calcularItbis(precio, tasa, datos.precioIncluyeItbis) };
+  }
+
+  // Comprueba que las listas y el impuesto existan, estén activos y vigentes.
+  private async verificarReferencias(c: PoolClient, d: Limpio) {
+    const un = await c.query(
+      'SELECT 1 FROM unidades_negocio WHERE id = $1 AND is_active = true',
+      [d.unidad_negocio_id],
+    );
+    if (un.rowCount === 0) {
+      throw new BadRequestException('La unidad de negocio no existe');
+    }
+    const um = await c.query(
+      'SELECT 1 FROM unidades_medida WHERE id = $1 AND is_active = true',
+      [d.unidad_medida_id],
+    );
+    if (um.rowCount === 0) {
+      throw new BadRequestException('La unidad de medida no existe');
+    }
+    await this.tasaVigente(c, d.impuesto_id);
+  }
+
+  private async tasaVigente(
+    c: Pick<DatabaseService, 'query'>,
+    impuestoId: string,
+  ): Promise<string> {
+    const r = await c.query<{ tasa: string | null }>(
+      `SELECT ${SQL_TASA_VIGENTE} AS tasa
+       FROM impuestos i WHERE i.id = $1 AND i.is_active = true`,
+      [impuestoId],
+    );
+    if (r.rowCount === 0) {
+      throw new BadRequestException('El impuesto no existe o está inactivo');
+    }
+    const tasa = r.rows[0].tasa;
+    if (tasa === null) {
+      throw new BadRequestException(
+        'El impuesto no tiene una tasa vigente hoy',
+      );
+    }
+    return tasa;
+  }
+
+  async crear(actorId: string, ip: string | undefined, datos: DatosServicio) {
+    const d = this.validar(datos);
+    try {
+      return await this.db.transaccion(async (c) => {
+        await this.verificarReferencias(c, d);
+        const r = await c.query<{ id: string }>(
+          `INSERT INTO servicios
+             (codigo, nombre, descripcion, unidad_negocio_id, unidad_medida_id,
+              precio, costo, impuesto_id, precio_incluye_itbis, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING id`,
+          [
+            d.codigo,
+            d.nombre,
+            d.descripcion,
+            d.unidad_negocio_id,
+            d.unidad_medida_id,
+            d.precio,
+            d.costo,
+            d.impuesto_id,
+            d.precio_incluye_itbis,
+            actorId,
+          ],
+        );
+        const id = r.rows[0].id;
+        await registrarAuditoria(c, {
+          usuarioId: actorId,
+          accion: 'servicio.crear',
+          entidad: 'servicios',
+          entidadId: id,
+          nuevo: d,
+          ip,
+        });
+        return { id };
+      });
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505') {
+        throw new ConflictException('Ese código de servicio ya existe');
+      }
+      throw e;
+    }
+  }
+
+  async editar(
+    actorId: string,
+    id: string,
+    ip: string | undefined,
+    datos: DatosServicio,
+  ) {
+    if (!UUID.test(id)) throw new NotFoundException('Servicio no encontrado');
+    const d = this.validar(datos);
+
+    try {
+      return await this.db.transaccion(async (c) => {
+        const r = await c.query<Limpio>(
+          `SELECT codigo, nombre, descripcion, unidad_negocio_id,
+                  unidad_medida_id, precio, costo, impuesto_id,
+                  precio_incluye_itbis
+           FROM servicios WHERE id = $1 FOR UPDATE`,
+          [id],
+        );
+        if (r.rowCount === 0) {
+          throw new NotFoundException('Servicio no encontrado');
+        }
+        const antes = r.rows[0];
+        await this.verificarReferencias(c, d);
+
+        await c.query(
+          `UPDATE servicios
+           SET codigo = $2, nombre = $3, descripcion = $4,
+               unidad_negocio_id = $5, unidad_medida_id = $6,
+               precio = $7, costo = $8, impuesto_id = $9,
+               precio_incluye_itbis = $10, updated_at = now()
+           WHERE id = $1`,
+          [
+            id,
+            d.codigo,
+            d.nombre,
+            d.descripcion,
+            d.unidad_negocio_id,
+            d.unidad_medida_id,
+            d.precio,
+            d.costo,
+            d.impuesto_id,
+            d.precio_incluye_itbis,
+          ],
+        );
+
+        // Cada tipo de cambio queda como un registro de auditoría distinto,
+        // para que los cambios de precio, costo e impuesto se vean claros.
+        const grupos: { accion: string; campos: (keyof Limpio)[] }[] = [
+          { accion: 'servicio.cambiar_precio', campos: ['precio'] },
+          { accion: 'servicio.cambiar_costo', campos: ['costo'] },
+          {
+            accion: 'servicio.cambiar_impuesto',
+            campos: ['impuesto_id', 'precio_incluye_itbis'],
+          },
+          {
+            accion: 'servicio.editar',
+            campos: [
+              'codigo',
+              'nombre',
+              'descripcion',
+              'unidad_negocio_id',
+              'unidad_medida_id',
+            ],
+          },
+        ];
+
+        for (const g of grupos) {
+          const cambiados = g.campos.filter((k) => antes[k] !== d[k]);
+          if (cambiados.length === 0) continue;
+          await registrarAuditoria(c, {
+            usuarioId: actorId,
+            accion: g.accion,
+            entidad: 'servicios',
+            entidadId: id,
+            anterior: Object.fromEntries(cambiados.map((k) => [k, antes[k]])),
+            nuevo: Object.fromEntries(cambiados.map((k) => [k, d[k]])),
+            ip,
+          });
+        }
+
+        return { ok: true };
+      });
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505') {
+        throw new ConflictException('Ese código de servicio ya existe');
+      }
+      throw e;
+    }
+  }
+
+  async cambiarEstado(
+    actorId: string,
+    id: string,
+    activo: unknown,
+    motivo: unknown,
+    ip: string | undefined,
+  ) {
+    if (!UUID.test(id)) throw new NotFoundException('Servicio no encontrado');
+    if (typeof activo !== 'boolean') {
+      throw new BadRequestException('Estado inválido');
+    }
+    const textoMotivo = texto(motivo);
+    if (!activo && textoMotivo.length < 5) {
+      throw new BadRequestException(
+        'Escriba el motivo de la desactivación (mínimo 5 caracteres)',
+      );
+    }
+
+    return this.db.transaccion(async (c) => {
+      const r = await c.query<{ codigo: string; is_active: boolean }>(
+        'SELECT codigo, is_active FROM servicios WHERE id = $1 FOR UPDATE',
+        [id],
+      );
+      if (r.rowCount === 0)
+        throw new NotFoundException('Servicio no encontrado');
+      const antes = r.rows[0];
+      if (antes.is_active === activo) return { ok: true };
+
+      await c.query(
+        'UPDATE servicios SET is_active = $2, updated_at = now() WHERE id = $1',
+        [id, activo],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: activo ? 'servicio.activar' : 'servicio.desactivar',
+        entidad: 'servicios',
+        entidadId: id,
+        anterior: { codigo: antes.codigo, is_active: antes.is_active },
+        nuevo: { codigo: antes.codigo, is_active: activo },
+        motivo: textoMotivo || undefined,
+        ip,
+      });
+      return { ok: true };
+    });
+  }
+}
