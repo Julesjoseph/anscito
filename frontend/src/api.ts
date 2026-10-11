@@ -23,6 +23,8 @@ export type FilaUsuario = {
   locked_until: string | null
   roles: string
   rol_id: string | null
+  // Todos sus roles (los permisos son la suma de todos).
+  rol_ids: string[]
   sucursal_id: string | null
   sucursal: string | null
 }
@@ -72,7 +74,7 @@ export const crearUsuario = (
     nombre: string
     apellido: string
     password: string
-    rolId: string
+    rolIds: string[]
     sucursalId: string
   },
 ) => llamar<{ id: string }>('POST', '/usuarios', token, datos)
@@ -80,7 +82,7 @@ export const crearUsuario = (
 export const editarUsuario = (
   token: string,
   id: string,
-  datos: { nombre: string; apellido: string; rolId: string; sucursalId: string },
+  datos: { nombre: string; apellido: string; rolIds: string[]; sucursalId: string },
 ) => llamar<{ ok: boolean }>('PATCH', `/usuarios/${id}`, token, datos)
 
 export const cambiarEstadoUsuario = (
@@ -1086,6 +1088,28 @@ export type ResumenPanel = {
     abiertas: { caja: string; usuario: string; abierta_en: string; esperado: string }[]
     total: string
   }
+  servicios?: {
+    cantidad: string
+    ventas: number
+    total: string
+    base: string
+    mas_vendido: { descripcion: string; cantidad: string; total: string } | null
+    // Solo con el permiso de ver costos.
+    ganancia?: string
+  }
+  remesas?: {
+    confirmados: number
+    enviado: string
+    recibido: string
+    pendientes: number
+    rechazados: number
+    // Solo con el permiso de cuentas de agentes.
+    comision?: string
+    comision_agentes?: string
+    comision_scito?: string
+    agentes_deben?: string
+    agentes_con_deuda?: number
+  }
   inventario?: {
     productos: number
     bajo: number
@@ -1380,6 +1404,10 @@ export type MovimientoCuenta = {
   monto_entra: string | null
   cambiado_por: string | null
   reversado: boolean
+  // Número del envío (E-000001) si salió de una billetera por un envío.
+  envio: string | null
+  // Viene de Envíos (envío, entrega o comisión): no se reversa desde Bancos.
+  de_envios: boolean
 }
 
 export type PaginaMovimientosCuenta = {
@@ -1514,3 +1542,311 @@ export const transferirDinero = (token: string, datos: DatosTransferencia) =>
     token,
     datos,
   )
+
+// ---------- Envíos a Haití (remesas) ----------
+
+export type TarifaEnvio = { tasa: string; comision_pct: string; comision_agente_pct: string }
+
+export type AgenteOpcion = { id: string; codigo: string; nombre: string; tipo: 'propio' | 'autorizado' }
+
+export type PrepararEnvios = {
+  tarifa: TarifaEnvio
+  motivos: { id: string; codigo: string; nombre: string }[]
+  agentes: AgenteOpcion[]
+  billeteras: { id: string; nombre: string; entidad: string }[]
+  documentoDesde: string
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
+  cuentasPesos: { id: string; nombre: string }[]
+  verDocumento: boolean
+}
+
+export type CalculoEnvio = {
+  monto_enviado: string
+  tasa: string
+  monto_recibir: string
+  comision_pct: string
+  comision: string
+  total_pagar: string
+  comision_agente_pct: string
+  comision_agente: string
+  comision_scito: string
+}
+
+export type EstadoEnvio = 'pendiente' | 'confirmado' | 'rechazado'
+
+export type FilaEnvio = {
+  id: string
+  numero_texto: string
+  fecha: string
+  origen: 'sistema' | 'importado'
+  estado: EstadoEnvio
+  agente_id: string
+  agente_codigo: string
+  agente: string
+  agente_tipo: string
+  remitente_id: string | null
+  remitente_nombre: string
+  remitente_telefono: string | null
+  remitente_documento: string | null
+  remitente_tipo_documento: string | null
+  beneficiario_nombre: string
+  beneficiario_telefono: string | null
+  parentesco: string | null
+  motivo_envio: string | null
+  billetera: string | null
+  monto_enviado: string
+  tasa: string
+  monto_recibir: string
+  comision_pct: string
+  comision: string
+  total_pagar: string
+  comision_agente_pct: string
+  comision_agente: string
+  codigo_externo: string | null
+  motivo_rechazo: string | null
+  resuelto_en: string | null
+  resuelto_por: string | null
+  registrado_por: string
+  pago_comision_id: string | null
+  notas: string | null
+}
+
+export type PaginaEnvios = {
+  filas: FilaEnvio[]
+  total: number
+  resumen: { n: number; enviado: string; comision: string; total: string }
+  pagina: number
+  porPagina: number
+}
+
+export type FiltrosEnvios = {
+  estado: 'todos' | EstadoEnvio
+  agenteId: string
+  desde: string
+  hasta: string
+  texto: string
+  pagina: number
+}
+
+export type DatosEnvio = {
+  agenteId: string
+  remitenteId: string
+  beneficiarioId?: string
+  beneficiarioNuevo?: { nombre: string; telefono: string }
+  parentesco: string
+  motivoEnvioId: string
+  cuentaId: string
+  montoEnviado: string
+  notas?: string
+}
+
+export type BeneficiarioOpcion = {
+  id: string
+  nombre: string
+  telefono: string | null
+  ultimo_envio: string | null
+}
+
+export type FilaAgente = {
+  id: string
+  codigo: string
+  nombre: string
+  telefono: string | null
+  tipo: 'propio' | 'autorizado'
+  frecuencia_pago: 'semanal' | 'quincenal' | 'mensual' | null
+  grupo_whatsapp: string | null
+  notas: string | null
+  is_active: boolean
+}
+
+export type DatosAgente = {
+  codigo?: string
+  nombre: string
+  telefono: string
+  tipo: 'propio' | 'autorizado'
+  frecuenciaPago: string
+  grupoWhatsapp: string
+  notas: string
+}
+
+export type CuentaAgente = {
+  id: string
+  codigo: string
+  nombre: string
+  tipo: 'propio' | 'autorizado'
+  frecuencia_pago: string | null
+  is_active: boolean
+  cobrado: string
+  entregado: string
+  debe: string
+  pendientes: number
+  comision_pendiente: string
+  envios_sin_pagar: number
+  ultimo_pago: string | null
+}
+
+export type ReporteDiaAgente = {
+  id: string
+  codigo: string
+  nombre: string
+  tipo: string
+  confirmados: number
+  pendientes: number
+  rechazados: number
+  enviado: string
+  comision: string
+  comision_agente: string
+  a_entregar: string
+  entregado: string
+  saldo_total: string
+}
+
+export type MovimientosAgente = {
+  agente: CuentaAgente
+  entregas: {
+    id: string
+    dia: string
+    monto: string
+    forma: 'efectivo' | 'deposito'
+    referencia: string | null
+    notas: string | null
+    created_at: string
+    usuario: string
+  }[]
+  pagos: {
+    id: string
+    desde: string
+    hasta: string
+    cantidad: number
+    monto: string
+    forma: 'efectivo' | 'banco'
+    referencia: string | null
+    created_at: string
+    usuario: string
+  }[]
+}
+
+export type FilaTarifa = TarifaEnvio & {
+  id: string
+  vigente_desde: string
+  motivo: string | null
+  usuario: string | null
+}
+
+export const prepararEnvios = (token: string) =>
+  llamar<PrepararEnvios>('GET', '/remesas/preparar', token)
+
+export const calcularEnvio = (token: string, datos: { agenteId: string; montoEnviado: string }) =>
+  llamar<CalculoEnvio>('POST', '/remesas/calcular', token, datos)
+
+export const registrarEnvio = (token: string, datos: DatosEnvio) =>
+  llamar<CalculoEnvio & { id: string; numero: string }>('POST', '/remesas/envios', token, datos)
+
+export const listarEnvios = (token: string, f: FiltrosEnvios) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.agenteId) q.set('agenteId', f.agenteId)
+  if (f.desde) q.set('desde', f.desde)
+  if (f.hasta) q.set('hasta', f.hasta)
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  return llamar<PaginaEnvios>('GET', `/remesas/envios?${q.toString()}`, token)
+}
+
+export const detalleEnvio = (token: string, id: string) =>
+  llamar<FilaEnvio>('GET', `/remesas/envios/${id}`, token)
+
+export const confirmarEnvio = (token: string, id: string, codigoExterno: string) =>
+  llamar<{ ok: boolean }>('POST', `/remesas/envios/${id}/confirmar`, token, { codigoExterno })
+
+export const rechazarEnvio = (token: string, id: string, motivo: string) =>
+  llamar<{ ok: boolean }>('POST', `/remesas/envios/${id}/rechazar`, token, { motivo })
+
+export async function obtenerReciboEnvio(
+  token: string,
+  id: string,
+  formato: FormatoRecibo,
+): Promise<Blob> {
+  const res = await fetch(`${API_URL}/remesas/envios/${id}/recibo?formato=${formato}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el recibo')
+  }
+  return res.blob()
+}
+
+export const buscarBeneficiarios = (token: string, texto: string) =>
+  llamar<BeneficiarioOpcion[]>(
+    'GET',
+    `/remesas/beneficiarios?${new URLSearchParams({ texto }).toString()}`,
+    token,
+  )
+
+export const listarAgentes = (token: string) =>
+  llamar<FilaAgente[]>('GET', '/remesas/agentes', token)
+
+export const crearAgente = (token: string, datos: DatosAgente) =>
+  llamar<{ id: string }>('POST', '/remesas/agentes', token, datos)
+
+export const editarAgente = (token: string, id: string, datos: DatosAgente) =>
+  llamar<{ ok: boolean }>('PATCH', `/remesas/agentes/${id}`, token, datos)
+
+export const estadoAgente = (token: string, id: string, isActive: boolean, motivo?: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/remesas/agentes/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+export const cuentasAgentes = (token: string) =>
+  llamar<CuentaAgente[]>('GET', '/remesas/cuentas-agentes', token)
+
+export const movimientosAgente = (token: string, id: string) =>
+  llamar<MovimientosAgente>('GET', `/remesas/cuentas-agentes/${id}`, token)
+
+export const reporteDiaEnvios = (token: string, dia: string) =>
+  llamar<{ dia: string; agentes: ReporteDiaAgente[] }>(
+    'GET',
+    `/remesas/reporte-dia${dia ? `?dia=${dia}` : ''}`,
+    token,
+  )
+
+export const registrarEntregaAgente = (
+  token: string,
+  datos: {
+    agenteId: string
+    dia: string
+    monto: string
+    forma: 'efectivo' | 'deposito'
+    cajaId?: string
+    cuentaId?: string
+    referencia?: string
+    notas?: string
+  },
+) => llamar<{ id: string; debe: string }>('POST', '/remesas/entregas', token, datos)
+
+export const pagarComisionesAgente = (
+  token: string,
+  datos: {
+    agenteId: string
+    hasta: string
+    forma: 'efectivo' | 'banco'
+    cajaId?: string
+    cuentaId?: string
+    referencia?: string
+  },
+) =>
+  llamar<{ id: string; monto: string; envios: number; desde: string; hasta: string }>(
+    'POST',
+    '/remesas/pagos-comision',
+    token,
+    datos,
+  )
+
+export const listarTarifas = (token: string) =>
+  llamar<FilaTarifa[]>('GET', '/remesas/tarifas', token)
+
+export const nuevaTarifa = (
+  token: string,
+  datos: { tasa: string; comisionPct: string; comisionAgentePct: string; motivo: string },
+) => llamar<{ id: string }>('POST', '/remesas/tarifas', token, datos)

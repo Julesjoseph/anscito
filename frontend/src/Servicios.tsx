@@ -832,7 +832,7 @@ export default function Servicios({ token, permisos, onSesionVencida }: Props) {
   return (
     <div>
       <div className="mb-4">
-        <h1 className="mb-1 text-xl font-medium">Servicios</h1>
+        <h1 className="mb-1 text-xl font-medium">SCITO SERVICE</h1>
         <p className="text-sm text-gray-500">
           Catálogo de servicios que ofrece la empresa, con su precio e impuesto.
         </p>

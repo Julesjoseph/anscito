@@ -21,6 +21,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { Marca, Perfil } from './api'
 import Empresa from './Empresa'
+import Envios from './Envios'
 import Panel from './Panel'
 import { LogoMarca } from './marca'
 import Bancos from './Bancos'
@@ -52,7 +53,7 @@ const MODULOS: Modulo[] = [
   },
   {
     id: 'servicios',
-    nombre: 'Servicios',
+    nombre: 'SCITO SERVICE',
     Icono: ClipboardList,
     listo: true,
     permiso: 'servicios.ver',
@@ -86,7 +87,13 @@ const MODULOS: Modulo[] = [
     permiso: 'bancos.ver',
   },
   { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
-  { id: 'moncash', nombre: 'MonCash / NatCash', Icono: Smartphone, listo: false },
+  {
+    id: 'envios',
+    nombre: 'SCITO TRANSFER',
+    Icono: Smartphone,
+    listo: true,
+    permiso: 'remesas.ver',
+  },
   { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
   { id: 'nomina', nombre: 'Nómina', Icono: Briefcase, listo: false },
   { id: 'reportes', nombre: 'Reportes', Icono: FileText, listo: false },
@@ -246,6 +253,12 @@ export default function Layout({
           />
         ) : pagina === 'roles' ? (
           <Roles
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'envios' ? (
+          <Envios
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

@@ -3,7 +3,9 @@ import type { ReactNode } from 'react'
 import {
   AlertTriangle,
   ArrowDownRight,
+  ClipboardList,
   Landmark,
+  Send,
   ArrowUpRight,
   Package,
   PackageX,
@@ -121,6 +123,8 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
   const inv = datos?.inventario
   const caja = datos?.caja
   const bancos = datos?.bancos
+  const envios = datos?.remesas
+  const serv = datos?.servicios
   const cambio = v ? variacion(v.total, v.total_anterior) : null
 
   return (
@@ -165,7 +169,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
       {error && <CajaError>{error}</CajaError>}
       {!datos && !error && <div className="text-gray-500">Cargando…</div>}
 
-      {datos && !v && !inv && !caja && !bancos && (
+      {datos && !v && !inv && !caja && !bancos && !envios && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
           Su usuario no tiene permisos para ver indicadores de ventas, caja ni
           inventario. Pídale al administrador que se los asigne en Roles y
@@ -173,7 +177,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
         </div>
       )}
 
-      {(v || inv || caja || bancos) && (
+      {(v || inv || caja || bancos || envios) && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {v && (
             <Tarjeta
@@ -300,6 +304,52 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
             >
               <button type="button" onClick={() => onIr('bancos')} className="self-start text-xs text-[#C8102E] hover:underline">
                 Ver bancos
+              </button>
+            </Tarjeta>
+          )}
+          {serv && (
+            <Tarjeta
+              titulo="SCITO SERVICE"
+              icono={<ClipboardList size={16} />}
+              valor={dinero(serv.total)}
+              detalle={
+                <>
+                  {cantidad(serv.cantidad)} servicio(s) en {serv.ventas} venta{serv.ventas === 1 ? '' : 's'}
+                  {serv.ganancia !== undefined && <span className="block">Ganancia {dinero(serv.ganancia)} (sin ITBIS)</span>}
+                  {serv.mas_vendido && (
+                    <span className="block">
+                      Más vendido: {serv.mas_vendido.descripcion} ({cantidad(serv.mas_vendido.cantidad)})
+                    </span>
+                  )}
+                </>
+              }
+            >
+              <button type="button" onClick={() => onIr('servicios')} className="self-start text-xs text-[#C8102E] hover:underline">
+                Ver servicios
+              </button>
+            </Tarjeta>
+          )}
+          {envios && (
+            <Tarjeta
+              titulo="SCITO TRANSFER"
+              alerta={envios.pendientes > 0}
+              icono={<Send size={16} />}
+              valor={`${envios.confirmados} envío${envios.confirmados === 1 ? '' : 's'}`}
+              detalle={
+                <>
+                  Enviado {dinero(envios.enviado)} · recibieron HTG {dinero(envios.recibido).slice(3)}
+                  {envios.comision_scito !== undefined && (
+                    <span className="block">Comisión para SCITO {dinero(envios.comision_scito)} (agentes {dinero(envios.comision_agentes ?? '0.00')})</span>
+                  )}
+                  {envios.pendientes > 0 && <span className="block text-amber-700">{envios.pendientes} pendiente(s) de confirmar</span>}
+                  {envios.agentes_deben !== undefined && centavos(envios.agentes_deben) > 0n && (
+                    <span className="block text-red-700">Agentes deben {dinero(envios.agentes_deben)} ({envios.agentes_con_deuda})</span>
+                  )}
+                </>
+              }
+            >
+              <button type="button" onClick={() => onIr('envios')} className="self-start text-xs text-[#C8102E] hover:underline">
+                Ver envíos
               </button>
             </Tarjeta>
           )}

@@ -110,7 +110,7 @@ function FormUsuario({
   const [nombre, setNombre] = useState(fila?.nombre ?? '')
   const [apellido, setApellido] = useState(fila?.apellido ?? '')
   const [password, setPassword] = useState('')
-  const [rolId, setRolId] = useState(fila?.rol_id ?? '')
+  const [rolIds, setRolIds] = useState<string[]>(fila?.rol_ids ?? [])
   // Los usuarios nuevos empiezan en la sucursal principal.
   const [sucursalId, setSucursalId] = useState(
     fila?.sucursal_id ?? sucursales.find((s) => s.es_principal)?.id ?? '',
@@ -124,14 +124,14 @@ function FormUsuario({
     setGuardando(true)
     try {
       if (fila) {
-        await editarUsuario(token, fila.id, { nombre, apellido, rolId, sucursalId })
+        await editarUsuario(token, fila.id, { nombre, apellido, rolIds, sucursalId })
       } else {
         await crearUsuario(token, {
           username,
           nombre,
           apellido,
           password,
-          rolId,
+          rolIds,
           sucursalId,
         })
       }
@@ -195,21 +195,38 @@ function FormUsuario({
           <span className="text-xs text-gray-400">Mínimo 10 caracteres</span>
         </label>
       )}
-      <label className="flex flex-col gap-1 text-sm text-gray-600">
-        Rol
-        <select
-          value={rolId}
-          onChange={(e) => setRolId(e.target.value)}
-          className={CAMPO}
-        >
-          <option value="">Seleccione un rol</option>
+      <fieldset className="flex flex-col gap-1 text-sm text-gray-600">
+        <legend className="mb-1">Roles</legend>
+        <div className="grid grid-cols-1 gap-1 rounded-lg border border-gray-300 p-2 sm:grid-cols-2">
           {roles.map((r) => (
-            <option key={r.id} value={r.id}>
+            <label key={r.id} className="flex items-center gap-2 rounded px-1 py-1 text-gray-800 hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={rolIds.includes(r.id)}
+                onChange={(e) =>
+                  setRolIds(
+                    e.target.checked
+                      ? [...rolIds, r.id]
+                      : rolIds.filter((x) => x !== r.id),
+                  )
+                }
+              />
               {r.nombre}
-            </option>
+            </label>
           ))}
-        </select>
-      </label>
+          {/* Roles que ya tenía y hoy están inactivos: se conservan. */}
+          {rolIds
+            .filter((id) => !roles.some((r) => r.id === id))
+            .map((id) => (
+              <span key={id} className="px-1 py-1 text-gray-400">
+                (un rol inactivo que ya tenía)
+              </span>
+            ))}
+        </div>
+        <span className="text-xs text-gray-400">
+          Puede marcar varios: el usuario tendrá los permisos de todos.
+        </span>
+      </fieldset>
       <label className="flex flex-col gap-1 text-sm text-gray-600">
         Sucursal
         <select

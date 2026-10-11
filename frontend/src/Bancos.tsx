@@ -70,6 +70,7 @@ const NOMBRE_TIPO: Record<string, string> = {
   interes: 'Intereses',
   ingreso: 'Otro ingreso',
   reverso: 'Reverso',
+  remesa: 'Envío a Haití',
 }
 
 const CAMBIADO_POR: [string, string][] = [
@@ -117,6 +118,7 @@ function EstadoEtiqueta({ estado }: { estado: EstadoMovimiento }) {
 
 function detalleMovimiento(m: MovimientoCuenta): string {
   const partes = [
+    m.envio,
     m.venta,
     m.transferencia && `${m.transferencia} ${m.tipo === 'transferencia_salida' ? 'a' : 'de'} ${m.contraparte ?? ''}`,
     m.categoria,
@@ -637,6 +639,7 @@ function TablaMovimientos({
     puedeReversar &&
     m.estado === 'confirmado' &&
     !m.reversado &&
+    !m.de_envios &&
     !['reverso', 'venta', 'devolucion', 'transferencia_entrada', 'transferencia_salida'].includes(m.tipo)
 
   return (

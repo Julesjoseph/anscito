@@ -44,7 +44,7 @@ type Modal =
 const NOMBRES_MODULO: Record<string, string> = {
   usuarios: 'Usuarios',
   roles: 'Roles y permisos',
-  servicios: 'Servicios',
+  servicios: 'SCITO SERVICE',
   impuestos: 'Impuestos',
   categorias: 'Categorías',
   inventario: 'Inventario',
@@ -56,6 +56,7 @@ const NOMBRES_MODULO: Record<string, string> = {
   ventas: 'Ventas',
   caja: 'Caja',
   bancos: 'Bancos',
+  remesas: 'SCITO TRANSFER',
 }
 
 function nombreModulo(modulo: string): string {

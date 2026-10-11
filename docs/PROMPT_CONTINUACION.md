@@ -139,7 +139,6 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 
 - Impuesto duplicado "ITBIS" al 16% (código `itbi`) creado en pruebas:
   preguntar al dueño si se desactiva o se renombra.
-- Parte D de usuarios: varios roles por usuario (unión de permisos).
 - Validaciones con profesionales: tasa de ITBIS 18% y qué productos/servicios
   la llevan, costo sin ITBIS y costo promedio (contador); plan de cuentas,
   ISR/TSS (contador); SANES e inversiones (abogado); Ley 172-13 (abogado).
@@ -149,6 +148,31 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   descuenten inventario (ver `docs/notas-ventas.md`).
 - Caja: falta pantalla para administrar las categorías de gasto (hoy fijas
   desde la migración 012) y su cuenta contable (`cuenta_contable_id`).
+- **SCITO TRANSFER: envíos a Haití** (`/remesas`, pantalla `Envios.tsx`,
+  menú "SCITO TRANSFER"): agentes (punto propio sin comisión y autorizados
+  con 50% de la comisión, pago semanal/quincenal/mensual), tasa y comisiones
+  con historial (2.05 HTG por RD$, 10%), remitentes = Clientes con documento
+  obligatorio (`remesas.documento_desde` = 0), beneficiarios con teléfono de
+  Haití, parentesco y motivo. Envío E-000001 pendiente → confirmado con el
+  código de NatCash/MonCash (salen las gourdes de la billetera HTG, tipo
+  `remesa`) o rechazado con motivo. Cuentas de agentes: deben el total de sus
+  envíos confirmados menos sus entregas (efectivo a caja o depósito por
+  confirmar); reporte del día; pago de comisiones como gasto
+  "Comisiones de agentes de envíos". Recibo provisional/definitivo en PDF.
+  Roles "Operador de envíos (RD)" y "(Haití)". 13 agentes importados del
+  Excel SCITOS SYSTEME 3.0; beneficiarios no. Queda preparado (origen
+  `importado`) para importar el registro de operaciones del Excel cuando el
+  dueño lo pida. Pruebas: `scripts/probar-envios.ps1`.
+- **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
+  suma; nadie cambia sus propios roles ni da permisos que no tiene.
+- **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los
+  envíos como "SCITO TRANSFER" (los permisos y tablas no cambian). Panel con
+  tarjetas SCITO SERVICE y SCITO TRANSFER. Las tarjetas del Panel dependen
+  de los permisos de cada módulo (decisión del dueño: no hay permisos
+  propios del Panel).
+- Pendiente: importar el registro de operaciones (envíos) del Excel cuando
+  el dueño lo pida; la hoja USUARIOS del Excel tenía contraseñas en texto
+  visible (se recomendó cambiarlas).
 - Bancos: la diferencia cambiaria (valor en RD$ de US$/HTG a tasas
   distintas) y la "Compra de mercancía" pagada por banco deben validarse con
   el contador al llegar Contabilidad. Cheques: no se usan por ahora.

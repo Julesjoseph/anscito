@@ -83,6 +83,11 @@ export class PanelService {
 
     if (permisos.has('ventas.ver')) {
       resultado.ventas = await this.ventas(inicio, fin, inicio_anterior);
+      resultado.servicios = await this.servicios(
+        inicio,
+        fin,
+        permisos.has('inventario.ver_costos'),
+      );
       if (permisos.has('inventario.ver_costos')) {
         resultado.ganancia = await this.ganancia(inicio, fin);
       }
@@ -221,6 +226,51 @@ export class PanelService {
       [inicio, fin],
     );
     return r.rows[0];
+  }
+
+  // SCITO SERVICE: servicios vendidos en el período (ventas completadas).
+  // La ganancia sigue la misma regla que "Ganancia bruta": comisión % del
+  // precio sin ITBIS, o precio − costo (costo 0 si no tiene).
+  private async servicios(inicio: string, fin: string, verGanancia: boolean) {
+    const r = await this.db.query<{
+      cantidad: string;
+      ventas: number;
+      total: string;
+      base: string;
+      ganancia: string;
+    }>(
+      `SELECT COALESCE(sum(vl.cantidad), 0)::numeric(16,3) AS cantidad,
+              count(DISTINCT vl.venta_id)::int AS ventas,
+              COALESCE(sum(vl.total), 0)::numeric(16,2) AS total,
+              COALESCE(sum(vl.base), 0)::numeric(16,2) AS base,
+              COALESCE(sum(CASE
+                WHEN vl.comision_pct IS NOT NULL THEN round(vl.base * vl.comision_pct / 100, 2)
+                ELSE vl.base - round(COALESCE(vl.costo_unitario, 0) * vl.cantidad, 2) END), 0)::numeric(16,2)
+                AS ganancia
+       FROM venta_lineas vl JOIN ventas v ON v.id = vl.venta_id
+       WHERE vl.tipo = 'servicio' AND v.estado = 'completada'
+         AND v.fecha >= $1 AND v.fecha < $2`,
+      [inicio, fin],
+    );
+    const top = await this.db.query<{
+      descripcion: string;
+      cantidad: string;
+      total: string;
+    }>(
+      `SELECT vl.descripcion, sum(vl.cantidad)::numeric(16,3) AS cantidad,
+              sum(vl.total)::numeric(16,2) AS total
+       FROM venta_lineas vl JOIN ventas v ON v.id = vl.venta_id
+       WHERE vl.tipo = 'servicio' AND v.estado = 'completada'
+         AND v.fecha >= $1 AND v.fecha < $2
+       GROUP BY vl.descripcion ORDER BY sum(vl.total) DESC LIMIT 1`,
+      [inicio, fin],
+    );
+    const { ganancia, ...resto } = r.rows[0];
+    return {
+      ...resto,
+      mas_vendido: top.rows[0] ?? null,
+      ...(verGanancia ? { ganancia } : {}),
+    };
   }
 
   // Lo que debería haber ahora en cada caja abierta (no depende del período).

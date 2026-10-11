@@ -19,6 +19,30 @@ const USERNAME = /^[a-z0-9._-]{3,50}$/;
 const MENSAJE_JERARQUIA =
   'No puede gestionar a un usuario con más permisos que los suyos';
 
+// Roles pedidos: "rolIds" (lista) o "rolId" (uno, como antes). Sin repetir.
+function leerRoles(datos: { rolId?: unknown; rolIds?: unknown }): string[] {
+  const lista = Array.isArray(datos.rolIds)
+    ? datos.rolIds
+    : datos.rolId !== undefined
+      ? [datos.rolId]
+      : [];
+  const ids = [
+    ...new Set(
+      lista.map((x) =>
+        String(x ?? '')
+          .trim()
+          .toLowerCase(),
+      ),
+    ),
+  ];
+  if (ids.length === 0 || ids.some((x) => !UUID.test(x))) {
+    throw new BadRequestException('Seleccione al menos un rol');
+  }
+  if (ids.length > 10)
+    throw new BadRequestException('Máximo 10 roles por usuario');
+  return ids.sort();
+}
+
 function errorRolSuperior(faltan: string[]) {
   return new ForbiddenException(
     `No puede asignar un rol con permisos que usted no tiene: ${faltan.join(', ')}`,
@@ -31,6 +55,7 @@ export type DatosCrear = {
   apellido?: string;
   password?: string;
   rolId?: string;
+  rolIds?: string[];
   sucursalId?: string;
 };
 
@@ -38,6 +63,7 @@ export type DatosEditar = {
   nombre?: string;
   apellido?: string;
   rolId?: string;
+  rolIds?: string[];
   sucursalId?: string;
 };
 
@@ -45,8 +71,8 @@ type FilaEdicion = {
   id: string;
   nombre: string;
   apellido: string;
-  rol_id: string | null;
-  rol: string | null;
+  rol_ids: string[];
+  roles: string[];
   sucursal_id: string | null;
   sucursal: string | null;
 };
@@ -61,6 +87,7 @@ export class UsuariosService {
               u.last_login_at, u.locked_until,
               COALESCE(string_agg(ro.nombre, ', ' ORDER BY ro.nombre), '') AS roles,
               (array_agg(ur.rol_id))[1] AS rol_id,
+              COALESCE(array_agg(ur.rol_id::text) FILTER (WHERE ur.rol_id IS NOT NULL), '{}') AS rol_ids,
               u.sucursal_id, s.nombre AS sucursal
        FROM usuarios u
        LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
@@ -100,6 +127,32 @@ export class UsuariosService {
     return r.rows;
   }
 
+  // Los roles deben existir y estar activos (los que ya tenía el usuario se
+  // aceptan aunque estén inactivos). El actor no puede dar permisos que no
+  // tiene: se revisan los roles de "revisar". Devuelve los nombres.
+  private async rolesValidos(
+    c: PoolClient,
+    actorId: string,
+    rolIds: string[],
+    revisar: string[],
+  ): Promise<string[]> {
+    const r = await c.query<{ id: string; nombre: string; is_active: boolean }>(
+      'SELECT id, nombre, is_active FROM roles WHERE id = ANY($1::uuid[])',
+      [rolIds],
+    );
+    if (r.rowCount !== rolIds.length)
+      throw new BadRequestException('Uno de los roles seleccionados no existe');
+    if (r.rows.some((f) => !f.is_active && revisar.includes(f.id)))
+      throw new BadRequestException(
+        'Uno de los roles seleccionados está inactivo',
+      );
+    for (const rolId of revisar) {
+      const faltan = await permisosFaltantesDeRol(c, actorId, rolId);
+      if (faltan.length > 0) throw errorRolSuperior(faltan);
+    }
+    return r.rows.map((f) => f.nombre).sort();
+  }
+
   async crear(actorId: string, ip: string | undefined, datos: DatosCrear) {
     const username = String(datos.username ?? '')
       .trim()
@@ -107,7 +160,7 @@ export class UsuariosService {
     const nombre = String(datos.nombre ?? '').trim();
     const apellido = String(datos.apellido ?? '').trim();
     const password = String(datos.password ?? '');
-    const rolId = String(datos.rolId ?? '');
+    const rolIds = leerRoles(datos);
     const sucursalId = String(datos.sucursalId ?? '');
 
     if (!USERNAME.test(username)) {
@@ -123,9 +176,6 @@ export class UsuariosService {
         'La contraseña debe tener al menos 10 caracteres',
       );
     }
-    if (!UUID.test(rolId)) {
-      throw new BadRequestException('Seleccione un rol');
-    }
     if (!UUID.test(sucursalId)) {
       throw new BadRequestException('Seleccione la sucursal');
     }
@@ -134,15 +184,7 @@ export class UsuariosService {
 
     try {
       return await this.db.transaccion(async (c) => {
-        const rol = await c.query<{ id: string; nombre: string }>(
-          'SELECT id, nombre FROM roles WHERE id = $1 AND is_active = true',
-          [rolId],
-        );
-        if (rol.rowCount === 0) {
-          throw new BadRequestException('El rol seleccionado no existe');
-        }
-        const faltan = await permisosFaltantesDeRol(c, actorId, rolId);
-        if (faltan.length > 0) throw errorRolSuperior(faltan);
+        const roles = await this.rolesValidos(c, actorId, rolIds, rolIds);
         const sucursal = await this.sucursalActiva(c, sucursalId);
 
         const u = await c.query<{ id: string }>(
@@ -156,8 +198,9 @@ export class UsuariosService {
         const nuevoId = u.rows[0].id;
 
         await c.query(
-          'INSERT INTO usuario_roles (usuario_id, rol_id) VALUES ($1, $2)',
-          [nuevoId, rolId],
+          `INSERT INTO usuario_roles (usuario_id, rol_id)
+           SELECT $1, unnest($2::uuid[])`,
+          [nuevoId, rolIds],
         );
 
         await registrarAuditoria(c, {
@@ -169,7 +212,7 @@ export class UsuariosService {
             username,
             nombre,
             apellido,
-            rol: rol.rows[0].nombre,
+            roles,
             sucursal,
           },
           ip,
@@ -195,24 +238,25 @@ export class UsuariosService {
 
     const nombre = String(datos.nombre ?? '').trim();
     const apellido = String(datos.apellido ?? '').trim();
-    const rolId = String(datos.rolId ?? '');
+    const rolIds = leerRoles(datos);
     const sucursalId = String(datos.sucursalId ?? '');
 
     if (!nombre || !apellido || nombre.length > 100 || apellido.length > 100) {
       throw new BadRequestException('El nombre y el apellido son obligatorios');
     }
-    if (!UUID.test(rolId)) throw new BadRequestException('Seleccione un rol');
     if (!UUID.test(sucursalId)) {
       throw new BadRequestException('Seleccione la sucursal');
     }
 
     return this.db.transaccion(async (c) => {
       const act = await c.query<FilaEdicion>(
-        `SELECT u.id, u.nombre, u.apellido, ur.rol_id, ro.nombre AS rol,
-                u.sucursal_id, s.nombre AS sucursal
+        `SELECT u.id, u.nombre, u.apellido, u.sucursal_id, s.nombre AS sucursal,
+                COALESCE((SELECT array_agg(ur.rol_id::text ORDER BY ur.rol_id)
+                          FROM usuario_roles ur WHERE ur.usuario_id = u.id), '{}') AS rol_ids,
+                COALESCE((SELECT array_agg(ro.nombre ORDER BY ro.nombre)
+                          FROM usuario_roles ur JOIN roles ro ON ro.id = ur.rol_id
+                          WHERE ur.usuario_id = u.id), '{}') AS roles
          FROM usuarios u
-         LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
-         LEFT JOIN roles ro ON ro.id = ur.rol_id
          LEFT JOIN sucursales s ON s.id = u.sucursal_id
          WHERE u.id = $1
          FOR UPDATE OF u`,
@@ -222,24 +266,18 @@ export class UsuariosService {
         throw new NotFoundException('Usuario no encontrado');
       const antes = act.rows[0];
 
-      if (id === actorId && rolId !== antes.rol_id) {
-        throw new BadRequestException('No puede cambiar su propio rol');
+      const antesIds = [...antes.rol_ids].sort();
+      const cambianRoles = antesIds.join(',') !== rolIds.join(',');
+      if (id === actorId && cambianRoles) {
+        throw new BadRequestException('No puede cambiar sus propios roles');
       }
       if (!(await puedeGestionarUsuario(c, actorId, id))) {
         throw new ForbiddenException(MENSAJE_JERARQUIA);
       }
 
-      const rol = await c.query<{ id: string; nombre: string }>(
-        'SELECT id, nombre FROM roles WHERE id = $1 AND is_active = true',
-        [rolId],
-      );
-      if (rol.rowCount === 0) {
-        throw new BadRequestException('El rol seleccionado no existe');
-      }
-      if (rolId !== antes.rol_id) {
-        const faltan = await permisosFaltantesDeRol(c, actorId, rolId);
-        if (faltan.length > 0) throw errorRolSuperior(faltan);
-      }
+      // Solo se revisan los roles que se agregan; los que ya tenía se respetan.
+      const nuevos = rolIds.filter((r) => !antesIds.includes(r));
+      const roles = await this.rolesValidos(c, actorId, rolIds, nuevos);
 
       // Si no cambia, se respeta aunque la sucursal esté inactiva.
       const sucursal =
@@ -253,11 +291,16 @@ export class UsuariosService {
          WHERE id = $1`,
         [id, nombre, apellido, sucursalId],
       );
-      if (rolId !== antes.rol_id) {
-        await c.query('DELETE FROM usuario_roles WHERE usuario_id = $1', [id]);
+      if (cambianRoles) {
         await c.query(
-          'INSERT INTO usuario_roles (usuario_id, rol_id) VALUES ($1, $2)',
-          [id, rolId],
+          `DELETE FROM usuario_roles
+           WHERE usuario_id = $1 AND NOT (rol_id = ANY($2::uuid[]))`,
+          [id, rolIds],
+        );
+        await c.query(
+          `INSERT INTO usuario_roles (usuario_id, rol_id)
+           SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`,
+          [id, rolIds],
         );
       }
 
@@ -269,10 +312,10 @@ export class UsuariosService {
         anterior: {
           nombre: antes.nombre,
           apellido: antes.apellido,
-          rol: antes.rol,
+          roles: antes.roles,
           sucursal: antes.sucursal,
         },
-        nuevo: { nombre, apellido, rol: rol.rows[0].nombre, sucursal },
+        nuevo: { nombre, apellido, roles, sucursal },
         ip,
       });
 
