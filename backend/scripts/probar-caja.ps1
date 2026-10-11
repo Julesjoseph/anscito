@@ -75,6 +75,21 @@ Write-Host "`n== Entrar como administrador ==" -ForegroundColor Cyan
 $admin = Entrar 'anscito'
 $sello = Get-Date -Format 'HHmmss'
 
+Write-Host "`n== Limpiar restos de una prueba anterior ==" -ForegroundColor Cyan
+# Si una prueba anterior se detuvo a mitad, su caja quedo abierta: se cierra
+# (con motivo, porque no se cuenta) y se desactiva, igual que su producto.
+foreach ($vieja in @(Llamar 'Get' '/caja/cajas' $admin) | Where-Object { $_.codigo -like 'PRUEBA-*' -and $_.is_active }) {
+  if ($vieja.sesion_id) {
+    Llamar 'Post' "/caja/sesiones/$($vieja.sesion_id)/cerrar" $admin @{ conteo = @{}; motivo = 'Cierre de caja de prueba que quedo abierta' } | Out-Null
+  }
+  Llamar 'Patch' "/caja/cajas/$($vieja.id)/estado" $admin @{ is_active = $false; motivo = 'Caja de prueba' } | Out-Null
+  Ok 'caja de prueba anterior cerrada y desactivada:' $vieja.codigo
+}
+foreach ($viejo in @((Llamar 'Get' '/productos?texto=Caja%20prueba' $admin).filas)) {
+  Llamar 'Patch' "/productos/$($viejo.id)/estado" $admin @{ is_active = $false; motivo = 'Producto de prueba' } | Out-Null
+  Ok 'producto de prueba anterior desactivado:' $viejo.codigo
+}
+
 Write-Host "`n== Preparar caja y producto de prueba ==" -ForegroundColor Cyan
 $caja = Llamar 'Post' '/caja/cajas' $admin @{ codigo = "PRUEBA-$sello"; nombre = "Caja prueba $sello" }
 Ok 'caja de prueba creada:' "PRUEBA-$sello"
@@ -98,7 +113,7 @@ $limpieza = ($cp.categoriasGasto | Where-Object { $_.codigo -eq 'limpieza' }).id
 Ok 'billetes y monedas:' ($cp.denominaciones -join ', ')
 
 function Vender($cantidad) {
-  Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = ,@(@{ tipo = 'producto'; id = $prod.id; cantidad = $cantidad }); pago = @{ formaPagoId = $efectivo; recibido = '1000'; cajaId = $caja.id } }
+  Llamar 'Post' '/ventas' $admin @{ clienteId = $cf; lineas = @(@{ tipo = 'producto'; id = $prod.id; cantidad = $cantidad }); pago = @{ formaPagoId = $efectivo; recibido = '1000'; cajaId = $caja.id } }
 }
 function Esperado { (Llamar 'Get' "/caja/sesiones/$($sesion.id)" $admin).esperado }
 
@@ -112,7 +127,7 @@ EsperarError 'abrir otra vez la misma caja' 409 { Llamar 'Post' "/caja/cajas/$($
 Write-Host "`n== Ventas en efectivo ==" -ForegroundColor Cyan
 $v1 = Vender '4'
 $v2 = Vender '2'
-Ok 'ventas:' "$($v1.numero) (RD$200) y $($v2.numero) (RD$100)"
+Ok 'ventas:' "$($v1.numero) (RD`$200) y $($v2.numero) (RD`$100)"
 Comparar 'debe haber 1000 + 300' (Esperado) '1300.00'
 
 Write-Host "`n== Gasto, retiro e ingreso ==" -ForegroundColor Cyan
@@ -138,7 +153,7 @@ $panel = Llamar 'Get' '/panel?periodo=hoy' $admin
 $enPanel = ($panel.caja.abiertas | Where-Object { $_.caja -eq "Caja prueba $sello" }).esperado
 Comparar 'el panel muestra el efectivo de la caja de prueba' $enPanel '650.00'
 
-Write-Host "`n== Cerrar contando billetes (faltan RD$10) ==" -ForegroundColor Cyan
+Write-Host "`n== Cerrar contando billetes (faltan RD`$10) ==" -ForegroundColor Cyan
 $conteo = @{ '500' = 1; '100' = 1; '25' = 1; '10' = 1; '5' = 1 }
 EsperarError 'billete que no existe (RD$3)' 400 { Llamar 'Post' "/caja/sesiones/$($sesion.id)/cerrar" $admin @{ conteo = @{ '3' = 1 } } }
 EsperarError 'cerrar con faltante sin motivo' 400 { Llamar 'Post' "/caja/sesiones/$($sesion.id)/cerrar" $admin @{ conteo = $conteo } }
