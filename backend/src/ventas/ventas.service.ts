@@ -70,6 +70,7 @@ type Articulo = {
   impuesto: string;
   tasa: string | null;
   costo: string | null;
+  comision_pct: string | null;
   is_active: boolean;
 };
 
@@ -260,7 +261,8 @@ export class VentasService {
         `SELECT 'producto' AS tipo, p.id, p.codigo, p.nombre, um.nombre AS unidad,
                 um.permite_decimales, p.precio_venta AS precio,
                 p.precio_incluye_itbis, p.impuesto_id, i.nombre AS impuesto,
-                ${SQL_TASA_VIGENTE} AS tasa, p.costo, p.is_active
+                ${SQL_TASA_VIGENTE} AS tasa, p.costo,
+                NULL::numeric AS comision_pct, p.is_active
          FROM productos p
          JOIN unidades_medida um ON um.id = p.unidad_id
          JOIN impuestos i ON i.id = p.impuesto_id
@@ -277,7 +279,10 @@ export class VentasService {
         `SELECT 'servicio' AS tipo, s.id, s.codigo, s.nombre, um.nombre AS unidad,
                 true AS permite_decimales, s.precio, s.precio_incluye_itbis,
                 s.impuesto_id, i.nombre AS impuesto, ${SQL_TASA_VIGENTE} AS tasa,
-                s.costo, s.is_active
+                s.costo,
+                CASE WHEN s.ganancia_tipo = 'comision' THEN s.comision_pct END
+                  AS comision_pct,
+                s.is_active
          FROM servicios s
          JOIN unidades_medida um ON um.id = s.unidad_medida_id
          JOIN impuestos i ON i.id = s.impuesto_id
@@ -512,9 +517,10 @@ export class VentasService {
           `INSERT INTO venta_lineas
              (venta_id, tipo, producto_id, servicio_id, codigo, descripcion, unidad,
               cantidad, precio_unitario, precio_incluye_itbis, impuesto_id, impuesto,
-              tasa, bruto, descuento, base, itbis, total, costo_unitario)
+              tasa, bruto, descuento, base, itbis, total, costo_unitario,
+              comision_pct)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                   $16, $17, $18, $19)`,
+                   $16, $17, $18, $19, $20)`,
           [
             ventaId,
             a.tipo,
@@ -535,6 +541,7 @@ export class VentasService {
             l.itbis,
             l.total,
             a.costo,
+            a.comision_pct,
           ],
         );
         if (a.tipo === 'producto') {

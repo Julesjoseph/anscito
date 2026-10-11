@@ -147,6 +147,9 @@ export type FilaServicio = {
   impuesto: string
   tasa: string | null
   precio_incluye_itbis: boolean
+  // Ganancia por costo (precio − costo) o por comisión (precio × %).
+  ganancia_tipo: 'costo' | 'comision'
+  comision_pct: string | null
   is_active: boolean
   calculo: Desglose | null
 }
@@ -178,6 +181,8 @@ export type DatosServicio = {
   costo: string
   impuestoId: string
   precioIncluyeItbis: boolean
+  gananciaTipo: 'costo' | 'comision'
+  comisionPct: string
 }
 
 export type FiltrosServicios = {
@@ -1046,6 +1051,8 @@ export type ResumenPanel = {
     venta: string
     costo: string
     venta_sin_costo: string
+    venta_comision: string
+    ganancia_comision: string
     ganancia: string
     margen: string | null
   }

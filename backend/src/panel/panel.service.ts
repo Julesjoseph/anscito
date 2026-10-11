@@ -60,7 +60,10 @@ export class PanelService {
       fin: string;
       inicio_anterior: string;
     }>(
-      `SELECT inicio, now() AS fin, inicio - (now() - inicio) AS inicio_anterior
+      `SELECT inicio,
+              -- 1 segundo de margen: una venta de este mismo instante entra.
+              now() + interval '1 second' AS fin,
+              inicio - (now() - inicio) AS inicio_anterior
        FROM (SELECT (date_trunc($1, now() AT TIME ZONE $2) AT TIME ZONE $2) AS inicio) x`,
       [TRUNCAR[periodo], zona],
     );
@@ -158,28 +161,41 @@ export class PanelService {
     };
   }
 
-  // Ganancia bruta estimada: toda la venta sin ITBIS (productos y servicios)
-  // menos el costo copiado en cada línea. Decisión del dueño: las líneas sin
-  // costo registrado (servicios sin costo) cuentan con costo 0, y se informan
-  // aparte para saber qué parte no tiene costo descontado.
+  // Ganancia bruta estimada sobre la venta sin ITBIS:
+  //  - servicios por comisión: base × % copiado en la venta;
+  //  - productos y servicios por costo: base − costo copiado en la venta;
+  //  - líneas sin costo ni comisión: cuentan con costo 0 (decisión del
+  //    dueño) y se informan aparte.
   private async ganancia(inicio: string, fin: string) {
     const r = await this.db.query<{
       venta: string;
       costo: string;
       venta_sin_costo: string;
+      venta_comision: string;
+      ganancia_comision: string;
       ganancia: string;
       margen: string | null;
     }>(
-      `SELECT venta, costo, venta_sin_costo,
+      `SELECT venta, costo, venta_sin_costo, venta_comision, ganancia_comision,
               (venta - costo)::numeric(16,2) AS ganancia,
               CASE WHEN venta > 0
                    THEN round((venta - costo) * 100 / venta, 1)::text END AS margen
        FROM (
          SELECT COALESCE(sum(vl.base), 0)::numeric(16,2) AS venta,
-                COALESCE(sum(round(vl.costo_unitario * vl.cantidad, 2)), 0)::numeric(16,2)
-                  AS costo,
-                COALESCE(sum(vl.base) FILTER (WHERE vl.costo_unitario IS NULL), 0)::numeric(16,2)
-                  AS venta_sin_costo
+                COALESCE(sum(CASE
+                  WHEN vl.comision_pct IS NOT NULL
+                    THEN vl.base - round(vl.base * vl.comision_pct / 100, 2)
+                  WHEN vl.costo_unitario IS NOT NULL
+                    THEN round(vl.costo_unitario * vl.cantidad, 2)
+                  ELSE 0 END), 0)::numeric(16,2) AS costo,
+                COALESCE(sum(vl.base) FILTER (
+                  WHERE vl.comision_pct IS NULL AND vl.costo_unitario IS NULL), 0)::numeric(16,2)
+                  AS venta_sin_costo,
+                COALESCE(sum(vl.base) FILTER (WHERE vl.comision_pct IS NOT NULL), 0)::numeric(16,2)
+                  AS venta_comision,
+                COALESCE(sum(round(vl.base * vl.comision_pct / 100, 2))
+                  FILTER (WHERE vl.comision_pct IS NOT NULL), 0)::numeric(16,2)
+                  AS ganancia_comision
          FROM venta_lineas vl JOIN ventas v ON v.id = vl.venta_id
          WHERE v.estado = 'completada' AND v.fecha >= $1 AND v.fecha < $2
        ) x`,

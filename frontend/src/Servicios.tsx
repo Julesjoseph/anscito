@@ -92,6 +92,12 @@ function FormServicio({
   )
   const [precio, setPrecio] = useState(fila?.precio ?? '')
   const [costo, setCosto] = useState(fila?.costo ?? '')
+  const [gananciaTipo, setGananciaTipo] = useState<'costo' | 'comision'>(
+    fila?.ganancia_tipo ?? 'costo',
+  )
+  const [comisionPct, setComisionPct] = useState(
+    fila?.comision_pct ? fila.comision_pct.replace(/\.?0+$/, '') : '',
+  )
   const [impuestoId, setImpuestoId] = useState(fila?.impuesto_id ?? '')
   const [incluye, setIncluye] = useState(fila?.precio_incluye_itbis ?? false)
   const [error, setError] = useState('')
@@ -148,9 +154,11 @@ function FormServicio({
       categoriaId,
       unidadMedidaId,
       precio: precio.trim(),
-      costo: costo.trim(),
+      costo: gananciaTipo === 'costo' ? costo.trim() : '',
       impuestoId,
       precioIncluyeItbis: incluye,
+      gananciaTipo,
+      comisionPct: comisionPct.trim(),
     }
     try {
       if (fila) await editarServicio(token, fila.id, datos)
@@ -281,17 +289,68 @@ function FormServicio({
             </span>
           )}
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
-          Costo interno (opcional)
-          <input
-            type="text"
-            inputMode="decimal"
-            value={costo}
-            onChange={(e) => setCosto(e.target.value)}
-            placeholder="Lo que le cuesta a la empresa"
-            className={CAMPO}
-          />
-        </label>
+        <div className="flex flex-col gap-1 text-sm text-gray-600">
+          ¿Cómo se calcula la ganancia?
+          <div className="flex gap-2">
+            {(
+              [
+                ['costo', 'Precio − costo'],
+                ['comision', 'Comisión %'],
+              ] as const
+            ).map(([id, nombre]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setGananciaTipo(id)}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm ${
+                  gananciaTipo === id
+                    ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                {nombre}
+              </button>
+            ))}
+          </div>
+          {gananciaTipo === 'costo' ? (
+            <input
+              type="text"
+              inputMode="decimal"
+              value={costo}
+              onChange={(e) => setCosto(e.target.value)}
+              placeholder="Costo interno (opcional)"
+              aria-label="Costo interno"
+              className={CAMPO}
+            />
+          ) : (
+            <input
+              type="text"
+              inputMode="decimal"
+              value={comisionPct}
+              onChange={(e) => setComisionPct(e.target.value)}
+              placeholder="Porcentaje de comisión, ej: 20"
+              aria-label="Porcentaje de comisión"
+              className={CAMPO}
+            />
+          )}
+          {gananciaTipo === 'comision' && local && /^\d{1,3}(\.\d{1,2})?$/.test(comisionPct.trim()) && Number(comisionPct) > 0 && Number(comisionPct) <= 100 && (
+            <span className="text-xs text-gray-700">
+              Ganancia por cada servicio: {comisionPct.trim()}% de {dinero(local.base)} (sin ITBIS) ={' '}
+              <span className="font-medium">
+                {dinero(
+                  (() => {
+                    const [e, d = ''] = local.base.split('.')
+                    const base = BigInt(e) * 100n + BigInt(d.padEnd(2, '0'))
+                    const [pe, pd = ''] = comisionPct.trim().split('.')
+                    const pct = BigInt(pe) * 100n + BigInt(pd.padEnd(2, '0'))
+                    const g = (2n * base * pct + 10000n) / 20000n
+                    return `${g / 100n}.${(g % 100n).toString().padStart(2, '0')}`
+                  })(),
+                )}
+              </span>
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -659,6 +718,13 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
                     {dinero(f.precio)}
                     <div className="text-xs text-gray-500">
                       por {f.unidad_medida.toLowerCase()}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {f.ganancia_tipo === 'comision'
+                        ? `Comisión ${f.comision_pct?.replace(/\.?0+$/, '')}%`
+                        : f.costo
+                          ? `Costo ${dinero(f.costo)}`
+                          : 'Sin costo registrado'}
                     </div>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">{etiquetaItbis(f)}</td>

@@ -214,9 +214,14 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               detalle={
                 <>
                   {g.margen !== null && `Margen ${g.margen}% · `}venta sin ITBIS {dinero(g.venta)} − costo {dinero(g.costo)}
-                  {centavos(g.venta_sin_costo) > 0n && (
+                  {centavos(g.venta_comision) > 0n && (
                     <span className="block text-gray-500">
-                      Incluye {dinero(g.venta_sin_costo)} de servicios sin costo registrado (contados con costo 0)
+                      Incluye {dinero(g.ganancia_comision)} de comisiones sobre {dinero(g.venta_comision)} en servicios
+                    </span>
+                  )}
+                  {centavos(g.venta_sin_costo) > 0n && (
+                    <span className="block text-amber-700">
+                      {dinero(g.venta_sin_costo)} vendidos sin costo ni comisión (contados como ganancia completa)
                     </span>
                   )}
                 </>
@@ -338,8 +343,9 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
 
       <p className="text-xs text-gray-400">
         Los montos excluyen las ventas anuladas. La ganancia es una estimación
-        sin ITBIS: productos al costo promedio del momento de la venta y
-        servicios a su costo registrado (o costo 0 si no tienen). Los indicadores contables y de caja llegarán con sus módulos.
+        sin ITBIS: productos al costo promedio del momento de la venta, y
+        servicios según su comisión % o su costo registrado (costo 0 si no
+        tienen ninguno). Los indicadores contables y de caja llegarán con sus módulos.
       </p>
     </div>
   )

@@ -33,6 +33,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 008 | Tipos de documento y terceros (clientes y proveedores) |
 | 009 | Datos de la empresa, más datos de sucursales, usuarios en Principal |
 | 010 | Ventas, líneas, pagos, formas de pago, configuración y contadores |
+| 011 | Ganancia de servicios por costo o por comisión %; % copiado en cada venta |
 
 ## Módulos terminados
 
@@ -90,6 +91,9 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   carta. El logo debe ser PNG o JPG. Dice "comprobante interno… no sustituye
   el comprobante fiscal".
 
+- **Comisión de servicios**: cada servicio calcula su ganancia por "precio −
+  costo" o por "comisión %" (decisión del dueño, editable en Servicios); cada
+  venta copia el % del día y el Panel lo usa.
 - **Panel** (`GET /panel?periodo=hoy|semana|mes|trimestre|anio`): ventas con
   comparación contra el período anterior, cobrado por forma de pago, ganancia
   bruta estimada (productos y servicios; servicios sin costo cuentan con

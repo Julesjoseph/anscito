@@ -30,6 +30,8 @@ export type DatosServicio = {
   costo?: unknown;
   impuestoId?: unknown;
   precioIncluyeItbis?: unknown;
+  gananciaTipo?: unknown;
+  comisionPct?: unknown;
 };
 
 export type Filtros = {
@@ -50,6 +52,8 @@ type Limpio = {
   costo: string | null;
   impuesto_id: string;
   precio_incluye_itbis: boolean;
+  ganancia_tipo: 'costo' | 'comision';
+  comision_pct: string | null;
 };
 
 type FilaServicio = Limpio & {
@@ -130,6 +134,30 @@ export class ServiciosService {
       );
     }
 
+    // Cómo se calcula la ganancia: por costo (precio − costo) o por
+    // comisión (precio × %). Sin indicarlo, es por costo.
+    const gananciaTipo = texto(datos.gananciaTipo) || 'costo';
+    if (gananciaTipo !== 'costo' && gananciaTipo !== 'comision') {
+      throw new BadRequestException('Forma de ganancia inválida');
+    }
+    let comisionPct: string | null = null;
+    if (gananciaTipo === 'comision') {
+      const pct = texto(datos.comisionPct);
+      if (
+        !/^\d{1,3}(\.\d{1,2})?$/.test(pct) ||
+        Number(pct) <= 0 ||
+        Number(pct) > 100
+      ) {
+        throw new BadRequestException(
+          'Comisión inválida: un porcentaje mayor que 0 y hasta 100, con hasta 2 decimales',
+        );
+      }
+      const [e, d = ''] = pct.split('.');
+      comisionPct = `${Number(e)}.${d.padEnd(2, '0')}`;
+      // Con comisión, el costo no se usa.
+      costo = null;
+    }
+
     return {
       codigo,
       nombre,
@@ -141,6 +169,8 @@ export class ServiciosService {
       costo,
       impuesto_id: impuestoId,
       precio_incluye_itbis: datos.precioIncluyeItbis,
+      ganancia_tipo: gananciaTipo,
+      comision_pct: comisionPct,
     };
   }
 
@@ -184,6 +214,7 @@ export class ServiciosService {
               s.categoria_id, cat.nombre AS categoria,
               s.unidad_medida_id, um.nombre AS unidad_medida,
               s.precio, s.costo, s.impuesto_id, i.nombre AS impuesto,
+              s.ganancia_tipo, s.comision_pct,
               ${SQL_TASA_VIGENTE} AS tasa,
               s.precio_incluye_itbis, s.is_active
        FROM servicios s
@@ -322,8 +353,8 @@ export class ServiciosService {
           `INSERT INTO servicios
              (codigo, nombre, descripcion, unidad_negocio_id, unidad_medida_id,
               precio, costo, impuesto_id, precio_incluye_itbis, created_by,
-              categoria_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              categoria_id, ganancia_tipo, comision_pct)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`,
           [
             d.codigo,
@@ -337,6 +368,8 @@ export class ServiciosService {
             d.precio_incluye_itbis,
             actorId,
             d.categoria_id,
+            d.ganancia_tipo,
+            d.comision_pct,
           ],
         );
         const id = r.rows[0].id;
@@ -372,7 +405,7 @@ export class ServiciosService {
         const r = await c.query<Limpio>(
           `SELECT codigo, nombre, descripcion, unidad_negocio_id,
                   categoria_id, unidad_medida_id, precio, costo, impuesto_id,
-                  precio_incluye_itbis
+                  precio_incluye_itbis, ganancia_tipo, comision_pct
            FROM servicios WHERE id = $1 FOR UPDATE`,
           [id],
         );
@@ -388,7 +421,7 @@ export class ServiciosService {
                unidad_negocio_id = $5, unidad_medida_id = $6,
                precio = $7, costo = $8, impuesto_id = $9,
                precio_incluye_itbis = $10, categoria_id = $11,
-               updated_at = now()
+               ganancia_tipo = $12, comision_pct = $13, updated_at = now()
            WHERE id = $1`,
           [
             id,
@@ -402,6 +435,8 @@ export class ServiciosService {
             d.impuesto_id,
             d.precio_incluye_itbis,
             d.categoria_id,
+            d.ganancia_tipo,
+            d.comision_pct,
           ],
         );
 
@@ -410,6 +445,10 @@ export class ServiciosService {
         const grupos: { accion: string; campos: (keyof Limpio)[] }[] = [
           { accion: 'servicio.cambiar_precio', campos: ['precio'] },
           { accion: 'servicio.cambiar_costo', campos: ['costo'] },
+          {
+            accion: 'servicio.cambiar_ganancia',
+            campos: ['ganancia_tipo', 'comision_pct'],
+          },
           {
             accion: 'servicio.cambiar_impuesto',
             campos: ['impuesto_id', 'precio_incluye_itbis'],

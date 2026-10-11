@@ -69,3 +69,46 @@ describe('ServiciosService.validar con categoría', () => {
     ).toThrow(BadRequestException);
   });
 });
+
+describe('ServiciosService.validar con comisión', () => {
+  const servicio = new ServiciosService({} as DatabaseService);
+
+  it('sin indicarlo, la ganancia es por costo', () => {
+    const d = servicio.validar({ ...valido, costo: '2' });
+    expect(d.ganancia_tipo).toBe('costo');
+    expect(d.comision_pct).toBeNull();
+    expect(d.costo).toBe('2.00');
+  });
+
+  it('por comisión: normaliza el % y no usa el costo', () => {
+    const d = servicio.validar({
+      ...valido,
+      costo: '2',
+      gananciaTipo: 'comision',
+      comisionPct: '20',
+    });
+    expect(d.ganancia_tipo).toBe('comision');
+    expect(d.comision_pct).toBe('20.00');
+    expect(d.costo).toBeNull();
+    expect(
+      servicio.validar({
+        ...valido,
+        gananciaTipo: 'comision',
+        comisionPct: '12.5',
+      }).comision_pct,
+    ).toBe('12.50');
+  });
+
+  it.each(['0', '150', '-5', 'veinte', '', '10.123'])(
+    'rechaza la comisión %s',
+    (pct) => {
+      expect(() =>
+        servicio.validar({
+          ...valido,
+          gananciaTipo: 'comision',
+          comisionPct: pct,
+        }),
+      ).toThrow(BadRequestException);
+    },
+  );
+});
