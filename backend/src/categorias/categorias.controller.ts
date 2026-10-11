@@ -19,6 +19,7 @@ type DatosCategoria = {
   unidadNegocioId?: unknown;
   nombre?: unknown;
   descripcion?: unknown;
+  prefijo?: unknown;
 };
 type DatosEstado = { is_active?: unknown; motivo?: unknown };
 

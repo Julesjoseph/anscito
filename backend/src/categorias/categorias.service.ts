@@ -13,6 +13,7 @@ import { DatabaseService } from '../database/database.service';
 // desactivan, y no se pueden desactivar mientras algo activo las use.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PREFIJO = /^[A-Z0-9]{2,5}$/;
 
 function texto(v: unknown): string {
   return typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
@@ -57,6 +58,12 @@ function esDuplicado(e: unknown): boolean {
   return (e as { code?: string }).code === '23505';
 }
 
+function errorCategoriaDuplicada(e: unknown) {
+  return (e as { constraint?: string }).constraint === 'categorias_prefijo_uq'
+    ? new ConflictException('Ese prefijo ya lo usa otra categoría')
+    : new ConflictException('Ya existe esa categoría en esa unidad de negocio');
+}
+
 // Lista "A, B, C y 2 más" para los mensajes de error.
 function listaCorta(codigos: string[], total: number): string {
   const resto = total - codigos.length;
@@ -74,15 +81,29 @@ export class CategoriasService {
               (SELECT count(*)::int FROM servicios s
                 WHERE s.unidad_negocio_id = un.id AND s.is_active = true)
                 AS servicios_activos,
+              (SELECT count(*)::int FROM productos p
+                 JOIN categorias c ON c.id = p.categoria_id
+                WHERE c.unidad_negocio_id = un.id AND p.is_active = true)
+                AS productos_activos,
               COALESCE(
                 (SELECT json_agg(json_build_object(
                           'id', c.id,
                           'nombre', c.nombre,
                           'descripcion', c.descripcion,
                           'is_active', c.is_active,
+                          'prefijo', c.prefijo,
+                          -- Vista previa del próximo código de producto.
+                          'proximo', CASE WHEN c.prefijo IS NULL THEN NULL
+                            ELSE c.prefijo || '-' ||
+                                 lpad((c.ultimo_numero + 1)::text, 4, '0') END,
                           'servicios_activos',
                             (SELECT count(*) FROM servicios s
-                              WHERE s.categoria_id = c.id AND s.is_active = true))
+                              WHERE s.categoria_id = c.id AND s.is_active = true),
+                          'productos_activos',
+                            (SELECT count(*) FROM productos p
+                              WHERE p.categoria_id = c.id AND p.is_active = true),
+                          'productos', (SELECT count(*) FROM productos p
+                              WHERE p.categoria_id = c.id))
                         ORDER BY lower(c.nombre))
                  FROM categorias c WHERE c.unidad_negocio_id = un.id),
                 '[]'::json) AS categorias
@@ -92,15 +113,24 @@ export class CategoriasService {
     return r.rows;
   }
 
-  // Servicios activos que usan una unidad o categoría (para los mensajes).
-  private async serviciosActivos(
+  // Servicios y productos activos que usan una unidad o categoría.
+  private async registrosActivos(
     c: PoolClient,
     columna: 'unidad_negocio_id' | 'categoria_id',
     id: string,
   ): Promise<{ total: number; codigos: string[] }> {
+    const productos =
+      columna === 'categoria_id'
+        ? `SELECT codigo FROM productos
+           WHERE categoria_id = $1 AND is_active = true`
+        : `SELECT p.codigo FROM productos p
+           JOIN categorias c ON c.id = p.categoria_id
+           WHERE c.unidad_negocio_id = $1 AND p.is_active = true`;
     const r = await c.query<{ codigo: string; total: number }>(
       `SELECT codigo, count(*) OVER ()::int AS total
-       FROM servicios WHERE ${columna} = $1 AND is_active = true
+       FROM (SELECT codigo FROM servicios
+             WHERE ${columna} = $1 AND is_active = true
+             UNION ALL ${productos}) x
        ORDER BY codigo LIMIT 5`,
       [id],
     );
@@ -224,10 +254,10 @@ export class CategoriasService {
       if (antes.is_active === activo) return { ok: true };
 
       if (!activo) {
-        const uso = await this.serviciosActivos(c, 'unidad_negocio_id', id);
+        const uso = await this.registrosActivos(c, 'unidad_negocio_id', id);
         if (uso.total > 0) {
           throw new BadRequestException(
-            `No se puede desactivar: la usan ${uso.total} servicio(s) activo(s): ${listaCorta(uso.codigos, uso.total)}. Desactívelos o cámbielos de unidad primero.`,
+            `No se puede desactivar: la usan ${uso.total} servicio(s) o producto(s) activo(s): ${listaCorta(uso.codigos, uso.total)}. Desactívelos o cámbielos de unidad primero.`,
           );
         }
       }
@@ -254,6 +284,7 @@ export class CategoriasService {
 
   private validarCategoria(datos: {
     unidadNegocioId?: unknown;
+    prefijo?: unknown;
     nombre?: unknown;
     descripcion?: unknown;
   }) {
@@ -268,7 +299,18 @@ export class CategoriasService {
         'La descripción no puede pasar de 500 caracteres',
       );
     }
-    return { unidadId, nombre, descripcion: descripcion || null };
+    const prefijo = texto(datos.prefijo).toUpperCase();
+    if (prefijo && !PREFIJO.test(prefijo)) {
+      throw new BadRequestException(
+        'Prefijo inválido: 2 a 5 letras o números, sin espacios (ej: CUA)',
+      );
+    }
+    return {
+      unidadId,
+      nombre,
+      descripcion: descripcion || null,
+      prefijo: prefijo || null,
+    };
   }
 
   private async unidadActiva(c: PoolClient, unidadId: string) {
@@ -290,6 +332,7 @@ export class CategoriasService {
       unidadNegocioId?: unknown;
       nombre?: unknown;
       descripcion?: unknown;
+      prefijo?: unknown;
     },
   ) {
     const d = this.validarCategoria(datos);
@@ -297,9 +340,10 @@ export class CategoriasService {
       return await this.db.transaccion(async (c) => {
         await this.unidadActiva(c, d.unidadId);
         const r = await c.query<{ id: string }>(
-          `INSERT INTO categorias (unidad_negocio_id, nombre, descripcion, created_by)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [d.unidadId, d.nombre, d.descripcion, actorId],
+          `INSERT INTO categorias
+             (unidad_negocio_id, nombre, descripcion, prefijo, created_by)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [d.unidadId, d.nombre, d.descripcion, d.prefijo, actorId],
         );
         const id = r.rows[0].id;
         await registrarAuditoria(c, {
@@ -311,17 +355,14 @@ export class CategoriasService {
             unidad_negocio_id: d.unidadId,
             nombre: d.nombre,
             descripcion: d.descripcion,
+            prefijo: d.prefijo,
           },
           ip,
         });
         return { id };
       });
     } catch (e) {
-      if (esDuplicado(e)) {
-        throw new ConflictException(
-          'Ya existe esa categoría en esa unidad de negocio',
-        );
-      }
+      if (esDuplicado(e)) throw errorCategoriaDuplicada(e);
       throw e;
     }
   }
@@ -334,6 +375,7 @@ export class CategoriasService {
       unidadNegocioId?: unknown;
       nombre?: unknown;
       descripcion?: unknown;
+      prefijo?: unknown;
     },
   ) {
     if (!UUID.test(id)) throw new NotFoundException('Categoría no encontrada');
@@ -344,8 +386,9 @@ export class CategoriasService {
           unidad_negocio_id: string;
           nombre: string;
           descripcion: string | null;
+          prefijo: string | null;
         }>(
-          `SELECT unidad_negocio_id, nombre, descripcion
+          `SELECT unidad_negocio_id, nombre, descripcion, prefijo
            FROM categorias WHERE id = $1 FOR UPDATE`,
           [id],
         );
@@ -367,8 +410,21 @@ export class CategoriasService {
           }
         }
 
+        // El prefijo arma los códigos: no cambia si ya hay productos.
+        if (antes.prefijo !== d.prefijo) {
+          const prods = await c.query<{ n: number }>(
+            'SELECT count(*)::int AS n FROM productos WHERE categoria_id = $1',
+            [id],
+          );
+          if (prods.rows[0].n > 0) {
+            throw new BadRequestException(
+              `No se puede cambiar el prefijo: la categoría ya tiene ${prods.rows[0].n} producto(s) con códigos ${antes.prefijo}-…`,
+            );
+          }
+        }
+
         const cambios = (
-          ['unidad_negocio_id', 'nombre', 'descripcion'] as const
+          ['unidad_negocio_id', 'nombre', 'descripcion', 'prefijo'] as const
         ).filter((k) => {
           const nuevo = k === 'unidad_negocio_id' ? d.unidadId : d[k];
           return antes[k] !== nuevo;
@@ -378,14 +434,15 @@ export class CategoriasService {
         await c.query(
           `UPDATE categorias
            SET unidad_negocio_id = $2, nombre = $3, descripcion = $4,
-               updated_at = now()
+               prefijo = $5, updated_at = now()
            WHERE id = $1`,
-          [id, d.unidadId, d.nombre, d.descripcion],
+          [id, d.unidadId, d.nombre, d.descripcion, d.prefijo],
         );
         const nuevo = {
           unidad_negocio_id: d.unidadId,
           nombre: d.nombre,
           descripcion: d.descripcion,
+          prefijo: d.prefijo,
         };
         await registrarAuditoria(c, {
           usuarioId: actorId,
@@ -399,11 +456,7 @@ export class CategoriasService {
         return { ok: true };
       });
     } catch (e) {
-      if (esDuplicado(e)) {
-        throw new ConflictException(
-          'Ya existe esa categoría en esa unidad de negocio',
-        );
-      }
+      if (esDuplicado(e)) throw errorCategoriaDuplicada(e);
       throw e;
     }
   }
@@ -435,10 +488,10 @@ export class CategoriasService {
       if (activo) {
         await this.unidadActiva(c, antes.unidad_negocio_id);
       } else {
-        const uso = await this.serviciosActivos(c, 'categoria_id', id);
+        const uso = await this.registrosActivos(c, 'categoria_id', id);
         if (uso.total > 0) {
           throw new BadRequestException(
-            `No se puede desactivar: la usan ${uso.total} servicio(s) activo(s): ${listaCorta(uso.codigos, uso.total)}. Desactívelos o cámbielos de categoría primero.`,
+            `No se puede desactivar: la usan ${uso.total} servicio(s) o producto(s) activo(s): ${listaCorta(uso.codigos, uso.total)}. Desactívelos o cámbielos de categoría primero.`,
           );
         }
       }
