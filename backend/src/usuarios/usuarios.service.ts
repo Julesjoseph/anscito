@@ -1,15 +1,28 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import {
+  permisosFaltantesDeRol,
+  puedeGestionarUsuario,
+} from '../auth/jerarquia';
 import { DatabaseService } from '../database/database.service';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const USERNAME = /^[a-z0-9._-]{3,50}$/;
+const MENSAJE_JERARQUIA =
+  'No puede gestionar a un usuario con más permisos que los suyos';
+
+function errorRolSuperior(faltan: string[]) {
+  return new ForbiddenException(
+    `No puede asignar un rol con permisos que usted no tiene: ${faltan.join(', ')}`,
+  );
+}
 
 export type DatosCrear = {
   username?: string;
@@ -61,7 +74,9 @@ export class UsuariosService {
   }
 
   async crear(actorId: string, ip: string | undefined, datos: DatosCrear) {
-    const username = String(datos.username ?? '').trim().toLowerCase();
+    const username = String(datos.username ?? '')
+      .trim()
+      .toLowerCase();
     const nombre = String(datos.nombre ?? '').trim();
     const apellido = String(datos.apellido ?? '').trim();
     const password = String(datos.password ?? '');
@@ -95,6 +110,8 @@ export class UsuariosService {
         if (rol.rowCount === 0) {
           throw new BadRequestException('El rol seleccionado no existe');
         }
+        const faltan = await permisosFaltantesDeRol(c, actorId, rolId);
+        if (faltan.length > 0) throw errorRolSuperior(faltan);
 
         const u = await c.query<{ id: string }>(
           `INSERT INTO usuarios
@@ -157,11 +174,15 @@ export class UsuariosService {
          FOR UPDATE OF u`,
         [id],
       );
-      if (act.rowCount === 0) throw new NotFoundException('Usuario no encontrado');
+      if (act.rowCount === 0)
+        throw new NotFoundException('Usuario no encontrado');
       const antes = act.rows[0];
 
       if (id === actorId && rolId !== antes.rol_id) {
         throw new BadRequestException('No puede cambiar su propio rol');
+      }
+      if (!(await puedeGestionarUsuario(c, actorId, id))) {
+        throw new ForbiddenException(MENSAJE_JERARQUIA);
       }
 
       const rol = await c.query<{ id: string; nombre: string }>(
@@ -170,6 +191,10 @@ export class UsuariosService {
       );
       if (rol.rowCount === 0) {
         throw new BadRequestException('El rol seleccionado no existe');
+      }
+      if (rolId !== antes.rol_id) {
+        const faltan = await permisosFaltantesDeRol(c, actorId, rolId);
+        if (faltan.length > 0) throw errorRolSuperior(faltan);
       }
 
       await c.query(
@@ -189,7 +214,11 @@ export class UsuariosService {
         accion: 'usuario.editar',
         entidad: 'usuarios',
         entidadId: id,
-        anterior: { nombre: antes.nombre, apellido: antes.apellido, rol: antes.rol },
+        anterior: {
+          nombre: antes.nombre,
+          apellido: antes.apellido,
+          rol: antes.rol,
+        },
         nuevo: { nombre, apellido, rol: rol.rows[0].nombre },
         ip,
       });
@@ -226,9 +255,13 @@ export class UsuariosService {
         'SELECT username, is_active FROM usuarios WHERE id = $1 FOR UPDATE',
         [id],
       );
-      if (r.rowCount === 0) throw new NotFoundException('Usuario no encontrado');
+      if (r.rowCount === 0)
+        throw new NotFoundException('Usuario no encontrado');
       const antes = r.rows[0];
       if (antes.is_active === activo) return { ok: true };
+      if (!(await puedeGestionarUsuario(c, actorId, id))) {
+        throw new ForbiddenException(MENSAJE_JERARQUIA);
+      }
 
       await c.query(
         `UPDATE usuarios

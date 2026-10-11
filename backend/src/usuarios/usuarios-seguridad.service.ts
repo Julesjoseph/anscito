@@ -6,8 +6,8 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
-import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { puedeGestionarUsuario } from '../auth/jerarquia';
 import { DatabaseService } from '../database/database.service';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,32 +25,6 @@ function claveTemporal(largo = 12): string {
 export class UsuariosSeguridadService {
   constructor(private readonly db: DatabaseService) {}
 
-  // Verdadero si el usuario objetivo no tiene ningún permiso que el actor no tenga.
-  private async puedeGestionar(
-    c: PoolClient,
-    actorId: string,
-    objetivoId: string,
-  ): Promise<boolean> {
-    const r = await c.query<{ ok: boolean }>(
-      `SELECT NOT EXISTS (
-         SELECT 1
-         FROM usuario_roles ur
-         JOIN roles ro ON ro.id = ur.rol_id AND ro.is_active = true
-         JOIN rol_permisos rp ON rp.rol_id = ro.id
-         WHERE ur.usuario_id = $2
-           AND rp.permiso_id NOT IN (
-             SELECT rp2.permiso_id
-             FROM usuario_roles ur2
-             JOIN roles ro2 ON ro2.id = ur2.rol_id AND ro2.is_active = true
-             JOIN rol_permisos rp2 ON rp2.rol_id = ro2.id
-             WHERE ur2.usuario_id = $1
-           )
-       ) AS ok`,
-      [actorId, objetivoId],
-    );
-    return r.rows[0].ok;
-  }
-
   async resetearPassword(actorId: string, id: string, ip: string | undefined) {
     if (!UUID.test(id)) throw new NotFoundException('Usuario no encontrado');
     if (id === actorId) {
@@ -67,9 +41,10 @@ export class UsuariosSeguridadService {
         'SELECT username FROM usuarios WHERE id = $1 FOR UPDATE',
         [id],
       );
-      if (r.rowCount === 0) throw new NotFoundException('Usuario no encontrado');
+      if (r.rowCount === 0)
+        throw new NotFoundException('Usuario no encontrado');
 
-      if (!(await this.puedeGestionar(c, actorId, id))) {
+      if (!(await puedeGestionarUsuario(c, actorId, id))) {
         throw new ForbiddenException(
           'No puede gestionar a un usuario con más permisos que los suyos',
         );
@@ -110,9 +85,10 @@ export class UsuariosSeguridadService {
          FROM usuarios WHERE id = $1 FOR UPDATE`,
         [id],
       );
-      if (r.rowCount === 0) throw new NotFoundException('Usuario no encontrado');
+      if (r.rowCount === 0)
+        throw new NotFoundException('Usuario no encontrado');
 
-      if (!(await this.puedeGestionar(c, actorId, id))) {
+      if (!(await puedeGestionarUsuario(c, actorId, id))) {
         throw new ForbiddenException(
           'No puede gestionar a un usuario con más permisos que los suyos',
         );
