@@ -32,6 +32,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 007 | Entradas, salidas y ajustes de inventario |
 | 008 | Tipos de documento y terceros (clientes y proveedores) |
 | 009 | Datos de la empresa, más datos de sucursales, usuarios en Principal |
+| 010 | Ventas, líneas, pagos, formas de pago, configuración y contadores |
 
 ## Módulos terminados
 
