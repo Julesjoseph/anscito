@@ -8,6 +8,8 @@ import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { DatabaseService } from '../database/database.service';
 import { calcularItbis, normalizarMonto } from '../servicios/calculo-itbis';
+import { margenTotal, rentabilidad, restar } from './rentabilidad';
+import { SQL_TASA_VIGENTE, SQL_TOTALES_PRODUCTO } from './sql';
 import {
   armarCodigo,
   esCero,
@@ -17,12 +19,31 @@ import {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Tasa vigente hoy del impuesto "i" (subconsulta reutilizable).
-const SQL_TASA_VIGENTE = `(SELECT t.tasa FROM impuesto_tasas t
-   WHERE t.impuesto_id = i.id
-     AND t.vigente_desde <= current_date
-     AND (t.vigente_hasta IS NULL OR t.vigente_hasta >= current_date)
-   ORDER BY t.vigente_desde DESC LIMIT 1)`;
+// Si un producto no tiene stock mínimo propio, la alerta usa este valor
+// (decisión del dueño). Mientras no exista una pantalla de configuración,
+// se cambia aquí.
+const STOCK_MINIMO_POR_DEFECTO = '5';
+
+// Origen común de la lista y de los totales: existencia calculada con los
+// movimientos, mínimo efectivo, alerta y precio sin ITBIS. $1 = mínimo por
+// defecto.
+const SQL_DESDE = `FROM productos p
+  JOIN categorias c ON c.id = p.categoria_id
+  JOIN unidades_negocio un ON un.id = c.unidad_negocio_id
+  JOIN unidades_medida um ON um.id = p.unidad_id
+  JOIN impuestos i ON i.id = p.impuesto_id
+  ${SQL_TOTALES_PRODUCTO}
+  CROSS JOIN LATERAL (SELECT ${SQL_TASA_VIGENTE} AS tasa) tv
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(p.stock_minimo, $1::numeric)::numeric(14,3) AS minimo) mn
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN mv.existencia <= 0 THEN 'agotado'
+                WHEN mv.existencia <= mn.minimo THEN 'bajo' END AS alerta) al
+  CROSS JOIN LATERAL (
+    SELECT CASE WHEN p.precio_venta IS NULL OR tv.tasa IS NULL THEN NULL
+                WHEN p.precio_incluye_itbis
+                  THEN round(p.precio_venta * 100 / (100 + tv.tasa), 2)
+                ELSE p.precio_venta END AS precio_base) pb`;
 
 export type DatosProducto = {
   nombre?: unknown;
@@ -40,6 +61,7 @@ export type FiltrosProductos = {
   texto?: string;
   categoriaId?: string;
   estado?: string;
+  alerta?: string;
   pagina?: string;
   porPagina?: string;
 };
@@ -66,6 +88,14 @@ type FilaProducto = Limpio & {
   tasa: string | null;
   is_active: boolean;
   existencia_inicial: string;
+  entradas: string;
+  salidas: string;
+  existencia: string;
+  minimo: string;
+  alerta: 'bajo' | 'agotado' | null;
+  precio_base: string | null;
+  costo_total: string;
+  venta_total: string | null;
   total: number;
 };
 
@@ -157,8 +187,9 @@ export class ProductosService {
   }
 
   async listar(actorId: string, filtros: FiltrosProductos) {
+    // $1 siempre es el stock mínimo por defecto.
+    const params: unknown[] = [STOCK_MINIMO_POR_DEFECTO];
     const condiciones: string[] = [];
-    const params: unknown[] = [];
 
     const buscar = texto(filtros.texto);
     if (buscar) {
@@ -177,6 +208,12 @@ export class ProductosService {
     else if (estado === 'inactivos') condiciones.push('p.is_active = false');
     else if (estado !== 'todos')
       throw new BadRequestException('Estado inválido');
+    if (texto(filtros.alerta) === 'si')
+      condiciones.push('al.alerta IS NOT NULL');
+
+    const donde = condiciones.length
+      ? 'WHERE ' + condiciones.join(' AND ')
+      : '';
 
     const pagina = Math.max(
       1,
@@ -186,49 +223,89 @@ export class ProductosService {
       200,
       Math.max(1, Number.parseInt(texto(filtros.porPagina) || '50', 10) || 50),
     );
-    params.push(porPagina, (pagina - 1) * porPagina);
+    const n = params.length;
 
-    const r = await this.db.query<FilaProducto>(
-      `SELECT p.id, p.codigo, p.nombre,
-              p.categoria_id, c.nombre AS categoria, un.nombre AS unidad_negocio,
-              p.unidad_id, um.nombre AS unidad, um.permite_decimales,
-              p.costo, p.impuesto_id, i.nombre AS impuesto,
-              ${SQL_TASA_VIGENTE} AS tasa,
-              p.precio_venta, p.precio_incluye_itbis, p.stock_minimo,
-              p.is_active,
-              COALESCE((SELECT sum(m.cantidad) FROM movimientos_inventario m
-                        WHERE m.producto_id = p.id AND m.tipo = 'inicial'),
-                       0)::numeric(14,3) AS existencia_inicial,
-              count(*) OVER ()::int AS total
-       FROM productos p
-       JOIN categorias c ON c.id = p.categoria_id
-       JOIN unidades_negocio un ON un.id = c.unidad_negocio_id
-       JOIN unidades_medida um ON um.id = p.unidad_id
-       JOIN impuestos i ON i.id = p.impuesto_id
-       ${condiciones.length ? 'WHERE ' + condiciones.join(' AND ') : ''}
-       ORDER BY p.codigo
-       LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params,
-    );
+    const [r, t, a] = await Promise.all([
+      this.db.query<FilaProducto>(
+        `SELECT p.id, p.codigo, p.nombre,
+                p.categoria_id, c.nombre AS categoria, un.nombre AS unidad_negocio,
+                p.unidad_id, um.nombre AS unidad, um.permite_decimales,
+                p.costo, p.impuesto_id, i.nombre AS impuesto, tv.tasa,
+                p.precio_venta, p.precio_incluye_itbis, p.stock_minimo,
+                p.is_active, mv.existencia_inicial, mv.entradas, mv.salidas,
+                mv.existencia,
+                mn.minimo, al.alerta, pb.precio_base,
+                round(mv.existencia * p.costo, 2) AS costo_total,
+                round(mv.existencia * pb.precio_base, 2) AS venta_total,
+                count(*) OVER ()::int AS total
+         ${SQL_DESDE}
+         ${donde}
+         ORDER BY p.codigo
+         LIMIT $${n + 1} OFFSET $${n + 2}`,
+        [...params, porPagina, (pagina - 1) * porPagina],
+      ),
+      // Totales de TODO el filtro, no solo de la página.
+      this.db.query<{
+        costo_total: string;
+        venta_total: string;
+        costo_con_precio: string;
+      }>(
+        `SELECT COALESCE(sum(round(mv.existencia * p.costo, 2)), 0)::numeric(16,2)
+                  AS costo_total,
+                COALESCE(sum(round(mv.existencia * pb.precio_base, 2)), 0)::numeric(16,2)
+                  AS venta_total,
+                COALESCE(sum(round(mv.existencia * p.costo, 2))
+                  FILTER (WHERE pb.precio_base IS NOT NULL), 0)::numeric(16,2)
+                  AS costo_con_precio
+         ${SQL_DESDE}
+         ${donde}`,
+        params,
+      ),
+      // Alertas de todos los productos activos (para el aviso de arriba).
+      this.db.query<{ bajo: number; agotado: number }>(
+        `SELECT count(*) FILTER (WHERE al.alerta = 'bajo')::int AS bajo,
+                count(*) FILTER (WHERE al.alerta = 'agotado')::int AS agotado
+         ${SQL_DESDE}
+         WHERE p.is_active = true`,
+        [STOCK_MINIMO_POR_DEFECTO],
+      ),
+    ]);
 
-    // Sin el permiso inventario.ver_costos, el costo no sale del servidor.
+    // Sin el permiso inventario.ver_costos, el costo (y la ganancia, que
+    // lo revela) no sale del servidor.
     const verCostos = await this.tienePermiso(actorId, 'inventario.ver_costos');
 
-    const filas = r.rows.map(({ total: _total, costo, ...f }) => {
-      const precio =
-        f.precio_venta !== null && f.tasa !== null
-          ? calcularItbis(f.precio_venta, f.tasa, f.precio_incluye_itbis)
-          : null;
-      if (!verCostos) return { ...f, calculo_precio: precio };
-      return {
-        ...f,
-        costo,
-        // El costo se guarda sin ITBIS; se muestra como una factura.
-        calculo_costo:
-          f.tasa !== null ? calcularItbis(costo, f.tasa, false) : null,
-        calculo_precio: precio,
-      };
-    });
+    const filas = r.rows.map(
+      ({ total: _total, costo, costo_total, precio_base, ...f }) => {
+        const precio =
+          f.precio_venta !== null && f.tasa !== null
+            ? calcularItbis(f.precio_venta, f.tasa, f.precio_incluye_itbis)
+            : null;
+        if (!verCostos) return { ...f, calculo_precio: precio };
+        return {
+          ...f,
+          costo,
+          costo_total,
+          // El costo se guarda sin ITBIS; se muestra como una factura.
+          calculo_costo:
+            f.tasa !== null ? calcularItbis(costo, f.tasa, false) : null,
+          calculo_precio: precio,
+          rentabilidad:
+            precio_base !== null ? rentabilidad(costo, precio_base) : null,
+        };
+      },
+    );
+
+    const tot = t.rows[0];
+    const ganancia = restar(tot.venta_total, tot.costo_con_precio);
+    const totales = verCostos
+      ? {
+          costo_total: tot.costo_total,
+          venta_total: tot.venta_total,
+          ganancia_total: ganancia,
+          margen_total: margenTotal(ganancia, tot.venta_total),
+        }
+      : { venta_total: tot.venta_total };
 
     return {
       filas,
@@ -236,6 +313,9 @@ export class ProductosService {
       pagina,
       porPagina,
       verCostos,
+      totales,
+      alertas: a.rows[0],
+      stockMinimoPorDefecto: STOCK_MINIMO_POR_DEFECTO,
     };
   }
 

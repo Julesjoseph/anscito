@@ -31,6 +31,7 @@ export class ProductosController {
     @Query('texto') texto?: string,
     @Query('categoriaId') categoriaId?: string,
     @Query('estado') estado?: string,
+    @Query('alerta') alerta?: string,
     @Query('pagina') pagina?: string,
     @Query('porPagina') porPagina?: string,
   ) {
@@ -38,6 +39,7 @@ export class ProductosController {
       texto,
       categoriaId,
       estado,
+      alerta,
       pagina,
       porPagina,
     });
