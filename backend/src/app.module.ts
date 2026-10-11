@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { BancosModule } from './bancos/bancos.module';
 import { CajaModule } from './caja/caja.module';
+import { RemesasModule } from './remesas/remesas.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { DatabaseModule } from './database/database.module';
 import { EmpresaModule } from './empresa/empresa.module';
@@ -29,6 +30,7 @@ import { VentasModule } from './ventas/ventas.module';
     PanelModule,
     BancosModule,
     CajaModule,
+    RemesasModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

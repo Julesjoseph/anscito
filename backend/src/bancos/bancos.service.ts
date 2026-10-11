@@ -648,13 +648,20 @@ export class BancosService {
         monto_dop: string;
         estado: string;
         reversado: boolean;
+        de_envios: boolean;
       }>(
         `SELECT x.tipo, x.signo, x.monto, x.tasa, x.monto_dop, x.estado,
-                EXISTS (SELECT 1 FROM cuenta_movimientos r WHERE r.reverso_de = x.id) AS reversado
+                EXISTS (SELECT 1 FROM cuenta_movimientos r WHERE r.reverso_de = x.id) AS reversado,
+                (x.remesa_id IS NOT NULL OR x.remesa_entrega_id IS NOT NULL
+                  OR x.remesa_pago_id IS NOT NULL) AS de_envios
          FROM ${SQL_MOVS_CON_ESTADO} x WHERE x.id = $1`,
         [movimientoId],
       );
       const m = r.rows[0];
+      if (m.de_envios)
+        throw new BadRequestException(
+          'Este movimiento viene de Envíos (un envío, una entrega de agente o un pago de comisión) y no se reversa desde Bancos',
+        );
       if (m.tipo === 'reverso')
         throw new BadRequestException('Un reverso no se puede reversar');
       if (m.reversado)
@@ -803,7 +810,10 @@ export class BancosService {
       CASE WHEN x.tipo = 'transferencia_salida'
            THEN COALESCE(cd.nombre, cjd.nombre) ELSE COALESCE(co.nombre, cjo.nombre) END AS contraparte,
       t.monto_sale, t.monto_entra, t.cambiado_por,
-      EXISTS (SELECT 1 FROM cuenta_movimientos r WHERE r.reverso_de = x.id) AS reversado
+      EXISTS (SELECT 1 FROM cuenta_movimientos r WHERE r.reverso_de = x.id) AS reversado,
+      CASE WHEN rm.numero IS NOT NULL THEN 'E-' || lpad(rm.numero::text, 6, '0') END AS envio,
+      (x.remesa_id IS NOT NULL OR x.remesa_entrega_id IS NOT NULL
+        OR x.remesa_pago_id IS NOT NULL) AS de_envios
     FROM ${SQL_MOVS_CON_ESTADO} x
     JOIN cuentas ct ON ct.id = x.cuenta_id
     JOIN monedas mo ON mo.codigo = ct.moneda
@@ -816,7 +826,8 @@ export class BancosService {
     LEFT JOIN caja_sesiones sd ON sd.id = t.destino_sesion_id
     LEFT JOIN cajas cjd ON cjd.id = sd.caja_id
     LEFT JOIN caja_sesiones so ON so.id = t.origen_sesion_id
-    LEFT JOIN cajas cjo ON cjo.id = so.caja_id`;
+    LEFT JOIN cajas cjo ON cjo.id = so.caja_id
+    LEFT JOIN remesas rm ON rm.id = x.remesa_id`;
 
   async movimientos(
     cuentaId: string,

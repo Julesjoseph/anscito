@@ -93,6 +93,13 @@ export class PanelService {
     if (permisos.has('bancos.ver')) {
       resultado.bancos = await this.bancos();
     }
+    if (permisos.has('remesas.ver')) {
+      resultado.remesas = await this.remesas(
+        inicio,
+        fin,
+        permisos.has('remesas.entregas'),
+      );
+    }
     if (permisos.has('inventario.ver')) {
       resultado.inventario = await this.inventario(
         permisos.has('inventario.ver_costos'),
@@ -240,6 +247,65 @@ export class PanelService {
       [r.rows.map((f) => f.esperado)],
     );
     return { abiertas: r.rows, total: total.rows[0].total };
+  }
+
+  // Envíos a Haití del período. Lo que gana SCITO y lo que deben los agentes
+  // solo con el permiso de cuentas de agentes.
+  private async remesas(inicio: string, fin: string, verDinero: boolean) {
+    const r = await this.db.query<{
+      confirmados: number;
+      enviado: string;
+      recibido: string;
+      comision: string;
+      comision_agentes: string;
+      pendientes: number;
+      rechazados: number;
+    }>(
+      `SELECT count(*) FILTER (WHERE estado = 'confirmado')::int AS confirmados,
+              COALESCE(sum(monto_enviado) FILTER (WHERE estado = 'confirmado'), 0)::numeric(16,2) AS enviado,
+              COALESCE(sum(monto_recibir) FILTER (WHERE estado = 'confirmado'), 0)::numeric(16,2) AS recibido,
+              COALESCE(sum(comision) FILTER (WHERE estado = 'confirmado'), 0)::numeric(16,2) AS comision,
+              COALESCE(sum(comision_agente) FILTER (WHERE estado = 'confirmado'), 0)::numeric(16,2) AS comision_agentes,
+              count(*) FILTER (WHERE estado = 'rechazado')::int AS rechazados,
+              (SELECT count(*)::int FROM remesas WHERE estado = 'pendiente') AS pendientes
+       FROM remesas
+       WHERE origen = 'sistema' AND fecha >= $1 AND fecha < $2`,
+      [inicio, fin],
+    );
+    const f = r.rows[0];
+    const base = {
+      confirmados: f.confirmados,
+      enviado: f.enviado,
+      recibido: f.recibido,
+      pendientes: f.pendientes,
+      rechazados: f.rechazados,
+    };
+    if (!verDinero) return base;
+    const deuda = await this.db.query<{ debe: string; agentes: number }>(
+      `SELECT COALESCE(sum(d.debe), 0)::numeric(16,2) AS debe,
+              count(*) FILTER (WHERE d.debe > 0)::int AS agentes
+       FROM (
+         SELECT a.id,
+                COALESCE((SELECT sum(total_pagar) FROM remesas r
+                          WHERE r.agente_id = a.id AND r.estado = 'confirmado'
+                            AND r.origen = 'sistema'), 0)
+              - COALESCE((SELECT sum(monto) FROM remesa_entregas e
+                          WHERE e.agente_id = a.id), 0) AS debe
+         FROM remesa_agentes a
+       ) d`,
+    );
+    const ganancia = await this.db.query<{ v: string }>(
+      'SELECT ($1::numeric - $2::numeric)::numeric(16,2) AS v',
+      [f.comision, f.comision_agentes],
+    );
+    return {
+      ...base,
+      comision: f.comision,
+      comision_agentes: f.comision_agentes,
+      comision_scito: ganancia.rows[0].v,
+      agentes_deben: deuda.rows[0].debe,
+      agentes_con_deuda: deuda.rows[0].agentes,
+    };
   }
 
   // Saldo de las cuentas activas por moneda (ahora, no depende del período).
