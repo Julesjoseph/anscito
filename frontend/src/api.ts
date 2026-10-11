@@ -134,6 +134,8 @@ export type FilaServicio = {
   descripcion: string | null
   unidad_negocio_id: string
   unidad_negocio: string
+  categoria_id: string | null
+  categoria: string | null
   unidad_medida_id: string
   unidad_medida: string
   precio: string
@@ -149,8 +151,15 @@ export type FilaServicio = {
 export type Opcion = { id: string; codigo: string; nombre: string }
 export type ImpuestoVigente = Opcion & { tasa: string }
 
+export type CategoriaOpcion = {
+  id: string
+  nombre: string
+  unidad_negocio_id: string
+}
+
 export type CatalogosServicios = {
   unidadesNegocio: Opcion[]
+  categorias: CategoriaOpcion[]
   unidadesMedida: Opcion[]
   impuestos: ImpuestoVigente[]
 }
@@ -160,6 +169,7 @@ export type DatosServicio = {
   nombre: string
   descripcion: string
   unidadNegocioId: string
+  categoriaId: string
   unidadMedidaId: string
   precio: string
   costo: string
@@ -170,6 +180,7 @@ export type DatosServicio = {
 export type FiltrosServicios = {
   texto: string
   unidadNegocioId: string
+  categoriaId: string
   estado: 'activos' | 'inactivos' | 'todos'
 }
 
@@ -177,6 +188,7 @@ export const listarServicios = (token: string, f: FiltrosServicios) => {
   const q = new URLSearchParams({ estado: f.estado })
   if (f.texto.trim()) q.set('texto', f.texto.trim())
   if (f.unidadNegocioId) q.set('unidadNegocioId', f.unidadNegocioId)
+  if (f.categoriaId) q.set('categoriaId', f.categoriaId)
   return llamar<FilaServicio[]>('GET', `/servicios?${q.toString()}`, token)
 }
 
@@ -299,6 +311,71 @@ export const cambiarEstadoRol = (
   motivo?: string,
 ) =>
   llamar<{ ok: boolean }>('PATCH', `/roles/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+// ---------- Unidades de negocio y categorías (universales) ----------
+
+export type CategoriaArbol = {
+  id: string
+  nombre: string
+  descripcion: string | null
+  is_active: boolean
+  servicios_activos: number
+}
+
+export type UnidadArbol = {
+  id: string
+  codigo: string
+  nombre: string
+  is_active: boolean
+  servicios_activos: number
+  categorias: CategoriaArbol[]
+}
+
+export type DatosCategoria = {
+  unidadNegocioId: string
+  nombre: string
+  descripcion: string
+}
+
+export const arbolCategorias = (token: string) =>
+  llamar<UnidadArbol[]>('GET', '/unidades-negocio', token)
+
+export const crearUnidad = (token: string, nombre: string) =>
+  llamar<{ id: string }>('POST', '/unidades-negocio', token, { nombre })
+
+export const editarUnidad = (token: string, id: string, nombre: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/unidades-negocio/${id}`, token, { nombre })
+
+export const estadoUnidad = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/unidades-negocio/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+export const crearCategoria = (token: string, datos: DatosCategoria) =>
+  llamar<{ id: string }>('POST', '/categorias', token, datos)
+
+export const editarCategoria = (
+  token: string,
+  id: string,
+  datos: DatosCategoria,
+) => llamar<{ ok: boolean }>('PATCH', `/categorias/${id}`, token, datos)
+
+export const estadoCategoria = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/categorias/${id}/estado`, token, {
     is_active: isActive,
     motivo,
   })

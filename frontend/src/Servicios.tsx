@@ -86,6 +86,7 @@ function FormServicio({
   const [unidadNegocioId, setUnidadNegocioId] = useState(
     fila?.unidad_negocio_id ?? '',
   )
+  const [categoriaId, setCategoriaId] = useState(fila?.categoria_id ?? '')
   const [unidadMedidaId, setUnidadMedidaId] = useState(
     fila?.unidad_medida_id ?? '',
   )
@@ -102,6 +103,10 @@ function FormServicio({
   } | null>(null)
 
   const impuesto = catalogos.impuestos.find((i) => i.id === impuestoId)
+  // Solo las categorías de la unidad elegida.
+  const categorias = catalogos.categorias.filter(
+    (c) => c.unidad_negocio_id === unidadNegocioId,
+  )
   const exento = impuesto !== undefined && Number(impuesto.tasa) === 0
   const local = impuesto ? vistaPrevia(precio, impuesto.tasa, incluye) : null
   const clave = `${precio.trim()}|${impuestoId}|${incluye}`
@@ -140,6 +145,7 @@ function FormServicio({
       nombre,
       descripcion,
       unidadNegocioId,
+      categoriaId,
       unidadMedidaId,
       precio: precio.trim(),
       costo: costo.trim(),
@@ -202,18 +208,41 @@ function FormServicio({
         />
       </label>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label className="flex flex-col gap-1 text-sm text-gray-600">
           Unidad de negocio
           <select
             value={unidadNegocioId}
-            onChange={(e) => setUnidadNegocioId(e.target.value)}
+            onChange={(e) => {
+              setUnidadNegocioId(e.target.value)
+              setCategoriaId('')
+            }}
             className={CAMPO}
           >
             <option value="">Seleccione…</option>
             {catalogos.unidadesNegocio.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-gray-600">
+          Categoría
+          <select
+            value={categoriaId}
+            onChange={(e) => setCategoriaId(e.target.value)}
+            disabled={!unidadNegocioId}
+            className={`${CAMPO} disabled:bg-gray-100 disabled:text-gray-400`}
+          >
+            <option value="">
+              {unidadNegocioId && categorias.length === 0
+                ? 'Sin categorías en esta unidad'
+                : 'Sin categoría'}
+            </option>
+            {categorias.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
               </option>
             ))}
           </select>
@@ -443,6 +472,7 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
   const [filtros, setFiltros] = useState<FiltrosServicios>({
     texto: '',
     unidadNegocioId: '',
+    categoriaId: '',
     estado: 'activos',
   })
   const [error, setError] = useState('')
@@ -510,7 +540,11 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
         <select
           value={filtros.unidadNegocioId}
           onChange={(e) =>
-            setFiltros({ ...filtros, unidadNegocioId: e.target.value })
+            setFiltros({
+              ...filtros,
+              unidadNegocioId: e.target.value,
+              categoriaId: '',
+            })
           }
           className={CAMPO}
           aria-label="Unidad de negocio"
@@ -522,6 +556,25 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
             </option>
           ))}
         </select>
+        {filtros.unidadNegocioId && (
+          <select
+            value={filtros.categoriaId}
+            onChange={(e) =>
+              setFiltros({ ...filtros, categoriaId: e.target.value })
+            }
+            className={CAMPO}
+            aria-label="Categoría"
+          >
+            <option value="">Todas las categorías</option>
+            {catalogos?.categorias
+              .filter((c) => c.unidad_negocio_id === filtros.unidadNegocioId)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+          </select>
+        )}
         <select
           value={filtros.estado}
           onChange={(e) =>
@@ -576,7 +629,7 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
               <tr>
                 <th className="px-4 py-3 font-medium">Código</th>
                 <th className="px-4 py-3 font-medium">Nombre</th>
-                <th className="px-4 py-3 font-medium">Unidad de negocio</th>
+                <th className="px-4 py-3 font-medium">Unidad / categoría</th>
                 <th className="px-4 py-3 text-right font-medium">Precio</th>
                 <th className="px-4 py-3 font-medium">ITBIS</th>
                 <th className="px-4 py-3 text-right font-medium">Total cliente</th>
@@ -596,7 +649,12 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
                       <div className="text-xs text-gray-500">{f.descripcion}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3">{f.unidad_negocio}</td>
+                  <td className="px-4 py-3">
+                    {f.unidad_negocio}
+                    {f.categoria && (
+                      <div className="text-xs text-gray-500">{f.categoria}</div>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     {dinero(f.precio)}
                     <div className="text-xs text-gray-500">

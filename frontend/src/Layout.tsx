@@ -11,11 +11,13 @@ import {
   ShieldCheck,
   ShoppingCart,
   Smartphone,
+  Tags,
   Users,
   Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Perfil } from './api'
+import Categorias from './Categorias'
 import Roles from './Roles'
 import Servicios from './Servicios'
 import Usuarios from './Usuarios'
@@ -37,6 +39,13 @@ const MODULOS: Modulo[] = [
     Icono: ClipboardList,
     listo: true,
     permiso: 'servicios.ver',
+  },
+  {
+    id: 'categorias',
+    nombre: 'Categorías',
+    Icono: Tags,
+    listo: true,
+    permiso: 'categorias.ver',
   },
   { id: 'inventario', nombre: 'Inventario', Icono: Package, listo: false },
   { id: 'caja', nombre: 'Caja y bancos', Icono: Wallet, listo: false },
@@ -159,6 +168,12 @@ export default function Layout({ perfil, token, onSalir }: Props) {
   usuarioId={perfil.id}
   onSesionVencida={onSalir}
 />
+        ) : pagina === 'categorias' ? (
+          <Categorias
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
         ) : pagina === 'roles' ? (
           <Roles
             token={token}
