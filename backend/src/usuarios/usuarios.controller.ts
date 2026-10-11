@@ -34,6 +34,12 @@ export class UsuariosController {
     return this.usuarios.listar();
   }
 
+  @Get('sucursales')
+  @RequierePermiso('usuarios.ver')
+  sucursales() {
+    return this.usuarios.listarSucursales();
+  }
+
   @Post()
   @RequierePermiso('usuarios.crear')
   crear(@Req() req: Peticion, @Body() body: DatosCrear) {

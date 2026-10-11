@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import {
   permisosFaltantesDeRol,
@@ -30,12 +31,14 @@ export type DatosCrear = {
   apellido?: string;
   password?: string;
   rolId?: string;
+  sucursalId?: string;
 };
 
 export type DatosEditar = {
   nombre?: string;
   apellido?: string;
   rolId?: string;
+  sucursalId?: string;
 };
 
 type FilaEdicion = {
@@ -44,6 +47,8 @@ type FilaEdicion = {
   apellido: string;
   rol_id: string | null;
   rol: string | null;
+  sucursal_id: string | null;
+  sucursal: string | null;
 };
 
 @Injectable()
@@ -55,14 +60,36 @@ export class UsuariosService {
       `SELECT u.id, u.username, u.nombre, u.apellido, u.is_active,
               u.last_login_at, u.locked_until,
               COALESCE(string_agg(ro.nombre, ', ' ORDER BY ro.nombre), '') AS roles,
-              (array_agg(ur.rol_id))[1] AS rol_id
+              (array_agg(ur.rol_id))[1] AS rol_id,
+              u.sucursal_id, s.nombre AS sucursal
        FROM usuarios u
        LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
        LEFT JOIN roles ro ON ro.id = ur.rol_id
-       GROUP BY u.id
+       LEFT JOIN sucursales s ON s.id = u.sucursal_id
+       GROUP BY u.id, s.nombre
        ORDER BY u.username`,
     );
     return r.rows;
+  }
+
+  // Sucursales activas para el formulario de usuarios.
+  async listarSucursales() {
+    const r = await this.db.query(
+      `SELECT id, codigo, nombre, es_principal FROM sucursales
+       WHERE is_active = true ORDER BY es_principal DESC, lower(nombre)`,
+    );
+    return r.rows;
+  }
+
+  private async sucursalActiva(c: PoolClient, sucursalId: string) {
+    const r = await c.query<{ nombre: string }>(
+      'SELECT nombre FROM sucursales WHERE id = $1 AND is_active = true',
+      [sucursalId],
+    );
+    if (r.rowCount === 0) {
+      throw new BadRequestException('La sucursal no existe o está inactiva');
+    }
+    return r.rows[0].nombre;
   }
 
   async listarRoles() {
@@ -81,6 +108,7 @@ export class UsuariosService {
     const apellido = String(datos.apellido ?? '').trim();
     const password = String(datos.password ?? '');
     const rolId = String(datos.rolId ?? '');
+    const sucursalId = String(datos.sucursalId ?? '');
 
     if (!USERNAME.test(username)) {
       throw new BadRequestException(
@@ -98,6 +126,9 @@ export class UsuariosService {
     if (!UUID.test(rolId)) {
       throw new BadRequestException('Seleccione un rol');
     }
+    if (!UUID.test(sucursalId)) {
+      throw new BadRequestException('Seleccione la sucursal');
+    }
 
     const hash = await bcrypt.hash(password, 12);
 
@@ -112,14 +143,15 @@ export class UsuariosService {
         }
         const faltan = await permisosFaltantesDeRol(c, actorId, rolId);
         if (faltan.length > 0) throw errorRolSuperior(faltan);
+        const sucursal = await this.sucursalActiva(c, sucursalId);
 
         const u = await c.query<{ id: string }>(
           `INSERT INTO usuarios
              (username, nombre, apellido, password_hash,
-              must_change_password, created_by)
-           VALUES ($1, $2, $3, $4, true, $5)
+              must_change_password, created_by, sucursal_id)
+           VALUES ($1, $2, $3, $4, true, $5, $6)
            RETURNING id`,
-          [username, nombre, apellido, hash, actorId],
+          [username, nombre, apellido, hash, actorId, sucursalId],
         );
         const nuevoId = u.rows[0].id;
 
@@ -133,7 +165,13 @@ export class UsuariosService {
           accion: 'usuario.crear',
           entidad: 'usuarios',
           entidadId: nuevoId,
-          nuevo: { username, nombre, apellido, rol: rol.rows[0].nombre },
+          nuevo: {
+            username,
+            nombre,
+            apellido,
+            rol: rol.rows[0].nombre,
+            sucursal,
+          },
           ip,
         });
 
@@ -158,18 +196,24 @@ export class UsuariosService {
     const nombre = String(datos.nombre ?? '').trim();
     const apellido = String(datos.apellido ?? '').trim();
     const rolId = String(datos.rolId ?? '');
+    const sucursalId = String(datos.sucursalId ?? '');
 
     if (!nombre || !apellido || nombre.length > 100 || apellido.length > 100) {
       throw new BadRequestException('El nombre y el apellido son obligatorios');
     }
     if (!UUID.test(rolId)) throw new BadRequestException('Seleccione un rol');
+    if (!UUID.test(sucursalId)) {
+      throw new BadRequestException('Seleccione la sucursal');
+    }
 
     return this.db.transaccion(async (c) => {
       const act = await c.query<FilaEdicion>(
-        `SELECT u.id, u.nombre, u.apellido, ur.rol_id, ro.nombre AS rol
+        `SELECT u.id, u.nombre, u.apellido, ur.rol_id, ro.nombre AS rol,
+                u.sucursal_id, s.nombre AS sucursal
          FROM usuarios u
          LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
          LEFT JOIN roles ro ON ro.id = ur.rol_id
+         LEFT JOIN sucursales s ON s.id = u.sucursal_id
          WHERE u.id = $1
          FOR UPDATE OF u`,
         [id],
@@ -197,9 +241,17 @@ export class UsuariosService {
         if (faltan.length > 0) throw errorRolSuperior(faltan);
       }
 
+      // Si no cambia, se respeta aunque la sucursal esté inactiva.
+      const sucursal =
+        sucursalId === antes.sucursal_id
+          ? antes.sucursal
+          : await this.sucursalActiva(c, sucursalId);
+
       await c.query(
-        'UPDATE usuarios SET nombre = $2, apellido = $3, updated_at = now() WHERE id = $1',
-        [id, nombre, apellido],
+        `UPDATE usuarios SET nombre = $2, apellido = $3, sucursal_id = $4,
+                updated_at = now()
+         WHERE id = $1`,
+        [id, nombre, apellido, sucursalId],
       );
       if (rolId !== antes.rol_id) {
         await c.query('DELETE FROM usuario_roles WHERE usuario_id = $1', [id]);
@@ -218,8 +270,9 @@ export class UsuariosService {
           nombre: antes.nombre,
           apellido: antes.apellido,
           rol: antes.rol,
+          sucursal: antes.sucursal,
         },
-        nuevo: { nombre, apellido, rol: rol.rows[0].nombre },
+        nuevo: { nombre, apellido, rol: rol.rows[0].nombre, sucursal },
         ip,
       });
 
