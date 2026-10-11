@@ -18,6 +18,8 @@ import {
   sumar,
 } from './calculo-venta';
 import type { LineaCalculada } from './calculo-venta';
+import { generarRecibo } from './recibo-pdf';
+import type { DatosRecibo, Formato } from './recibo-pdf';
 
 // Ventas. Cada venta copia precio, costo, impuesto y tasa del día; descuenta
 // el inventario de los productos en la misma transacción (sin dejar el stock
@@ -717,6 +719,31 @@ export class VentasService {
       }),
       pagos: pagos.rows,
     };
+  }
+
+  // ---------- Comprobante interno en PDF (80 mm, 58 mm o carta) ----------
+
+  async recibo(actorId: string, id: string, formato: unknown) {
+    const f = texto(formato) || '80';
+    if (f !== '80' && f !== '58' && f !== 'carta') {
+      throw new BadRequestException('Formato inválido: use 80, 58 o carta');
+    }
+    // El detalle ya aplica los permisos (documento oculto si corresponde).
+    const venta = (await this.detalle(
+      actorId,
+      id,
+    )) as unknown as DatosRecibo['venta'];
+    const e = await this.db.query<DatosRecibo['empresa']>(
+      `SELECT nombre_comercial, razon_social, rnc, direccion, telefono, whatsapp,
+              correo, logo, logo_tipo
+       FROM empresa WHERE id = 1`,
+    );
+    const zona = await this.config(this.db, 'empresa.zona_horaria');
+    const pdf = await generarRecibo(
+      { empresa: e.rows[0], venta, zonaHoraria: zona },
+      f as Formato,
+    );
+    return { pdf, nombre: `${venta.numero_texto}.pdf` };
   }
 
   // ---------- Comprobante fiscal (NCF/e-CF emitido en el sistema actual) ----------

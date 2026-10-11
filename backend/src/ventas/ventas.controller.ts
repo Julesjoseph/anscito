@@ -8,8 +8,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UsuarioActual } from '../auth/jwt-auth.guard';
 import { PermisosGuard } from '../auth/permisos.guard';
@@ -72,6 +74,28 @@ export class VentasController {
   @RequierePermiso('ventas.ver')
   detalle(@Req() req: Peticion, @Param('id') id: string) {
     return this.ventas.detalle(req.usuario.id, id);
+  }
+
+  // Comprobante interno en PDF, listo para imprimir o guardar.
+  @Get(':id/recibo')
+  @RequierePermiso('ventas.ver')
+  async recibo(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Query('formato') formato: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { pdf, nombre } = await this.ventas.recibo(
+      req.usuario.id,
+      id,
+      formato,
+    );
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${nombre}"`,
+      'Cache-Control': 'no-store',
+    });
+    res.send(pdf);
   }
 
   @Patch(':id/comprobante')
