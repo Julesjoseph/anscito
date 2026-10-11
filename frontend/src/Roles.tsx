@@ -48,6 +48,9 @@ const NOMBRES_MODULO: Record<string, string> = {
   impuestos: 'Impuestos',
   categorias: 'Categorías',
   inventario: 'Inventario',
+  clientes: 'Clientes',
+  proveedores: 'Proveedores',
+  terceros: 'Datos personales de clientes y proveedores',
 }
 
 function nombreModulo(modulo: string): string {

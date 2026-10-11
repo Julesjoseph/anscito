@@ -606,3 +606,103 @@ export const ajustarInventario = (
 
 export const kardexProducto = (token: string, id: string) =>
   llamar<Kardex>('GET', `/productos/${id}/kardex`, token)
+
+// ---------- Clientes y proveedores ----------
+
+// Ruta de cada lista (son listas separadas con sus propios permisos).
+export type RolTercero = 'clientes' | 'proveedores'
+
+export type TipoDocumento = {
+  id: string
+  codigo: string
+  nombre: string
+  ayuda: string
+}
+
+export type FilaTercero = {
+  id: string
+  tipo_documento_id: string | null
+  tipo_documento: string | null
+  // Enmascarado (********678) sin el permiso terceros.ver_documento.
+  numero_documento: string | null
+  nombre: string
+  nombre_comercial: string | null
+  es_contribuyente: boolean
+  direccion: string | null
+  telefono: string | null
+  whatsapp: string | null
+  correo: string | null
+  notas: string | null
+  puede_credito: boolean
+  persona_contacto: string | null
+  dias_credito: number | null
+  es_protegido: boolean
+  is_active: boolean
+}
+
+export type PaginaTerceros = {
+  filas: FilaTercero[]
+  total: number
+  pagina: number
+  porPagina: number
+  verDocumento: boolean
+}
+
+export type FiltrosTerceros = {
+  texto: string
+  estado: 'activos' | 'inactivos' | 'todos'
+  soloContribuyentes: boolean
+  pagina: number
+}
+
+export type DatosTercero = {
+  tipoDocumentoId: string
+  numeroDocumento: string
+  nombre: string
+  nombreComercial: string
+  esContribuyente: boolean
+  direccion: string
+  telefono: string
+  whatsapp: string
+  correo: string
+  notas: string
+  puedeCredito: boolean
+  personaContacto: string
+  diasCredito: string
+}
+
+export const listarTerceros = (
+  rol: RolTercero,
+  token: string,
+  f: FiltrosTerceros,
+) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.soloContribuyentes) q.set('contribuyente', 'si')
+  return llamar<PaginaTerceros>('GET', `/${rol}?${q.toString()}`, token)
+}
+
+export const tiposDocumento = (rol: RolTercero, token: string) =>
+  llamar<TipoDocumento[]>('GET', `/${rol}/tipos-documento`, token)
+
+export const crearTercero = (rol: RolTercero, token: string, datos: DatosTercero) =>
+  llamar<{ id: string }>('POST', `/${rol}`, token, datos)
+
+export const editarTercero = (
+  rol: RolTercero,
+  token: string,
+  id: string,
+  datos: DatosTercero,
+) => llamar<{ ok: boolean }>('PATCH', `/${rol}/${id}`, token, datos)
+
+export const estadoTercero = (
+  rol: RolTercero,
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/${rol}/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })

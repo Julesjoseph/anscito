@@ -49,22 +49,15 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   salidas con causa, ajuste por conteo, kárdex, costo promedio ponderado,
   alertas de stock (mínimo propio o 5 por defecto), ganancia (margen y sobre
   costo, sin ITBIS), corrección de costo con motivo.
-
-## En curso
-
-- **Clientes y proveedores** (migración 008 y backend listos y probados,
-  `backend/scripts/probar-clientes.ps1`; falta la pantalla). Decisiones del dueño:
-  - Listas **separadas** (cada registro es cliente o proveedor).
-  - Clientes: casilla "Puede comprar a crédito" (sin montos).
-  - Proveedores: persona de contacto y días de plazo.
-  - Documento opcional, obligatorio si "es contribuyente"; tipos RNC (9),
-    cédula (11), pasaporte, otro. Solo formato y largo, sin dígito
-    verificador ni consulta a la DGII.
-  - Datos: dirección, teléfono, WhatsApp, correo, notas, nombre comercial.
-  - "Consumidor final" protegido.
-  - Privacidad: sin `terceros.ver_documento` el documento sale enmascarado;
-    la auditoría guarda el documento enmascarado y solo qué datos de contacto
-    cambiaron. La Ley 172-13 debe revisarla el abogado del dueño.
+- **Clientes y proveedores** (menús Clientes y Proveedores): listas
+  separadas en la tabla `terceros` (campo `rol`). Clientes con "Puede comprar
+  a crédito"; proveedores con persona de contacto y días de plazo. Documento
+  opcional, obligatorio si "es contribuyente" (RNC 9, cédula 11, pasaporte,
+  otro; solo formato y largo, sin dígito verificador ni consulta a la DGII).
+  WhatsApp con enlace directo. "Consumidor final" protegido. Privacidad: sin
+  `terceros.ver_documento` el documento sale enmascarado y no se puede
+  cambiar; la auditoría guarda el documento enmascarado y solo qué datos de
+  contacto cambiaron. La Ley 172-13 debe revisarla el abogado del dueño.
 
 ## Pendientes y decisiones abiertas
 

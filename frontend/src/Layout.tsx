@@ -12,6 +12,8 @@ import {
   ShoppingCart,
   Smartphone,
   Tags,
+  Truck,
+  UserRound,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -21,6 +23,7 @@ import Categorias from './Categorias'
 import Inventario from './Inventario'
 import Roles from './Roles'
 import Servicios from './Servicios'
+import Terceros from './Terceros'
 import Usuarios from './Usuarios'
 
 type Modulo = {
@@ -61,6 +64,20 @@ const MODULOS: Modulo[] = [
   { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
   { id: 'nomina', nombre: 'Nómina', Icono: Briefcase, listo: false },
   { id: 'reportes', nombre: 'Reportes', Icono: FileText, listo: false },
+  {
+    id: 'clientes',
+    nombre: 'Clientes',
+    Icono: UserRound,
+    listo: true,
+    permiso: 'clientes.ver',
+  },
+  {
+    id: 'proveedores',
+    nombre: 'Proveedores',
+    Icono: Truck,
+    listo: true,
+    permiso: 'proveedores.ver',
+  },
   {
     id: 'usuarios',
     nombre: 'Usuarios',
@@ -175,6 +192,14 @@ export default function Layout({ perfil, token, onSalir }: Props) {
   usuarioId={perfil.id}
   onSesionVencida={onSalir}
 />
+        ) : pagina === 'clientes' || pagina === 'proveedores' ? (
+          <Terceros
+            key={pagina}
+            rol={pagina}
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
         ) : pagina === 'inventario' ? (
           <Inventario
             token={token}
