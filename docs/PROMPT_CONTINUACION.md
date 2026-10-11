@@ -36,6 +36,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 011 | Ganancia de servicios por costo o por comisión %; % copiado en cada venta |
 | 012 | Caja: cajas fijas, sesiones con arqueo, movimientos inmutables, categorías de gasto |
 | 013 | Bancos: monedas (DOP, USD, HTG), cuentas y billeteras, movimientos con tasa, confirmaciones, transferencias entre cuentas y caja |
+| 014 | Envíos a Haití (remesas): tarifas con historial, agentes, beneficiarios, motivos, envíos pendiente/confirmado/rechazado, entregas de agentes, pago de comisiones, roles de operadores |
 
 ## Módulos terminados
 

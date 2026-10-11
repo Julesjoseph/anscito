@@ -104,7 +104,7 @@ docs/       Documentación (vacío por ahora)
      enseñarle la consulta de comprobación.
   Si el dueño las ejecuta en pgAdmin y una transacción queda rota, se
   arregla con `ROLLBACK;`.
-- Aplicadas hasta ahora: 001 a 013.
+- Aplicadas hasta ahora: 001 a 014.
 - Prohibido sin autorización explícita: `DROP`, `TRUNCATE`, `DELETE` masivo,
   `ALTER ... DROP COLUMN`, cambios de tipo con pérdida, desactivar triggers.
 
