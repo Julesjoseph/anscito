@@ -21,9 +21,10 @@ import {
   editarUsuario,
   listarRoles,
   listarUsuarios,
+  sucursalesParaUsuarios,
   resetearPassword,
 } from './api'
-import type { FilaUsuario, Rol } from './api'
+import type { FilaUsuario, Rol, SucursalOpcion } from './api'
 
 const CAMPO =
   'h-10 rounded-lg border border-gray-300 px-3 text-base text-gray-900 outline-none focus:border-[#C8102E]'
@@ -89,6 +90,7 @@ function mensajeDe(err: unknown): string {
 type PropsForm = {
   token: string
   roles: Rol[]
+  sucursales: SucursalOpcion[]
   fila?: FilaUsuario
   onListo: () => void
   onCancelar: () => void
@@ -98,6 +100,7 @@ type PropsForm = {
 function FormUsuario({
   token,
   roles,
+  sucursales,
   fila,
   onListo,
   onCancelar,
@@ -108,6 +111,10 @@ function FormUsuario({
   const [apellido, setApellido] = useState(fila?.apellido ?? '')
   const [password, setPassword] = useState('')
   const [rolId, setRolId] = useState(fila?.rol_id ?? '')
+  // Los usuarios nuevos empiezan en la sucursal principal.
+  const [sucursalId, setSucursalId] = useState(
+    fila?.sucursal_id ?? sucursales.find((s) => s.es_principal)?.id ?? '',
+  )
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
 
@@ -117,9 +124,16 @@ function FormUsuario({
     setGuardando(true)
     try {
       if (fila) {
-        await editarUsuario(token, fila.id, { nombre, apellido, rolId })
+        await editarUsuario(token, fila.id, { nombre, apellido, rolId, sucursalId })
       } else {
-        await crearUsuario(token, { username, nombre, apellido, password, rolId })
+        await crearUsuario(token, {
+          username,
+          nombre,
+          apellido,
+          password,
+          rolId,
+          sucursalId,
+        })
       }
       onListo()
     } catch (err) {
@@ -192,6 +206,26 @@ function FormUsuario({
           {roles.map((r) => (
             <option key={r.id} value={r.id}>
               {r.nombre}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-sm text-gray-600">
+        Sucursal
+        <select
+          value={sucursalId}
+          onChange={(e) => setSucursalId(e.target.value)}
+          className={CAMPO}
+        >
+          <option value="">Seleccione la sucursal</option>
+          {/* Si su sucursal actual está inactiva, sigue apareciendo. */}
+          {fila?.sucursal_id &&
+            !sucursales.some((s) => s.id === fila.sucursal_id) && (
+              <option value={fila.sucursal_id}>{fila.sucursal} (inactiva)</option>
+            )}
+          {sucursales.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.nombre}
             </option>
           ))}
         </select>
@@ -484,6 +518,7 @@ export default function Usuarios({
 }: Props) {
   const [filas, setFilas] = useState<FilaUsuario[] | null>(null)
   const [roles, setRoles] = useState<Rol[]>([])
+  const [sucursales, setSucursales] = useState<SucursalOpcion[]>([])
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
   const [modal, setModal] = useState<Modal>(null)
@@ -518,6 +553,7 @@ export default function Usuarios({
   useEffect(() => {
     if (!puedeCrear && !puedeEditar) return
     listarRoles(token).then(setRoles).catch(manejar)
+    sucursalesParaUsuarios(token).then(setSucursales).catch(manejar)
   }, [token, puedeCrear, puedeEditar, manejar])
 
   function terminado(mensaje: string) {
@@ -568,6 +604,7 @@ export default function Usuarios({
                 <th className="px-4 py-3 font-medium">Usuario</th>
                 <th className="px-4 py-3 font-medium">Nombre</th>
                 <th className="px-4 py-3 font-medium">Rol</th>
+                <th className="px-4 py-3 font-medium">Sucursal</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
                 <th className="px-4 py-3 font-medium">Último acceso</th>
                 {hayAcciones && <th className="px-4 py-3" />}
@@ -581,6 +618,7 @@ export default function Usuarios({
                     {f.nombre} {f.apellido}
                   </td>
                   <td className="px-4 py-3">{f.roles || '—'}</td>
+                  <td className="px-4 py-3">{f.sucursal ?? '—'}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`rounded-md px-2 py-0.5 text-xs ${
@@ -671,6 +709,7 @@ export default function Usuarios({
           <FormUsuario
             token={token}
             roles={roles}
+            sucursales={sucursales}
             onListo={() => terminado('Usuario creado correctamente')}
             onCancelar={() => setModal(null)}
             onSesionVencida={onSesionVencida}
@@ -682,6 +721,7 @@ export default function Usuarios({
           <FormUsuario
             token={token}
             roles={roles}
+            sucursales={sucursales}
             fila={modal.fila}
             onListo={() => terminado('Cambios guardados')}
             onCancelar={() => setModal(null)}

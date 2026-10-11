@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   BookOpen,
   Briefcase,
+  Building2,
   ClipboardList,
   FileText,
   Landmark,
@@ -18,7 +19,9 @@ import {
   Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { Perfil } from './api'
+import type { Marca, Perfil } from './api'
+import Empresa from './Empresa'
+import { LogoMarca } from './marca'
 import Categorias from './Categorias'
 import Inventario from './Inventario'
 import Roles from './Roles'
@@ -79,6 +82,13 @@ const MODULOS: Modulo[] = [
     permiso: 'proveedores.ver',
   },
   {
+    id: 'empresa',
+    nombre: 'Empresa',
+    Icono: Building2,
+    listo: true,
+    permiso: 'empresa.ver',
+  },
+  {
     id: 'usuarios',
     nombre: 'Usuarios',
     Icono: Users,
@@ -94,7 +104,13 @@ const MODULOS: Modulo[] = [
   },
 ]
 
-type Props = { perfil: Perfil; token: string; onSalir: () => void }
+type Props = {
+  perfil: Perfil
+  token: string
+  marca: Marca
+  onMarcaCambiada: () => void
+  onSalir: () => void
+}
 
 function Panel() {
   const tarjetas = [
@@ -121,7 +137,13 @@ function Panel() {
   )
 }
 
-export default function Layout({ perfil, token, onSalir }: Props) {
+export default function Layout({
+  perfil,
+  token,
+  marca,
+  onMarcaCambiada,
+  onSalir,
+}: Props) {
   const [pagina, setPagina] = useState('panel')
 
   const visibles = MODULOS.filter(
@@ -132,11 +154,9 @@ export default function Layout({ perfil, token, onSalir }: Props) {
     <div className="min-h-screen flex bg-gray-100">
       <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col">
         <div className="flex items-center gap-2 px-4 py-4">
-          <div className="w-9 h-9 rounded-lg bg-[#C8102E] text-white flex items-center justify-center font-medium">
-            S
-          </div>
+          <LogoMarca marca={marca} tamano="chico" />
           <div className="leading-tight">
-            <div className="text-sm font-medium">SCITO ENTREPRISE</div>
+            <div className="text-sm font-medium">{marca.nombre_comercial}</div>
             <div className="text-xs text-gray-500">Administración</div>
           </div>
         </div>
@@ -192,6 +212,14 @@ export default function Layout({ perfil, token, onSalir }: Props) {
   usuarioId={perfil.id}
   onSesionVencida={onSalir}
 />
+        ) : pagina === 'empresa' ? (
+          <Empresa
+            token={token}
+            permisos={perfil.permisos}
+            marca={marca}
+            onMarcaCambiada={onMarcaCambiada}
+            onSesionVencida={onSalir}
+          />
         ) : pagina === 'clientes' || pagina === 'proveedores' ? (
           <Terceros
             key={pagina}

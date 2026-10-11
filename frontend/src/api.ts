@@ -23,6 +23,8 @@ export type FilaUsuario = {
   locked_until: string | null
   roles: string
   rol_id: string | null
+  sucursal_id: string | null
+  sucursal: string | null
 }
 
 export type Rol = { id: string; codigo: string; nombre: string }
@@ -71,13 +73,14 @@ export const crearUsuario = (
     apellido: string
     password: string
     rolId: string
+    sucursalId: string
   },
 ) => llamar<{ id: string }>('POST', '/usuarios', token, datos)
 
 export const editarUsuario = (
   token: string,
   id: string,
-  datos: { nombre: string; apellido: string; rolId: string },
+  datos: { nombre: string; apellido: string; rolId: string; sucursalId: string },
 ) => llamar<{ ok: boolean }>('PATCH', `/usuarios/${id}`, token, datos)
 
 export const cambiarEstadoUsuario = (
@@ -706,3 +709,103 @@ export const estadoTercero = (
     is_active: isActive,
     motivo,
   })
+
+// ---------- Empresa y sucursales ----------
+
+// Pública: se pide antes de iniciar sesión.
+export type Marca = {
+  nombre_comercial: string
+  tiene_logo: boolean
+  version: string
+}
+
+export async function obtenerMarca(): Promise<Marca> {
+  const res = await fetch(`${API_URL}/marca`)
+  if (!res.ok) throw new Error('No se pudo cargar la marca')
+  return (await res.json()) as Marca
+}
+
+export type FichaEmpresa = {
+  razon_social: string | null
+  nombre_comercial: string
+  rnc: string | null
+  direccion: string | null
+  telefono: string | null
+  whatsapp: string | null
+  correo: string | null
+  sitio_web: string | null
+  tiene_logo: boolean
+}
+
+export type DatosEmpresa = {
+  razonSocial: string
+  nombreComercial: string
+  rnc: string
+  direccion: string
+  telefono: string
+  whatsapp: string
+  correo: string
+  sitioWeb: string
+}
+
+export const verEmpresa = (token: string) =>
+  llamar<FichaEmpresa>('GET', '/empresa', token)
+
+export const editarEmpresa = (token: string, datos: DatosEmpresa) =>
+  llamar<{ ok: boolean }>('PATCH', '/empresa', token, datos)
+
+export const subirLogo = (token: string, imagen: string) =>
+  llamar<{ ok: boolean }>('PUT', '/empresa/logo', token, { imagen })
+
+export const quitarLogo = (token: string) =>
+  llamar<{ ok: boolean }>('DELETE', '/empresa/logo', token)
+
+export type FilaSucursal = {
+  id: string
+  codigo: string
+  nombre: string
+  direccion: string | null
+  telefono: string | null
+  encargado: string | null
+  es_principal: boolean
+  is_active: boolean
+  usuarios: number
+}
+
+export type DatosSucursal = {
+  codigo: string
+  nombre: string
+  direccion: string
+  telefono: string
+  encargado: string
+}
+
+export const listarSucursales = (token: string) =>
+  llamar<FilaSucursal[]>('GET', '/sucursales', token)
+
+export const crearSucursal = (token: string, datos: DatosSucursal) =>
+  llamar<{ id: string }>('POST', '/sucursales', token, datos)
+
+export const editarSucursal = (token: string, id: string, datos: DatosSucursal) =>
+  llamar<{ ok: boolean }>('PATCH', `/sucursales/${id}`, token, datos)
+
+export const cambiarEstadoSucursal = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/sucursales/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+export type SucursalOpcion = {
+  id: string
+  codigo: string
+  nombre: string
+  es_principal: boolean
+}
+
+export const sucursalesParaUsuarios = (token: string) =>
+  llamar<SucursalOpcion[]>('GET', '/usuarios/sucursales', token)

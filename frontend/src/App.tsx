@@ -2,14 +2,45 @@ import { useEffect, useState } from 'react'
 import Login from './Login'
 import Layout from './Layout'
 import CambiarPassword from './CambiarPassword'
-import { obtenerPerfil } from './api'
-import type { Perfil } from './api'
+import { obtenerMarca, obtenerPerfil } from './api'
+import type { Marca, Perfil } from './api'
+
+// Marca mientras carga o si el servidor no responde.
+const MARCA_INICIAL: Marca = {
+  nombre_comercial: 'SCITO ENTREPRISE',
+  tiene_logo: false,
+  version: '0',
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() =>
     sessionStorage.getItem('token'),
   )
   const [perfil, setPerfil] = useState<Perfil | null>(null)
+  const [marca, setMarca] = useState<Marca>(MARCA_INICIAL)
+
+  function recargarMarca() {
+    obtenerMarca()
+      .then(setMarca)
+      .catch(() => undefined)
+  }
+
+  useEffect(() => {
+    let activo = true
+    obtenerMarca()
+      .then((m) => {
+        if (activo) setMarca(m)
+      })
+      .catch(() => undefined)
+    return () => {
+      activo = false
+    }
+  }, [])
+
+  // El nombre comercial también va en la pestaña del navegador.
+  useEffect(() => {
+    document.title = marca.nombre_comercial
+  }, [marca.nombre_comercial])
   const [cargando, setCargando] = useState<boolean>(
     () => sessionStorage.getItem('token') !== null,
   )
@@ -64,7 +95,7 @@ export default function App() {
   }
 
   if (!token || !perfil) {
-    return <Login onEntrar={entrar} />
+    return <Login onEntrar={entrar} marca={marca} />
   }
 
   if (perfil.must_change_password) {
@@ -73,5 +104,13 @@ export default function App() {
     )
   }
 
-  return <Layout perfil={perfil} token={token} onSalir={salir} />
+  return (
+    <Layout
+      perfil={perfil}
+      token={token}
+      marca={marca}
+      onMarcaCambiada={recargarMarca}
+      onSalir={salir}
+    />
+  )
 }

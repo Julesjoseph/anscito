@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { login } from './api'
-import type { Usuario } from './api'
+import type { Marca, Usuario } from './api'
+import { LogoMarca } from './marca'
 
-type Props = { onEntrar: (token: string, usuario: Usuario) => void }
+type Props = {
+  onEntrar: (token: string, usuario: Usuario) => void
+  marca: Marca
+}
 
-export default function Login({ onEntrar }: Props) {
+export default function Login({ onEntrar, marca }: Props) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -37,11 +41,9 @@ export default function Login({ onEntrar }: Props) {
     <div className="min-h-screen flex items-center justify-center bg-gray-100 px-4">
       <div className="w-full max-w-sm bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex flex-col items-center gap-1 mb-6">
-          <div className="w-12 h-12 rounded-xl bg-[#C8102E] text-white flex items-center justify-center text-2xl font-medium">
-            S
-          </div>
+          <LogoMarca marca={marca} tamano="grande" />
           <div className="text-lg font-medium tracking-wide mt-2">
-            SCITO ENTREPRISE
+            {marca.nombre_comercial}
           </div>
           <div className="text-sm text-gray-500">Área de administración</div>
         </div>

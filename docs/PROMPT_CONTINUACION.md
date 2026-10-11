@@ -60,6 +60,19 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   cambiar; la auditoría guarda el documento enmascarado y solo qué datos de
   contacto cambiaron. La Ley 172-13 debe revisarla el abogado del dueño.
 
+- **Empresa** (menú Empresa): datos de la empresa (razón social, nombre
+  comercial, RNC, dirección, teléfono, WhatsApp, correo, sitio web) y logo
+  (PNG/JPG/WebP, hasta 512 KB; la pantalla lo reduce a 512 px y el servidor
+  verifica que sea una imagen real). El nombre comercial y el logo salen de la
+  base en la entrada, el menú y la pestaña del navegador (rutas públicas
+  `/marca` y `/marca/logo`; nada más sale sin sesión). El servidor acepta
+  envíos de hasta 1 MB por el logo.
+- **Sucursales** (pestaña en Empresa): código, nombre, dirección, teléfono,
+  encargado; "Principal" no se desactiva (ahí está todo el inventario); no se
+  desactiva una sucursal con usuarios activos. Cada usuario tiene su sucursal
+  (obligatoria en el formulario de Usuarios). El inventario por sucursal y los
+  traslados se construirán cuando el dueño abra la segunda sucursal.
+
 ## Pendientes y decisiones abiertas
 
 - Impuesto duplicado "ITBIS" al 16% (código `itbi`) creado en pruebas:
