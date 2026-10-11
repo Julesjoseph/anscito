@@ -251,3 +251,54 @@ export const cambiarEstadoImpuesto = (
     is_active: isActive,
     motivo,
   })
+
+// ---------- Roles y permisos ----------
+
+export type Permiso = {
+  id: string
+  codigo: string
+  modulo: string
+  accion: string
+  descripcion: string | null
+}
+
+export type FilaRol = {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  is_system: boolean
+  is_active: boolean
+  permisos: string[]
+  usuarios: number
+}
+
+export type DatosRol = {
+  codigo?: string
+  nombre: string
+  descripcion: string
+  permisos: string[]
+}
+
+export const listarRolesGestion = (token: string) =>
+  llamar<FilaRol[]>('GET', '/roles/gestion', token)
+
+export const listarPermisos = (token: string) =>
+  llamar<Permiso[]>('GET', '/roles/permisos', token)
+
+export const crearRol = (token: string, datos: DatosRol) =>
+  llamar<{ id: string }>('POST', '/roles', token, datos)
+
+export const editarRol = (token: string, id: string, datos: DatosRol) =>
+  llamar<{ ok: boolean }>('PATCH', `/roles/${id}`, token, datos)
+
+export const cambiarEstadoRol = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/roles/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })

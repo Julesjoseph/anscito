@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Package,
+  ShieldCheck,
   ShoppingCart,
   Smartphone,
   Users,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Perfil } from './api'
+import Roles from './Roles'
 import Servicios from './Servicios'
 import Usuarios from './Usuarios'
 
@@ -49,6 +51,13 @@ const MODULOS: Modulo[] = [
     Icono: Users,
     listo: true,
     permiso: 'usuarios.ver',
+  },
+  {
+    id: 'roles',
+    nombre: 'Roles y permisos',
+    Icono: ShieldCheck,
+    listo: true,
+    permiso: 'roles.ver',
   },
 ]
 
@@ -150,6 +159,12 @@ export default function Layout({ perfil, token, onSalir }: Props) {
   usuarioId={perfil.id}
   onSesionVencida={onSalir}
 />
+        ) : pagina === 'roles' ? (
+          <Roles
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
         ) : pagina === 'servicios' ? (
           <Servicios
             token={token}
