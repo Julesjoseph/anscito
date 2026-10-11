@@ -86,7 +86,8 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   descuento máximo configurable (`configuracion.ventas.descuento_maximo_pct`,
   10%) con permiso y motivo; anular el mismo día con `ventas.anular`, días
   anteriores con `ventas.anular_anteriores` (la mercancía vuelve con
-  `anulacion_venta`). Sin caja, asientos, cuentas por cobrar ni e-CF todavía.
+  `anulacion_venta`). El efectivo pasa por la caja (ver Caja). Sin asientos,
+  cuentas por cobrar ni e-CF todavía.
 - **Comprobante en PDF** (`GET /ventas/:id/recibo?formato=80|58|carta`, con
   PDFKit 0.20.2): rollo de 80 o 58 mm con largo ajustado al contenido, u hoja
   carta. El logo debe ser PNG o JPG. Dice "comprobante interno… no sustituye
@@ -100,8 +101,22 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   bruta estimada (productos y servicios; servicios sin costo cuentan con
   costo 0, decisión del dueño), ITBIS cobrado, alertas y valor del
   inventario, más vendidos, últimas ventas y "Reponer pronto". Cada sección
-  solo llega si el usuario tiene el permiso del módulo. "Efectivo en caja" y
-  "Cuentas por cobrar" quedan como "Disponible con el módulo…".
+  solo llega si el usuario tiene el permiso del módulo. "Efectivo en caja"
+  muestra lo que debería haber en las cajas abiertas (`caja.ver`); "Cuentas
+  por cobrar" queda como "Disponible con el módulo…".
+- **Caja (Parte 1 de Caja y bancos)** (`/caja`, pantalla `Caja.tsx`): cajas
+  fijas configurables ("Caja 1"…); cada computadora recuerda su caja en
+  `localStorage` (`anscito.cajaId`, `cajaLocal.ts`). Abrir con fondo inicial
+  (sesión S-000001 sin huecos, una abierta por caja); gastos con categoría y
+  comprobante opcional, retiros e ingresos, siempre con motivo y sin sacar
+  más de lo que hay; cierre contando billetes y monedas
+  (`configuracion.caja.denominaciones`), diferencia = contado − esperado, con
+  motivo obligatorio si no cuadra; una sesión cerrada no se reabre. Cuadre en
+  PDF (80, 58 mm o carta). Ventas: cobrar en efectivo (`formas_pago.usa_caja`)
+  exige la caja de la computadora abierta y crea el movimiento `venta`; anular
+  una venta en efectivo devuelve el dinero desde esa caja (`devolucion`), si
+  alcanza. Movimientos inmutables y auditados. Pruebas:
+  `scripts/probar-caja.ps1` (caja de prueba que se desactiva al final).
 
 ## Pendientes y decisiones abiertas
 
@@ -115,5 +130,8 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   preferido (e-CF), datos bancarios de proveedores, importar desde Excel,
   enlazar entradas de inventario con la lista de proveedores, ventas que
   descuenten inventario (ver `docs/notas-ventas.md`).
-- Siguiente según el Documento Maestro (sección 26): datos de la empresa y
-  sucursales, plan de cuentas y motor contable, caja y bancos, ventas.
+- Caja: falta pantalla para administrar las categorías de gasto (hoy fijas
+  desde la migración 012) y su cuenta contable (`cuenta_contable_id`).
+- Siguiente: Parte 2 de Caja y bancos, **Bancos** (cuentas bancarias,
+  depósitos desde la caja, transferencias recibidas). Después, según la
+  sección 26: plan de cuentas y motor contable.

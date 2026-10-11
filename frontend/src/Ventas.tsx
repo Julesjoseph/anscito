@@ -14,6 +14,7 @@ import {
   ShoppingCart,
   Trash2,
   UserRound,
+  Wallet,
 } from 'lucide-react'
 import {
   SesionVencida,
@@ -39,6 +40,7 @@ import type {
   PrepararVenta,
   PrevisualizacionVenta,
 } from './api'
+import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
 import {
   AREA,
   BOTON_PELIGRO,
@@ -205,6 +207,7 @@ function NuevaVenta({
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [hecha, setHecha] = useState<{ id: string; numero: string; total: string; devuelta: string | null } | null>(null)
+  const [cajaId, setCajaId] = useState<string | null>(cajaDeEstaComputadora)
 
   const manejar = useCallback(
     (e: unknown) => {
@@ -228,6 +231,22 @@ function NuevaVenta({
       activo = false
     }
   }, [token, manejar])
+
+  // Vuelve a preguntar si la caja está abierta (por si se abrió en otra pantalla).
+  async function revisarCaja() {
+    try {
+      const p = await prepararVenta(token)
+      setPrep((antes) => (antes ? { ...antes, cajas: p.cajas } : p))
+      setError('')
+    } catch (e) {
+      manejar(e)
+    }
+  }
+
+  function elegirCaja(id: string) {
+    guardarCajaDeEstaComputadora(id || null)
+    setCajaId(id || null)
+  }
 
   // Buscar artículos mientras se escribe.
   useEffect(() => {
@@ -265,6 +284,9 @@ function NuevaVenta({
 
   const maximo = prep?.descuentoMaximoPct ?? '0'
   const forma = prep?.formasPago.find((f) => f.id === formaId)
+  const miCaja = prep?.cajas.find((c) => c.id === cajaId)
+  // El efectivo solo se cobra con la caja de esta computadora abierta.
+  const cajaLista = !forma?.usa_caja || (miCaja !== undefined && miCaja.sesion_id !== null)
 
   // Líneas listas para el servidor (con el descuento en RD$).
   const entrada = useMemo(
@@ -370,6 +392,7 @@ function NuevaVenta({
           formaPagoId: forma.id,
           recibido: forma.calcula_devuelta ? recibido.trim() : undefined,
           referencia: referencia.trim() || undefined,
+          cajaId: forma.usa_caja && miCaja ? miCaja.id : undefined,
         },
         comprobanteFiscal: comprobante,
         notas,
@@ -389,6 +412,7 @@ function NuevaVenta({
     totales !== null &&
     cliente !== null &&
     forma !== undefined &&
+    cajaLista &&
     (!forma.calcula_devuelta || (devuelta !== null && devuelta >= 0n)) &&
     (!forma.requiere_referencia || referencia.trim() !== '') &&
     (!hayDescuento || motivoDescuento.trim().length >= 5)
@@ -631,6 +655,36 @@ function NuevaVenta({
           </div>
         </div>
 
+        {forma?.usa_caja &&
+          (miCaja?.sesion_id ? (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+              <Wallet size={16} /> El efectivo entra a {miCaja.nombre} (abierta)
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div className="flex gap-2">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                {miCaja
+                  ? `${miCaja.nombre} está cerrada. Ábrala en el menú Caja para cobrar en efectivo.`
+                  : 'Esta computadora no tiene caja asignada. Elija cuál es para cobrar en efectivo.'}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {!miCaja && (
+                  <select value="" onChange={(e) => elegirCaja(e.target.value)} className={`${CAMPO} h-9 bg-white`} aria-label="Caja de esta computadora">
+                    <option value="">Elegir caja…</option>
+                    {prep.cajas.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button type="button" onClick={() => void revisarCaja()} className="text-xs underline">
+                  Ya la abrí: revisar de nuevo
+                </button>
+              </div>
+            </div>
+          ))}
         {forma?.calcula_devuelta && (
           <label className="flex flex-col gap-1 text-sm text-gray-600">
             Recibido del cliente (RD$)
@@ -734,7 +788,7 @@ function VerDetalle({
     e.preventDefault()
     setGuardando(true)
     try {
-      await anularVenta(token, id, motivo)
+      await anularVenta(token, id, motivo, cajaDeEstaComputadora())
       setAnulando(false)
       await cargar()
       onCambio()
@@ -857,6 +911,10 @@ function VerDetalle({
           <div className="flex gap-2 text-red-800">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
             La venta no se borra: queda como "Anulada" con su motivo, y los productos vuelven al inventario. Las ventas de días anteriores solo las anula quien tenga el permiso especial.
+          </div>
+          <div className="flex gap-2 text-gray-600">
+            <Wallet size={16} className="mt-0.5 shrink-0" />
+            Si se cobró en efectivo, el dinero se le devuelve al cliente desde la caja de esta computadora, que debe estar abierta.
           </div>
           <label className="flex flex-col gap-1 text-gray-600">
             Motivo de la anulación

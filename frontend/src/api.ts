@@ -823,10 +823,13 @@ export type FormaPago = {
   nombre: string
   calcula_devuelta: boolean
   requiere_referencia: boolean
+  // El efectivo entra a la caja abierta de la computadora.
+  usa_caja: boolean
 }
 
 export type PrepararVenta = {
   formasPago: FormaPago[]
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
   descuentoMaximoPct: string
   puedeDescontar: boolean
   consumidorFinal: { id: string; nombre: string } | null
@@ -878,7 +881,12 @@ export type DatosVenta = {
   clienteId: string
   lineas: LineaVentaEntrada[]
   motivoDescuento: string
-  pago: { formaPagoId: string; recibido?: string; referencia?: string }
+  pago: {
+    formaPagoId: string
+    recibido?: string
+    referencia?: string
+    cajaId?: string
+  }
   comprobanteFiscal: string
   notas: string
 }
@@ -1004,8 +1012,17 @@ export const detalleVenta = (token: string, id: string) =>
 export const anotarComprobante = (token: string, id: string, comprobante: string) =>
   llamar<{ ok: boolean }>('PATCH', `/ventas/${id}/comprobante`, token, { comprobante })
 
-export const anularVenta = (token: string, id: string, motivo: string) =>
-  llamar<{ ok: boolean }>('POST', `/ventas/${id}/anular`, token, { motivo })
+// cajaId: la caja de esta computadora, de donde sale el efectivo devuelto.
+export const anularVenta = (
+  token: string,
+  id: string,
+  motivo: string,
+  cajaId: string | null,
+) =>
+  llamar<{ ok: boolean }>('POST', `/ventas/${id}/anular`, token, {
+    motivo,
+    cajaId: cajaId ?? undefined,
+  })
 
 export type FormatoRecibo = '80' | '58' | 'carta'
 
@@ -1056,6 +1073,10 @@ export type ResumenPanel = {
     ganancia: string
     margen: string | null
   }
+  caja?: {
+    abiertas: { caja: string; usuario: string; abierta_en: string; esperado: string }[]
+    total: string
+  }
   inventario?: {
     productos: number
     bajo: number
@@ -1067,3 +1088,184 @@ export type ResumenPanel = {
 
 export const resumenPanel = (token: string, periodo: PeriodoPanel) =>
   llamar<ResumenPanel>('GET', `/panel?periodo=${periodo}`, token)
+
+// ---------- Caja ----------
+
+export type FilaCaja = {
+  id: string
+  codigo: string
+  nombre: string
+  is_active: boolean
+  sucursal: string
+  // Datos de la sesión abierta (null si la caja está cerrada).
+  sesion_id: string | null
+  sesion_texto: string | null
+  abierta_en: string | null
+  fondo_inicial: string | null
+  abierta_por: string | null
+  esperado: string | null
+}
+
+export type PrepararCaja = {
+  categoriasGasto: { id: string; codigo: string; nombre: string }[]
+  denominaciones: string[]
+}
+
+export type TipoMovimientoCaja = 'venta' | 'devolucion' | 'gasto' | 'retiro' | 'ingreso'
+
+export type MovimientoCaja = {
+  id: string
+  tipo: TipoMovimientoCaja
+  monto: string
+  fecha: string
+  comprobante: string | null
+  motivo: string | null
+  categoria: string | null
+  usuario: string
+  venta: string | null
+  venta_id: string | null
+}
+
+export type TotalesCaja = {
+  ventas: string
+  ingresos: string
+  gastos: string
+  retiros: string
+  devoluciones: string
+  cantidad_ventas: number
+}
+
+export type SesionCaja = {
+  id: string
+  sesion_texto: string
+  caja: string
+  caja_id: string
+  sucursal: string
+  estado: 'abierta' | 'cerrada'
+  fondo_inicial: string
+  abierta_en: string
+  abierta_por_usuario: string
+  cerrada_en: string | null
+  cerrada_por_usuario: string | null
+  esperado: string
+  contado: string | null
+  diferencia: string | null
+  conteo: Record<string, number> | null
+  motivo_diferencia: string | null
+  notas: string | null
+  totales: TotalesCaja
+  movimientos: MovimientoCaja[]
+}
+
+export type FilaSesionCaja = {
+  id: string
+  sesion_texto: string
+  estado: 'abierta' | 'cerrada'
+  caja: string
+  abierta_en: string
+  abierta_por: string
+  cerrada_en: string | null
+  cerrada_por: string | null
+  fondo_inicial: string
+  esperado: string | null
+  contado: string | null
+  diferencia: string | null
+  motivo_diferencia: string | null
+}
+
+export type PaginaSesionesCaja = {
+  filas: FilaSesionCaja[]
+  total: number
+  pagina: number
+  porPagina: number
+}
+
+export type FiltrosSesionesCaja = {
+  cajaId: string
+  desde: string
+  hasta: string
+  estado: 'todas' | 'abiertas' | 'cerradas'
+  pagina: number
+}
+
+export const listarCajas = (token: string) =>
+  llamar<FilaCaja[]>('GET', '/caja/cajas', token)
+
+export const prepararCaja = (token: string) =>
+  llamar<PrepararCaja>('GET', '/caja/preparar', token)
+
+export const crearCaja = (token: string, datos: { codigo: string; nombre: string }) =>
+  llamar<{ id: string }>('POST', '/caja/cajas', token, datos)
+
+export const editarCaja = (token: string, id: string, nombre: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/caja/cajas/${id}`, token, { nombre })
+
+export const estadoCaja = (
+  token: string,
+  id: string,
+  isActive: boolean,
+  motivo?: string,
+) =>
+  llamar<{ ok: boolean }>('PATCH', `/caja/cajas/${id}/estado`, token, {
+    is_active: isActive,
+    motivo,
+  })
+
+export const abrirCaja = (
+  token: string,
+  id: string,
+  datos: { fondoInicial: string; notas: string },
+) => llamar<{ id: string; sesion: string }>('POST', `/caja/cajas/${id}/abrir`, token, datos)
+
+export const movimientoCaja = (
+  token: string,
+  sesionId: string,
+  datos: {
+    tipo: 'gasto' | 'retiro' | 'ingreso'
+    monto: string
+    categoriaGastoId?: string
+    comprobante?: string
+    motivo: string
+  },
+) =>
+  llamar<{ esperado: string }>('POST', `/caja/sesiones/${sesionId}/movimientos`, token, datos)
+
+export const cerrarCaja = (
+  token: string,
+  sesionId: string,
+  datos: { conteo: Record<string, number>; motivo: string; notas: string },
+) =>
+  llamar<{ esperado: string; contado: string; diferencia: string }>(
+    'POST',
+    `/caja/sesiones/${sesionId}/cerrar`,
+    token,
+    datos,
+  )
+
+export const detalleSesionCaja = (token: string, id: string) =>
+  llamar<SesionCaja>('GET', `/caja/sesiones/${id}`, token)
+
+export const listarSesionesCaja = (token: string, f: FiltrosSesionesCaja) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.cajaId) q.set('cajaId', f.cajaId)
+  if (f.desde) q.set('desde', f.desde)
+  if (f.hasta) q.set('hasta', f.hasta)
+  return llamar<PaginaSesionesCaja>('GET', `/caja/sesiones?${q.toString()}`, token)
+}
+
+// El cuadre en PDF (o el estado, si la sesión sigue abierta).
+export async function obtenerCuadre(
+  token: string,
+  sesionId: string,
+  formato: FormatoRecibo,
+): Promise<Blob> {
+  const res = await fetch(`${API_URL}/caja/sesiones/${sesionId}/cuadre?formato=${formato}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el cuadre')
+  }
+  return res.blob()
+}

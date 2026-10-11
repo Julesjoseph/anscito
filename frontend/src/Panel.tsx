@@ -8,6 +8,7 @@ import {
   PackageX,
   RefreshCw,
   TrendingUp,
+  Wallet,
 } from 'lucide-react'
 import { SesionVencida, resumenPanel } from './api'
 import type { PeriodoPanel, ResumenPanel } from './api'
@@ -117,6 +118,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
   const v = datos?.ventas
   const g = datos?.ganancia
   const inv = datos?.inventario
+  const caja = datos?.caja
   const cambio = v ? variacion(v.total, v.total_anterior) : null
 
   return (
@@ -161,15 +163,15 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
       {error && <CajaError>{error}</CajaError>}
       {!datos && !error && <div className="text-gray-500">Cargando…</div>}
 
-      {datos && !v && !inv && (
+      {datos && !v && !inv && !caja && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-          Su usuario no tiene permisos para ver indicadores de ventas ni de
+          Su usuario no tiene permisos para ver indicadores de ventas, caja ni
           inventario. Pídale al administrador que se los asigne en Roles y
           permisos.
         </div>
       )}
 
-      {(v || inv) && (
+      {(v || inv || caja) && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {v && (
             <Tarjeta
@@ -255,7 +257,22 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               detalle="Existencia actual × costo promedio, sin ITBIS (hoy, no depende del período)"
             />
           )}
-          <Proximamente titulo="Efectivo en caja" modulo="Caja y bancos" />
+          {caja && (
+            <Tarjeta
+              titulo="Efectivo en caja"
+              valor={dinero(caja.total)}
+              icono={<Wallet size={16} />}
+              detalle={
+                caja.abiertas.length === 0
+                  ? 'Ninguna caja abierta (ahora, no depende del período)'
+                  : caja.abiertas.map((a) => `${a.caja}: ${dinero(a.esperado)} (${a.usuario})`).join(' · ')
+              }
+            >
+              <button type="button" onClick={() => onIr('caja')} className="self-start text-xs text-[#C8102E] hover:underline">
+                Ver caja
+              </button>
+            </Tarjeta>
+          )}
           <Proximamente titulo="Cuentas por cobrar" modulo="Cuentas por cobrar" />
         </div>
       )}
@@ -345,7 +362,9 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
         Los montos excluyen las ventas anuladas. La ganancia es una estimación
         sin ITBIS: productos al costo promedio del momento de la venta, y
         servicios según su comisión % o su costo registrado (costo 0 si no
-        tienen ninguno). Los indicadores contables y de caja llegarán con sus módulos.
+        tienen ninguno). El efectivo en caja es lo que debería haber ahora en
+        las cajas abiertas. Los indicadores contables y de bancos llegarán con
+        sus módulos.
       </p>
     </div>
   )
