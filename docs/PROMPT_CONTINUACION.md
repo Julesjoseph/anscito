@@ -34,6 +34,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 009 | Datos de la empresa, más datos de sucursales, usuarios en Principal |
 | 010 | Ventas, líneas, pagos, formas de pago, configuración y contadores |
 | 011 | Ganancia de servicios por costo o por comisión %; % copiado en cada venta |
+| 012 | Caja: cajas fijas, sesiones con arqueo, movimientos inmutables, categorías de gasto |
 
 ## Módulos terminados
 
