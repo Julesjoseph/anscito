@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { SQL_DISPONIBLE, SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
 import { DatabaseService } from '../database/database.service';
 import { esEntera, normalizarCantidad } from '../inventario/cantidades';
@@ -50,6 +51,7 @@ export type DatosVenta = {
     recibido?: unknown;
     referencia?: unknown;
     cajaId?: unknown;
+    cuentaId?: unknown;
   };
   comprobanteFiscal?: unknown;
   notas?: unknown;
@@ -134,7 +136,7 @@ export class VentasService {
   async preparar(actorId: string) {
     const [formas, maximo, descontar] = await Promise.all([
       this.db.query(
-        `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia, usa_caja
+        `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia, usa_caja, usa_cuenta
          FROM formas_pago WHERE is_active = true ORDER BY orden, nombre`,
       ),
       this.config(this.db, 'ventas.descuento_maximo_pct'),
@@ -153,9 +155,15 @@ export class VentasService {
        WHERE c.is_active
        ORDER BY lower(c.nombre)`,
     );
+    // Cuentas en pesos donde pueden llegar las transferencias de ventas.
+    const cuentas = await this.db.query(
+      `SELECT id, nombre FROM cuentas
+       WHERE is_active AND recibe_ventas ORDER BY lower(nombre)`,
+    );
     return {
       formasPago: formas.rows,
       cajas: cajas.rows,
+      cuentasVenta: cuentas.rows,
       descuentoMaximoPct: maximo,
       puedeDescontar: descontar,
       consumidorFinal: cf.rows[0] ?? null,
@@ -457,8 +465,9 @@ export class VentasService {
         calcula_devuelta: boolean;
         requiere_referencia: boolean;
         usa_caja: boolean;
+        usa_cuenta: boolean;
       }>(
-        `SELECT nombre, calcula_devuelta, requiere_referencia, usa_caja
+        `SELECT nombre, calcula_devuelta, requiere_referencia, usa_caja, usa_cuenta
          FROM formas_pago WHERE id = $1 AND is_active`,
         [formaId],
       );
@@ -516,6 +525,29 @@ export class VentasService {
           );
         }
         sesionCaja = s.rows[0];
+      }
+
+      // La transferencia llega a la cuenta que diga el cajero; queda
+      // "por confirmar" hasta verla en el estado de cuenta del banco.
+      let cuentaVenta: { id: string; nombre: string } | null = null;
+      if (forma.usa_cuenta) {
+        const cuentaId = texto(datos.pago?.cuentaId).toLowerCase();
+        if (!UUID.test(cuentaId)) {
+          throw new BadRequestException(
+            `Elija a qué cuenta llegó la ${forma.nombre.toLowerCase()}`,
+          );
+        }
+        const ct = await c.query<{ id: string; nombre: string }>(
+          `SELECT id, nombre FROM cuentas
+           WHERE id = $1 AND is_active AND recibe_ventas FOR SHARE`,
+          [cuentaId],
+        );
+        if (ct.rowCount === 0) {
+          throw new BadRequestException(
+            'Esa cuenta no existe, está desactivada o no recibe ventas',
+          );
+        }
+        cuentaVenta = ct.rows[0];
       }
 
       // Sucursal del vendedor (o la principal si no tiene).
@@ -609,10 +641,29 @@ export class VentasService {
       }
 
       await c.query(
-        `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto, recibido, devuelta, referencia)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [ventaId, formaId, totales.total, recibido, devuelta, referencia],
+        `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto, recibido, devuelta, referencia, cuenta_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          ventaId,
+          formaId,
+          totales.total,
+          recibido,
+          devuelta,
+          referencia,
+          cuentaVenta?.id ?? null,
+        ],
       );
+      if (cuentaVenta) {
+        const zona = await this.config(c, 'empresa.zona_horaria');
+        await c.query(
+          `INSERT INTO cuenta_movimientos
+             (cuenta_id, tipo, signo, monto, tasa, monto_dop, fecha, por_confirmar,
+              venta_id, referencia, usuario_id)
+           VALUES ($1, 'venta', 1, $2, 1, $2, (now() AT TIME ZONE $3)::date, true,
+                   $4, $5, $6)`,
+          [cuentaVenta.id, totales.total, zona, ventaId, referencia, actorId],
+        );
+      }
       if (sesionCaja) {
         // Entra a la caja lo cobrado (la devuelta ya salió de lo recibido).
         await c.query(
@@ -636,6 +687,7 @@ export class VentasService {
           caja: sesionCaja
             ? `${sesionCaja.caja} (${numeroSesion(sesionCaja.numero)})`
             : null,
+          cuenta: cuentaVenta?.nombre ?? null,
           comprobante_fiscal: comprobante,
         },
         motivo:
@@ -956,6 +1008,50 @@ export class VentasService {
         cajaDevolucion = `${s.rows[0].caja} (${numeroSesion(s.rows[0].numero)})`;
       }
 
+      // Lo cobrado por transferencia se devuelve desde la misma cuenta
+      // (por confirmar). Si el cobro "no llegó", no hay nada que devolver.
+      const cobros = await c.query<{
+        cuenta_id: string;
+        monto: string;
+        estado: string;
+      }>(
+        `SELECT x.cuenta_id, x.monto, x.estado
+         FROM ${SQL_MOVS_CON_ESTADO} x
+         WHERE x.venta_id = $1 AND x.tipo = 'venta'`,
+        [id],
+      );
+      const devueltoCuentas: string[] = [];
+      for (const cobro of cobros.rows) {
+        if (cobro.estado === 'no_llego') continue;
+        const ct = await c.query<{ nombre: string }>(
+          'SELECT nombre FROM cuentas WHERE id = $1 FOR UPDATE',
+          [cobro.cuenta_id],
+        );
+        const hay = (
+          await c.query<{ disponible: string }>(SQL_DISPONIBLE, [
+            cobro.cuenta_id,
+          ])
+        ).rows[0].disponible;
+        const alcanza = await c.query<{ ok: boolean }>(
+          'SELECT $1::numeric >= $2::numeric AS ok',
+          [hay, cobro.monto],
+        );
+        if (!alcanza.rows[0].ok) {
+          throw new BadRequestException(
+            `No hay suficiente dinero en ${ct.rows[0].nombre} para devolver RD$${cobro.monto} (hay RD$${hay})`,
+          );
+        }
+        await c.query(
+          `INSERT INTO cuenta_movimientos
+             (cuenta_id, tipo, signo, monto, tasa, monto_dop, fecha, por_confirmar,
+              venta_id, motivo, usuario_id)
+           VALUES ($1, 'devolucion', -1, $2, 1, $2, (now() AT TIME ZONE $3)::date, true,
+                   $4, $5, $6)`,
+          [cobro.cuenta_id, cobro.monto, zona, id, textoMotivo, actorId],
+        );
+        devueltoCuentas.push(`${ct.rows[0].nombre}: RD$${cobro.monto}`);
+      }
+
       // La mercancía vuelve al inventario.
       const lineas = await c.query<{
         producto_id: string;
@@ -1008,6 +1104,7 @@ export class VentasService {
           mismo_dia: v.mismo_dia,
           efectivo_devuelto: efectivo,
           caja: cajaDevolucion,
+          devuelto_por_cuenta: devueltoCuentas.length ? devueltoCuentas : null,
         },
         motivo: textoMotivo,
         ip,

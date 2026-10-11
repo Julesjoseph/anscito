@@ -1,8 +1,8 @@
 // Piezas de SQL compartidas por Caja, Ventas y el Panel.
 
-// Signo de cada movimiento de caja "m": ventas e ingresos suman; gastos,
-// retiros y devoluciones restan.
-export const SQL_SIGNO_CAJA = `CASE WHEN m.tipo IN ('venta', 'ingreso') THEN 1 ELSE -1 END`;
+// Signo de cada movimiento de caja "m": ventas, ingresos y efectivo traído
+// de una cuenta suman; gastos, retiros, devoluciones y depósitos restan.
+export const SQL_SIGNO_CAJA = `CASE WHEN m.tipo IN ('venta', 'ingreso', 'desde_cuenta') THEN 1 ELSE -1 END`;
 
 // Lo que debería haber en la sesión $1: fondo inicial ± movimientos.
 export const SQL_ESPERADO = `SELECT (s.fondo_inicial + COALESCE(
@@ -17,6 +17,8 @@ export const SQL_TOTALES_SESION = `SELECT
     COALESCE(sum(monto) FILTER (WHERE tipo = 'gasto'), 0)::numeric(14,2) AS gastos,
     COALESCE(sum(monto) FILTER (WHERE tipo = 'retiro'), 0)::numeric(14,2) AS retiros,
     COALESCE(sum(monto) FILTER (WHERE tipo = 'devolucion'), 0)::numeric(14,2) AS devoluciones,
+    COALESCE(sum(monto) FILTER (WHERE tipo = 'deposito'), 0)::numeric(14,2) AS depositos,
+    COALESCE(sum(monto) FILTER (WHERE tipo = 'desde_cuenta'), 0)::numeric(14,2) AS desde_cuentas,
     count(*) FILTER (WHERE tipo = 'venta')::int AS cantidad_ventas
   FROM caja_movimientos WHERE sesion_id = $1`;
 

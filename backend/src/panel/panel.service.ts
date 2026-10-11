@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { SQL_SALDOS } from '../bancos/sql';
 import { SQL_SIGNO_CAJA } from '../caja/sql';
 import {
   SQL_TOTALES_PRODUCTO,
@@ -84,6 +85,9 @@ export class PanelService {
     }
     if (permisos.has('caja.ver')) {
       resultado.caja = await this.caja();
+    }
+    if (permisos.has('bancos.ver')) {
+      resultado.bancos = await this.bancos();
     }
     if (permisos.has('inventario.ver')) {
       resultado.inventario = await this.inventario(
@@ -232,6 +236,37 @@ export class PanelService {
       [r.rows.map((f) => f.esperado)],
     );
     return { abiertas: r.rows, total: total.rows[0].total };
+  }
+
+  // Saldo de las cuentas activas por moneda (ahora, no depende del período).
+  private async bancos() {
+    const r = await this.db.query<{
+      moneda: string;
+      simbolo: string;
+      confirmado: string;
+      por_confirmar: string;
+      cuentas: number;
+    }>(
+      `SELECT ct.moneda, mo.simbolo,
+              COALESCE(sum(s.confirmado), 0)::numeric(16,2) AS confirmado,
+              COALESCE(sum(s.por_confirmar), 0)::numeric(16,2) AS por_confirmar,
+              count(*)::int AS cuentas
+       FROM cuentas ct
+       JOIN monedas mo ON mo.codigo = ct.moneda
+       LEFT JOIN (${SQL_SALDOS}) s ON s.cuenta_id = ct.id
+       WHERE ct.is_active
+       GROUP BY ct.moneda, mo.simbolo, mo.orden
+       ORDER BY mo.orden`,
+    );
+    const avisos = await this.db.query<{
+      pendientes: number;
+      no_llegaron: number;
+    }>(
+      `SELECT COALESCE(sum(s.pendientes), 0)::int AS pendientes,
+              COALESCE(sum(s.no_llegaron), 0)::int AS no_llegaron
+       FROM (${SQL_SALDOS}) s`,
+    );
+    return { monedas: r.rows, ...avisos.rows[0] };
   }
 
   private async inventario(verCostos: boolean) {

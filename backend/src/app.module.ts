@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { BancosModule } from './bancos/bancos.module';
 import { CajaModule } from './caja/caja.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { DatabaseModule } from './database/database.module';
@@ -26,6 +27,7 @@ import { VentasModule } from './ventas/ventas.module';
     EmpresaModule,
     VentasModule,
     PanelModule,
+    BancosModule,
     CajaModule,
   ],
   controllers: [AppController, HealthController],

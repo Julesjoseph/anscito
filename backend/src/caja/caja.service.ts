@@ -546,11 +546,16 @@ export class CajaService {
                 cg.nombre AS categoria, u.username AS usuario,
                 CASE WHEN v.numero IS NOT NULL
                      THEN 'V-' || lpad(v.numero::text, 6, '0') END AS venta,
-                m.venta_id
+                m.venta_id,
+                -- Cuenta del depósito (destino) o de donde vino el efectivo (origen).
+                COALESCE(cd.nombre, co.nombre) AS cuenta
          FROM caja_movimientos m
          JOIN usuarios u ON u.id = m.usuario_id
          LEFT JOIN categorias_gasto cg ON cg.id = m.categoria_gasto_id
          LEFT JOIN ventas v ON v.id = m.venta_id
+         LEFT JOIN transferencias t ON t.id = m.transferencia_id
+         LEFT JOIN cuentas cd ON cd.id = t.destino_cuenta_id
+         LEFT JOIN cuentas co ON co.id = t.origen_cuenta_id
          WHERE m.sesion_id = $1
          ORDER BY m.created_at, m.id`,
         [id],

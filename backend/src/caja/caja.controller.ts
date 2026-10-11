@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UsuarioActual } from '../auth/jwt-auth.guard';
 import { PermisosGuard } from '../auth/permisos.guard';
 import { RequierePermiso } from '../auth/permisos.decorator';
+import { BancosService } from '../bancos/bancos.service';
 import { CajaService } from './caja.service';
 
 type Peticion = { usuario: UsuarioActual; ip?: string };
@@ -22,7 +23,10 @@ type Peticion = { usuario: UsuarioActual; ip?: string };
 @UseGuards(JwtAuthGuard, PermisosGuard)
 @Controller('caja')
 export class CajaController {
-  constructor(private readonly caja: CajaService) {}
+  constructor(
+    private readonly caja: CajaService,
+    private readonly bancos: BancosService,
+  ) {}
 
   // Cajas con su sesión abierta (si tienen) y lo que debería haber.
   // También la usa la pantalla de Ventas para saber si la caja está abierta.
@@ -116,6 +120,60 @@ export class CajaController {
     },
   ) {
     return this.caja.movimiento(req.usuario.id, id, req.ip, body ?? {});
+  }
+
+  // Llevar efectivo de la caja (abierta) a una cuenta: depósito o recarga.
+  @Post('cajas/:id/depositar')
+  @RequierePermiso('caja.movimientos')
+  depositar(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      cuentaId?: unknown;
+      monto?: unknown;
+      montoEntra?: unknown;
+      cambiadoPor?: unknown;
+      referencia?: unknown;
+      motivo?: unknown;
+    },
+  ) {
+    return this.bancos.transferir(req.usuario.id, req.ip, {
+      origenCajaId: id,
+      destinoCuentaId: body?.cuentaId,
+      montoSale: body?.monto,
+      montoEntra: body?.montoEntra,
+      cambiadoPor: body?.cambiadoPor,
+      referencia: body?.referencia,
+      motivo: body?.motivo,
+    });
+  }
+
+  // Traer efectivo de una cuenta a la caja (abierta), por ejemplo para cambio.
+  @Post('cajas/:id/traer')
+  @RequierePermiso('caja.movimientos')
+  traer(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      cuentaId?: unknown;
+      monto?: unknown;
+      montoEntra?: unknown;
+      cambiadoPor?: unknown;
+      referencia?: unknown;
+      motivo?: unknown;
+    },
+  ) {
+    return this.bancos.transferir(req.usuario.id, req.ip, {
+      origenCuentaId: body?.cuentaId,
+      destinoCajaId: id,
+      montoSale: body?.monto,
+      montoEntra: body?.montoEntra,
+      cambiadoPor: body?.cambiadoPor,
+      referencia: body?.referencia,
+      motivo: body?.motivo,
+    });
   }
 
   @Post('sesiones/:id/cerrar')
