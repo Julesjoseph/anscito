@@ -96,7 +96,7 @@ docs/       Documentación (vacío por ahora)
   sobre `anscito_dev` (no hay herramienta ni tabla de control de
   migraciones, y `psql` no está en el PATH). No ejecutarlas sin autorización.
   Si una transacción queda rota en pgAdmin, se arregla con `ROLLBACK;`.
-- Aplicadas hasta ahora: 001, 002 y 003.
+- Aplicadas hasta ahora: 001, 002, 003 y 004.
 - Prohibido sin autorización explícita: `DROP`, `TRUNCATE`, `DELETE` masivo,
   `ALTER ... DROP COLUMN`, cambios de tipo con pérdida, desactivar triggers.
 
