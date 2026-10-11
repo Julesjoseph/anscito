@@ -9,8 +9,9 @@ export const SQL_TASA_VIGENTE = `(SELECT t.tasa FROM impuesto_tasas t
    ORDER BY t.vigente_desde DESC LIMIT 1)`;
 
 // Tipos que suman y que restan. EXISTENCIA = inicial + entradas − salidas.
-export const TIPOS_ENTRADA = `('entrada', 'ajuste_entrada')`;
-export const TIPOS_SALIDA = `('salida', 'ajuste_salida')`;
+// Una venta es salida; su anulación devuelve la mercancía (entrada).
+export const TIPOS_ENTRADA = `('entrada', 'ajuste_entrada', 'anulacion_venta')`;
+export const TIPOS_SALIDA = `('salida', 'ajuste_salida', 'venta')`;
 
 // Signo de cada movimiento "m".
 export const SQL_SIGNO = `CASE

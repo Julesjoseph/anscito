@@ -10,6 +10,7 @@ import { InventarioModule } from './inventario/inventario.module';
 import { ServiciosModule } from './servicios/servicios.module';
 import { TercerosModule } from './terceros/terceros.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
+import { VentasModule } from './ventas/ventas.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UsuariosModule } from './usuarios/usuarios.module';
     InventarioModule,
     TercerosModule,
     EmpresaModule,
+    VentasModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
