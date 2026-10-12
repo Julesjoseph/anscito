@@ -104,7 +104,7 @@ docs/       Documentación (vacío por ahora)
      enseñarle la consulta de comprobación.
   Si el dueño las ejecuta en pgAdmin y una transacción queda rota, se
   arregla con `ROLLBACK;`.
-- Aplicadas hasta ahora: 001 a 016 en las tres bases (`anscito_dev`, `anscito`, `anscito_demo`).
+- Aplicadas hasta ahora: 001 a 017 en las tres bases (`anscito_dev`, `anscito`, `anscito_demo`).
 - Bases de datos: `anscito_dev` (pruebas de Claude), `anscito_demo`
   (entrenamiento) y, cuando se cree, `anscito` (real). Cada migración nueva
   se prueba en `anscito_dev` y, con el visto bueno del dueño, se aplica a

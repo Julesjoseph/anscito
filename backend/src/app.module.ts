@@ -7,6 +7,7 @@ import { CajaModule } from './caja/caja.module';
 import { RemesasModule } from './remesas/remesas.module';
 import { ReportesModule } from './reportes/reportes.module';
 import { SanesModule } from './sanes/sanes.module';
+import { FacturacionModule } from './facturacion/facturacion.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { DatabaseModule } from './database/database.module';
 import { EmpresaModule } from './empresa/empresa.module';
@@ -35,6 +36,7 @@ import { VentasModule } from './ventas/ventas.module';
     RemesasModule,
     ReportesModule,
     SanesModule,
+    FacturacionModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

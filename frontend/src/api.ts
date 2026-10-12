@@ -840,6 +840,8 @@ export type PrepararVenta = {
   descuentoMaximoPct: string
   puedeDescontar: boolean
   consumidorFinal: { id: string; nombre: string } | null
+  // Facturación electrónica: si ya empezó, cada venta deja su e-CF por emitir.
+  facturacion: { activa: boolean; umbral: string }
 }
 
 export type ArticuloVenta = {
@@ -896,6 +898,8 @@ export type DatosVenta = {
     cuentaId?: string
   }
   comprobanteFiscal: string
+  // '31' Crédito Fiscal, '32' Consumo o '' (según el cliente).
+  tipoEcf?: string
   notas: string
 }
 
@@ -969,6 +973,7 @@ export type DetalleVenta = {
   anulada_por_usuario: string | null
   motivo_anulacion: string | null
   lineas: LineaDetalle[]
+  ecf: EcfDeVenta[]
   pagos: {
     monto: string
     recibido: string | null
@@ -976,6 +981,14 @@ export type DetalleVenta = {
     referencia: string | null
     forma_pago: string
   }[]
+}
+
+export type EcfDeVenta = {
+  tipo: string
+  estado: 'por_emitir' | 'emitido'
+  encf: string | null
+  fecha_emision: string | null
+  codigo_seguridad: string | null
 }
 
 export const prepararVenta = (token: string) =>
@@ -999,7 +1012,7 @@ export const previsualizarVenta = (token: string, datos: DatosVenta) =>
   llamar<PrevisualizacionVenta>('POST', '/ventas/calcular', token, datos)
 
 export const registrarVenta = (token: string, datos: DatosVenta) =>
-  llamar<{ id: string; numero: string; total: string; devuelta: string | null }>(
+  llamar<{ id: string; numero: string; total: string; devuelta: string | null; ecf: string | null }>(
     'POST',
     '/ventas',
     token,
@@ -2170,3 +2183,81 @@ export const buscarClientesSan = (token: string, texto: string, soloParticipante
   if (soloParticipantes) q.set('participantes', 'si')
   return llamar<ClienteSan[]>('GET', `/sanes/clientes?${q.toString()}`, token)
 }
+
+// ---------- Facturación electrónica (e-CF) ----------
+
+export type EstadoEcf = 'por_emitir' | 'emitido' | 'cancelado'
+
+export type PrepararFacturacion = {
+  modo: string
+  inicio: string
+  umbral: string
+  hoy: string
+  activa: boolean
+  porEmitir: number
+  emitidos: number
+  cancelados: number
+}
+
+export type FilaEcf = {
+  id: string
+  venta_id: string
+  tipo: string
+  tipo_nombre: string
+  estado: EstadoEcf
+  comprador_documento: string | null
+  comprador_nombre: string
+  base_imponible: string
+  itbis: string
+  total: string
+  encf: string | null
+  fecha_emision: string | null
+  codigo_seguridad: string | null
+  emitido_en: string | null
+  emitido_por_usuario: string | null
+  motivo_cancelacion: string | null
+  created_at: string
+  venta_numero_texto: string
+  venta_fecha: string
+  venta_estado: 'completada' | 'anulada'
+  modifica_encf: string | null
+  modifica_fecha: string | null
+}
+
+export type PaginaEcf = {
+  filas: FilaEcf[]
+  total: number
+  pagina: number
+  porPagina: number
+}
+
+export type DatosEmision = {
+  encf: string
+  fechaEmision: string
+  codigoSeguridad: string
+  motivo?: string
+}
+
+export const prepararFacturacion = (token: string) =>
+  llamar<PrepararFacturacion>('GET', '/facturacion/preparar', token)
+
+export const listarEcf = (
+  token: string,
+  f: { estado: EstadoEcf | 'todos'; texto: string; pagina: number },
+) => {
+  const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  return llamar<PaginaEcf>('GET', `/facturacion?${q.toString()}`, token)
+}
+
+export const emitirEcf = (token: string, id: string, datos: DatosEmision) =>
+  llamar<{ ok: boolean; encf: string }>('POST', `/facturacion/${id}/emitir`, token, datos)
+
+export const corregirEcf = (token: string, id: string, datos: DatosEmision) =>
+  llamar<{ ok: boolean }>('POST', `/facturacion/${id}/corregir`, token, datos)
+
+export const cambiarTipoEcf = (token: string, id: string, tipo: string) =>
+  llamar<{ ok: boolean; id: string }>('POST', `/facturacion/${id}/tipo`, token, { tipo })
+
+export const configurarFacturacion = (token: string, datos: { inicio: string; umbral: string }) =>
+  llamar<{ ok: boolean }>('PATCH', '/facturacion/configuracion', token, datos)

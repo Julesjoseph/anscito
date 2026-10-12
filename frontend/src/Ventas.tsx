@@ -206,7 +206,8 @@ function NuevaVenta({
   const [previa, setPrevia] = useState<{ clave: string; datos: PrevisualizacionVenta | null; error: string } | null>(null)
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
-  const [hecha, setHecha] = useState<{ id: string; numero: string; total: string; devuelta: string | null } | null>(null)
+  const [hecha, setHecha] = useState<{ id: string; numero: string; total: string; devuelta: string | null; ecf: string | null } | null>(null)
+  const [tipoEcf, setTipoEcf] = useState('')
   const [cajaId, setCajaId] = useState<string | null>(cajaDeEstaComputadora)
   // Última cuenta usada para transferencias en esta computadora.
   const [cuentaId, setCuentaId] = useState<string>(() => {
@@ -394,6 +395,7 @@ function NuevaVenta({
     setRecibido('')
     setReferencia('')
     setComprobante('')
+    setTipoEcf('')
     setMotivoDescuento('')
     setNotas('')
     setPrevia(null)
@@ -417,7 +419,8 @@ function NuevaVenta({
           cajaId: forma.usa_caja && miCaja ? miCaja.id : undefined,
           cuentaId: forma.usa_cuenta && cuentaVenta ? cuentaVenta.id : undefined,
         },
-        comprobanteFiscal: comprobante,
+        comprobanteFiscal: prep?.facturacion.activa ? '' : comprobante,
+        tipoEcf: prep?.facturacion.activa ? tipoEcf : undefined,
         notas,
       })
       setHecha(r)
@@ -593,6 +596,11 @@ function NuevaVenta({
             </div>
             <div>Total cobrado: {dinero(hecha.total)}</div>
             {hecha.devuelta !== null && <div className="text-lg font-medium">Devuelta: {dinero(hecha.devuelta)}</div>}
+            {hecha.ecf && (
+              <div>
+                Factura electrónica {hecha.ecf === '31' ? '31 (Crédito Fiscal)' : '32 (Consumo)'}: queda en la lista “Por emitir”.
+              </div>
+            )}
             <BotonImprimir token={token} ventaId={hecha.id} onSesionVencida={onSesionVencida} />
             <button type="button" onClick={() => onVerVenta(hecha.id)} className="self-start text-green-900 underline">
               Ver el detalle
@@ -747,10 +755,29 @@ function NuevaVenta({
           </label>
         )}
 
+        {prep?.facturacion.activa && (
+          <label className="flex flex-col gap-1 text-sm text-gray-600">
+            Factura electrónica
+            <select value={tipoEcf} onChange={(e) => setTipoEcf(e.target.value)} className={CAMPO}>
+              <option value="">Automática (según el cliente)</option>
+              <option value="32">32 · Consumo</option>
+              <option value="31">31 · Crédito Fiscal (cliente con RNC o cédula)</option>
+            </select>
+            {tipoEcf === '' && (
+              <span className="text-xs text-gray-500">
+                Automática: si el cliente está marcado como contribuyente en Clientes se hace 31 · Crédito Fiscal; si no
+                (por ejemplo, Consumidor final), 32 · Consumo.
+              </span>
+            )}
+          </label>
+        )}
+
         <details className="text-sm text-gray-600">
-          <summary className="cursor-pointer">Comprobante fiscal y notas (opcional)</summary>
+          <summary className="cursor-pointer">{prep?.facturacion.activa ? 'Notas (opcional)' : 'Comprobante fiscal y notas (opcional)'}</summary>
           <div className="mt-2 flex flex-col gap-2">
-            <input type="text" value={comprobante} onChange={(e) => setComprobante(e.target.value.toUpperCase())} placeholder="NCF o e-CF emitido (se puede anotar después)" className={`${CAMPO} font-mono`} />
+            {!prep?.facturacion.activa && (
+              <input type="text" value={comprobante} onChange={(e) => setComprobante(e.target.value.toUpperCase())} placeholder="NCF o e-CF emitido (se puede anotar después)" className={`${CAMPO} font-mono`} />
+            )}
             <textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={2} placeholder="Notas" className={AREA} />
           </div>
         </details>
@@ -766,9 +793,9 @@ function NuevaVenta({
           </button>
         )}
         <p className="text-xs text-gray-500">
-          El número interno (V-000001…) no es un comprobante fiscal: el NCF o
-          e-CF se emite en su sistema actual. Confirme con su contador cómo deben
-          quedar documentadas sus ventas.
+          {prep?.facturacion.activa
+            ? 'El número interno (V-000001…) no es un comprobante fiscal: la factura electrónica queda “por emitir” y se emite en el Facturador de la DGII desde Facturación electrónica.'
+            : 'El número interno (V-000001…) no es un comprobante fiscal: el NCF o e-CF se emite en su sistema actual. Confirme con su contador cómo deben quedar documentadas sus ventas.'}
         </p>
       </div>
     </form>
@@ -917,7 +944,26 @@ function VerDetalle({
         </dl>
       </div>
 
-      <div className="flex flex-wrap items-end gap-2">
+      {d.ecf.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-lg border border-gray-200 p-3">
+          <div className="font-medium">Factura electrónica</div>
+          {d.ecf.map((e) => (
+            <div key={e.tipo} className="flex flex-wrap justify-between gap-2">
+              <span>{e.tipo === '31' ? '31 · Crédito Fiscal' : e.tipo === '32' ? '32 · Consumo' : '34 · Nota de Crédito'}</span>
+              {e.estado === 'emitido' ? (
+                <span className="font-mono">
+                  {e.encf} · {e.fecha_emision} · código {e.codigo_seguridad}
+                </span>
+              ) : (
+                <span className="text-amber-700">Por emitir</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {d.ecf.length === 0 && (
+        <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-1 flex-col gap-1 text-gray-600">
           Comprobante fiscal (NCF / e-CF)
           <input
@@ -933,7 +979,8 @@ function VerDetalle({
             Guardar comprobante
           </button>
         )}
-      </div>
+        </div>
+      )}
 
       <BotonImprimir token={token} ventaId={id} onSesionVencida={onSesionVencida} />
 

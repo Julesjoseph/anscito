@@ -5,6 +5,7 @@ import {
   Briefcase,
   Building2,
   ClipboardList,
+  FileCheck2,
   FileText,
   HandCoins,
   Landmark,
@@ -24,6 +25,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { Marca, Perfil } from './api'
 import Empresa from './Empresa'
 import Envios from './Envios'
+import Facturacion from './Facturacion'
 import Panel from './Panel'
 import Reportes from './Reportes'
 import { LogoMarca } from './marca'
@@ -115,6 +117,13 @@ const MODULOS: Modulo[] = [
     permiso: 'remesas.ver',
   },
   { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
+  {
+    id: 'facturacion',
+    nombre: 'Facturación electrónica',
+    Icono: FileCheck2,
+    listo: true,
+    permiso: 'facturacion.ver',
+  },
   { id: 'nomina', nombre: 'Nómina', Icono: Briefcase, listo: false },
   {
     id: 'reportes',
@@ -303,6 +312,12 @@ export default function Layout({
           />
         ) : pagina === 'bancos' ? (
           <Bancos
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'facturacion' ? (
+          <Facturacion
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

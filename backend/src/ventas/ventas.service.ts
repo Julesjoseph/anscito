@@ -8,6 +8,11 @@ import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE, SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
 import { DatabaseService } from '../database/database.service';
+import {
+  anularEcfDeVenta,
+  crearEcfDeVenta,
+  facturacionActiva,
+} from '../facturacion/ecf';
 import { esEntera, normalizarCantidad } from '../inventario/cantidades';
 import { SQL_EXISTENCIA, SQL_SIGNO, SQL_TASA_VIGENTE } from '../inventario/sql';
 import { normalizarMonto } from '../servicios/calculo-itbis';
@@ -54,6 +59,8 @@ export type DatosVenta = {
     cuentaId?: unknown;
   };
   comprobanteFiscal?: unknown;
+  // e-CF: '31' (Crédito Fiscal), '32' (Consumo) o vacío (según el cliente).
+  tipoEcf?: unknown;
   notas?: unknown;
 };
 
@@ -134,13 +141,14 @@ export class VentasService {
   // ---------- Datos para la pantalla de venta ----------
 
   async preparar(actorId: string) {
-    const [formas, maximo, descontar] = await Promise.all([
+    const [formas, maximo, descontar, factura] = await Promise.all([
       this.db.query(
         `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia, usa_caja, usa_cuenta
          FROM formas_pago WHERE is_active = true ORDER BY orden, nombre`,
       ),
       this.config(this.db, 'ventas.descuento_maximo_pct'),
       this.tienePermiso(actorId, 'ventas.descontar'),
+      facturacionActiva(this.db),
     ]);
     const cf = await this.db.query<{ id: string; nombre: string }>(
       `SELECT id, nombre FROM terceros
@@ -167,6 +175,7 @@ export class VentasService {
       descuentoMaximoPct: maximo,
       puedeDescontar: descontar,
       consumidorFinal: cf.rows[0] ?? null,
+      facturacion: { activa: factura.activa, umbral: factura.umbral },
     };
   }
 
@@ -673,6 +682,14 @@ export class VentasService {
         );
       }
 
+      // Su e-CF queda por emitir (si la facturación electrónica ya empezó).
+      const ecf = await crearEcfDeVenta(
+        c,
+        ventaId,
+        texto(datos.tipoEcf),
+        actorId,
+      );
+
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'venta.crear',
@@ -689,6 +706,7 @@ export class VentasService {
             : null,
           cuenta: cuentaVenta?.nombre ?? null,
           comprobante_fiscal: comprobante,
+          ecf: ecf ? `${ecf.tipo} por emitir` : null,
         },
         motivo:
           totales.descuento === '0.00'
@@ -702,6 +720,7 @@ export class VentasService {
         numero: numeroVenta(numero),
         total: totales.total,
         devuelta,
+        ecf: ecf?.tipo ?? null,
       };
     });
   }
@@ -806,7 +825,7 @@ export class VentasService {
       [id],
     );
     if (v.rowCount === 0) throw new NotFoundException('Venta no encontrada');
-    const [lineas, pagos, verCostos, verDocumento] = await Promise.all([
+    const [lineas, pagos, verCostos, verDocumento, ecf] = await Promise.all([
       this.db.query(
         'SELECT * FROM venta_lineas WHERE venta_id = $1 ORDER BY id',
         [id],
@@ -819,6 +838,12 @@ export class VentasService {
       ),
       this.tienePermiso(actorId, 'inventario.ver_costos'),
       this.tienePermiso(actorId, 'terceros.ver_documento'),
+      this.db.query(
+        `SELECT tipo, estado, encf, to_char(fecha_emision, 'YYYY-MM-DD') AS fecha_emision,
+                codigo_seguridad
+         FROM ecf WHERE venta_id = $1 AND estado <> 'cancelado' ORDER BY created_at`,
+        [id],
+      ),
     ]);
     const venta = v.rows[0] as Record<string, unknown>;
     return {
@@ -833,6 +858,7 @@ export class VentasService {
         return resto;
       }),
       pagos: pagos.rows,
+      ecf: ecf.rows,
     };
   }
 
@@ -1081,6 +1107,8 @@ export class VentasService {
         );
       }
 
+      const ecf = await anularEcfDeVenta(c, id, actorId, textoMotivo, ip);
+
       await c.query(
         `UPDATE ventas SET estado = 'anulada', anulada_por = $2, anulada_en = now(),
                 motivo_anulacion = $3
@@ -1105,11 +1133,12 @@ export class VentasService {
           efectivo_devuelto: efectivo,
           caja: cajaDevolucion,
           devuelto_por_cuenta: devueltoCuentas.length ? devueltoCuentas : null,
+          ecf,
         },
         motivo: textoMotivo,
         ip,
       });
-      return { ok: true };
+      return { ok: true, ecf };
     });
   }
 }

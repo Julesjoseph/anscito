@@ -39,6 +39,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 014 | Envíos a Haití (remesas): tarifas con historial, agentes, beneficiarios, motivos, envíos pendiente/confirmado/rechazado, entregas de agentes, pago de comisiones, roles de operadores |
 | 015 | Permisos de reportes por área (ventas, envíos, caja y bancos, inventario) |
 | 016 | SAN: sanes, turnos, participaciones (completo/medio), recibos de cuotas, entregas de mano, pagos; % comisión/mora y días de gracia configurables; movimientos `san_cuota`/`san_mano` en caja y cuentas |
+| 017 | Facturación electrónica: tipos de e-CF (31, 32, 34 activos), tabla `ecf` (por emitir / emitido / cancelado, e-NCF único, nota de crédito), configuración `facturacion.*` (modo manual, fecha de inicio vacía, monto para identificar al comprador) |
 
 ## Módulos terminados
 
@@ -221,6 +222,17 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   aunque otros deban (SCITO adelanta) y a quien cobra se le descuentan sus
   cuotas vencidas. Las cuotas son dinero de terceros; solo comisión y mora
   son ganancia. Requiere validación legal antes de usarlo con clientes.
+- **Facturación electrónica** (`/facturacion`, pantalla `Facturacion.tsx`):
+  modo manual con el Facturador Gratuito de la DGII. Desde la fecha de
+  inicio (Configuración; vacía = apagada) cada venta de Ventas / SCITO
+  SERVICE deja su e-CF "por emitir": 31 si el cliente es contribuyente, 32 si
+  no (o el que se elija al cobrar). Al final del día se emite en la DGII y se
+  anota e-NCF, fecha y código de seguridad (validados). Venta anulada: si el
+  e-CF no se emitió se cancela; si ya se emitió queda una Nota de Crédito 34
+  por emitir. Las comisiones (envíos, SAN) no llevan e-CF por ahora: lo decide
+  el contador. Plazo DGII para pequeños: 15/11/2026 (confirmar). Siguiente
+  paso posible: modo "proveedor" (envío automático por la API del proveedor
+  que el dueño contrate; claves solo en `.env`).
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los
