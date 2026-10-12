@@ -230,7 +230,9 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   anota e-NCF, fecha y código de seguridad (validados). Venta anulada: si el
   e-CF no se emitió se cancela; si ya se emitió queda una Nota de Crédito 34
   por emitir. Las comisiones (envíos, SAN) no llevan e-CF por ahora: lo decide
-  el contador. Plazo DGII para pequeños: 15/11/2026 (confirmar). Siguiente
+  el contador. En Ventas se puede crear un cliente nuevo ("+ Nuevo", con
+  RNC/cédula y "pide Crédito Fiscal") sin salir de la venta.
+  Plazo DGII para pequeños: 15/11/2026 (confirmar). Siguiente
   paso posible: modo "proveedor" (envío automático por la API del proveedor
   que el dueño contrate; claves solo en `.env`).
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la

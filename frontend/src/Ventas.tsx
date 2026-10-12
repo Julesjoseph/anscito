@@ -13,6 +13,7 @@ import {
   Search,
   ShoppingCart,
   Trash2,
+  UserPlus,
   UserRound,
   Wallet,
 } from 'lucide-react'
@@ -22,12 +23,14 @@ import {
   anularVenta,
   buscarArticulos,
   buscarClientesVenta,
+  crearTercero,
   detalleVenta,
   listarVentas,
   obtenerRecibo,
   prepararVenta,
   previsualizarVenta,
   registrarVenta,
+  tiposDocumento,
 } from './api'
 import type {
   ArticuloVenta,
@@ -39,6 +42,7 @@ import type {
   PaginaVentas,
   PrepararVenta,
   PrevisualizacionVenta,
+  TipoDocumento,
 } from './api'
 import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
 import {
@@ -181,12 +185,126 @@ function BotonImprimir({
   )
 }
 
+// ---------- Cliente nuevo desde la venta ----------
+
+// Para registrar en el momento a quien pide factura de Crédito Fiscal.
+// Queda también en la lista de Clientes.
+function FormClienteNuevo({
+  token,
+  onListo,
+  onSesionVencida,
+}: {
+  token: string
+  onListo: (c: { id: string; nombre: string; contribuyente: boolean }) => void
+  onSesionVencida: () => void
+}) {
+  const [tipos, setTipos] = useState<TipoDocumento[]>([])
+  const [tipoId, setTipoId] = useState('')
+  const [numero, setNumero] = useState('')
+  const [nombre, setNombre] = useState('')
+  const [telefono, setTelefono] = useState('')
+  const [contribuyente, setContribuyente] = useState(true)
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  useEffect(() => {
+    tiposDocumento('clientes', token)
+      .then((t) => {
+        setTipos(t)
+        setTipoId(t.find((x) => x.codigo === 'rnc')?.id ?? '')
+      })
+      .catch((e) => {
+        if (e instanceof SesionVencida) onSesionVencida()
+        else setError(mensajeDe(e))
+      })
+  }, [token, onSesionVencida])
+
+  const tipo = tipos.find((t) => t.id === tipoId)
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setGuardando(true)
+    try {
+      const r = await crearTercero('clientes', token, {
+        tipoDocumentoId: tipoId,
+        numeroDocumento: numero,
+        nombre,
+        nombreComercial: '',
+        esContribuyente: contribuyente,
+        direccion: '',
+        telefono,
+        whatsapp: '',
+        correo: '',
+        notas: '',
+        puedeCredito: false,
+        personaContacto: '',
+        diasCredito: '',
+      })
+      onListo({ id: r.id, nombre: nombre.trim(), contribuyente })
+    } catch (err) {
+      if (err instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void guardar(e)} className="flex flex-col gap-3 text-sm">
+      <label className="flex flex-col gap-1 text-gray-600">
+        Nombre o razón social
+        <input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={150} className={CAMPO} autoFocus />
+      </label>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-gray-600">
+          Documento
+          <select value={tipoId} onChange={(e) => setTipoId(e.target.value)} className={CAMPO}>
+            {tipos.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-gray-600">
+          Número
+          <input type="text" value={numero} onChange={(e) => setNumero(e.target.value)} inputMode="numeric" className={`${CAMPO} font-mono`} />
+          {tipo && <span className="text-xs text-gray-500">{tipo.ayuda}</span>}
+        </label>
+      </div>
+      <label className="flex flex-col gap-1 text-gray-600">
+        Teléfono (opcional)
+        <input type="text" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="809-555-1234" className={CAMPO} />
+      </label>
+      <label className="flex items-start gap-2 text-gray-700">
+        <input type="checkbox" checked={contribuyente} onChange={(e) => setContribuyente(e.target.checked)} className="mt-1" />
+        <span>
+          Pide factura de Crédito Fiscal (contribuyente)
+          <span className="block text-xs text-gray-500">Sus ventas saldrán como 31 · Crédito Fiscal.</span>
+        </span>
+      </label>
+      {error && (
+        <CajaError>
+          {error}
+          {/ya existe/i.test(error) && ' Búsquelo por su nombre o documento en “Cliente” y tóquelo en la lista.'}
+        </CajaError>
+      )}
+      <button type="submit" disabled={guardando || !nombre.trim() || !numero.trim() || !tipoId} className={BOTON_PRINCIPAL}>
+        {guardando ? 'Guardando…' : 'Guardar y usar en esta venta'}
+      </button>
+      <p className="text-xs text-gray-500">El cliente queda también en la lista de Clientes.</p>
+    </form>
+  )
+}
+
 // ---------- Nueva venta ----------
 
 type Linea = { art: ArticuloVenta; cantidad: string; pct: string }
 
 function NuevaVenta({
   token,
+  permisos,
   onSesionVencida,
   onVerVenta,
 }: Props & { onVerVenta: (id: string) => void }) {
@@ -208,6 +326,8 @@ function NuevaVenta({
   const [guardando, setGuardando] = useState(false)
   const [hecha, setHecha] = useState<{ id: string; numero: string; total: string; devuelta: string | null; ecf: string | null } | null>(null)
   const [tipoEcf, setTipoEcf] = useState('')
+  const [nuevoCliente, setNuevoCliente] = useState(false)
+  const puedeCrearCliente = permisos.includes('clientes.crear') && permisos.includes('clientes.ver')
   const [cajaId, setCajaId] = useState<string | null>(cajaDeEstaComputadora)
   // Última cuenta usada para transferencias en esta computadora.
   const [cuentaId, setCuentaId] = useState<string>(() => {
@@ -447,6 +567,7 @@ function NuevaVenta({
   if (!prep) return error ? <CajaError>{error}</CajaError> : <div className="text-gray-500">Cargando…</div>
 
   return (
+    <>
     <form onSubmit={cobrar} className="grid grid-cols-1 gap-4 xl:grid-cols-3">
       {/* Artículos */}
       <div className="flex flex-col gap-4 xl:col-span-2">
@@ -615,9 +736,16 @@ function NuevaVenta({
               <span className="flex items-center gap-2 font-medium text-gray-900">
                 <UserRound size={16} /> {cliente?.nombre ?? 'Sin cliente'}
               </span>
-              <button type="button" onClick={() => setClientes([])} className="text-xs text-[#C8102E] hover:underline">
-                Cambiar
-              </button>
+              <span className="flex gap-3">
+                {puedeCrearCliente && (
+                  <button type="button" onClick={() => setNuevoCliente(true)} className="flex items-center gap-1 text-xs text-[#C8102E] hover:underline">
+                    <UserPlus size={14} /> Nuevo
+                  </button>
+                )}
+                <button type="button" onClick={() => setClientes([])} className="text-xs text-[#C8102E] hover:underline">
+                  Cambiar
+                </button>
+              </span>
             </div>
           ) : (
             <div className="relative">
@@ -647,9 +775,16 @@ function NuevaVenta({
                   </li>
                 ))}
               </ul>
-              <button type="button" onClick={() => setClientes(null)} className="mt-1 text-xs text-gray-500 hover:underline">
-                Cancelar
-              </button>
+              <div className="mt-1 flex gap-4">
+                {puedeCrearCliente && (
+                  <button type="button" onClick={() => setNuevoCliente(true)} className="flex items-center gap-1 text-xs text-[#C8102E] hover:underline">
+                    <UserPlus size={14} /> Nuevo cliente
+                  </button>
+                )}
+                <button type="button" onClick={() => setClientes(null)} className="text-xs text-gray-500 hover:underline">
+                  Cancelar
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -799,6 +934,22 @@ function NuevaVenta({
         </p>
       </div>
     </form>
+    {nuevoCliente && (
+      <Ventana titulo="Nuevo cliente" onCerrar={() => setNuevoCliente(false)}>
+        <FormClienteNuevo
+          token={token}
+          onSesionVencida={onSesionVencida}
+          onListo={(c) => {
+            setCliente({ id: c.id, nombre: c.nombre })
+            setClientes(null)
+            setBuscarCliente('')
+            setTipoEcf('')
+            setNuevoCliente(false)
+          }}
+        />
+      </Ventana>
+    )}
+    </>
   )
 }
 
