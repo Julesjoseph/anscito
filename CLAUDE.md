@@ -110,6 +110,10 @@ docs/       Documentación (vacío por ahora)
   se prueba en `anscito_dev` y, con el visto bueno del dueño, se aplica a
   TODAS. La demo también se puede recrear con
   `backend/scripts/demo/reiniciar-demo.ps1` (borra solo `anscito_demo`).
+- Flujo de cada cambio: programar y probar en `anscito_dev` (puertos
+  3010/5180) → el dueño prueba → "publícalo": aplicar migraciones a
+  `anscito` y `anscito_demo`, ejecutar `backend/scripts/publicar.ps1`,
+  commit y push. El sistema real nunca usa esta carpeta directamente.
 - Al probar, no compilar en `backend/dist` mientras el servidor del dueño
   está encendido (lo usa `npm run start:dev` y el demo).
 - Prohibido sin autorización explícita: `DROP`, `TRUNCATE`, `DELETE` masivo,

@@ -181,6 +181,24 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   (→ `reiniciar-demo.js`: borra solo `anscito_demo`, migraciones, copia
   catálogos activos del real o de `anscito_dev`, crea 4 usuarios demo.* con
   contraseña nueva en el escritorio y datos inventados).
+- **Tres entornos** (decisión del dueño):
+
+  | Entorno | Programa | Base | Puertos |
+  |---|---|---|---|
+  | ANSCITO (real, icono) | `C:\Users\Dell\SCITO-publicado` | `anscito` | 3000 / 5173 |
+  | ANSCITO DEMO (icono) | `SCITO-publicado` | `anscito_demo` | 3001 / 5174 |
+  | Pruebas (`npm run start:dev` / `npm run dev`) | esta carpeta | `anscito_dev` | 3010 / 5180 |
+
+  La base real se creó vacía con `backend/scripts/crear-base-real.js`
+  (solo migraciones + los 13 agentes); el administrador real lo creó el
+  dueño con `crear-admin.js`. Publicar una versión aprobada:
+  `backend/scripts/publicar.ps1` (compila en una carpeta temporal, guarda la
+  anterior en `SCITO-publicado-anterior`, copia solo lo cambiado, rehace los
+  accesos del escritorio; el `.env` no se copia: se lee vía
+  `publicado.json`). Las migraciones se aplican a mano a `anscito` y
+  `anscito_demo` antes de publicar. Las pantallas publicadas las sirve
+  `backend/scripts/servir-pantallas.js` (solo Node). Los accesos verifican
+  que el puerto lo use la versión publicada antes de reutilizarlo.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los
