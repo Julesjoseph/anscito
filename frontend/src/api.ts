@@ -1,4 +1,6 @@
-export const API_URL = 'http://localhost:3000'
+// La dirección del servidor se configura al arrancar (ver entorno.ts).
+import { API_URL } from './entorno'
+export { API_URL }
 
 export type Usuario = {
   id: string

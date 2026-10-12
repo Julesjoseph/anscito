@@ -105,6 +105,13 @@ docs/       Documentación (vacío por ahora)
   Si el dueño las ejecuta en pgAdmin y una transacción queda rota, se
   arregla con `ROLLBACK;`.
 - Aplicadas hasta ahora: 001 a 014.
+- Bases de datos: `anscito_dev` (pruebas de Claude), `anscito_demo`
+  (entrenamiento) y, cuando se cree, `anscito` (real). Cada migración nueva
+  se prueba en `anscito_dev` y, con el visto bueno del dueño, se aplica a
+  TODAS. La demo también se puede recrear con
+  `backend/scripts/demo/reiniciar-demo.ps1` (borra solo `anscito_demo`).
+- Al probar, no compilar en `backend/dist` mientras el servidor del dueño
+  está encendido (lo usa `npm run start:dev` y el demo).
 - Prohibido sin autorización explícita: `DROP`, `TRUNCATE`, `DELETE` masivo,
   `ALTER ... DROP COLUMN`, cambios de tipo con pérdida, desactivar triggers.
 

@@ -3,6 +3,7 @@ import Login from './Login'
 import Layout from './Layout'
 import CambiarPassword from './CambiarPassword'
 import { obtenerMarca, obtenerPerfil } from './api'
+import { MODO_DEMO } from './entorno'
 import type { Marca, Perfil } from './api'
 
 // Marca mientras carga o si el servidor no responde.
@@ -39,7 +40,9 @@ export default function App() {
 
   // El nombre comercial también va en la pestaña del navegador.
   useEffect(() => {
-    document.title = marca.nombre_comercial
+    document.title = MODO_DEMO
+      ? `DEMO · ${marca.nombre_comercial}`
+      : marca.nombre_comercial
   }, [marca.nombre_comercial])
   const [cargando, setCargando] = useState<boolean>(
     () => sessionStorage.getItem('token') !== null,

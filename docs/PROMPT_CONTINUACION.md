@@ -172,6 +172,15 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   redondean al entero (mitad hacia arriba; comisión impar: el agente recibe
   la mitad redondeada hacia arriba). La comisión es % del monto enviado, no
   del total pagado. Los envíos anteriores no cambian.
+- **Modo DEMO (entrenamiento)**: el mismo programa arranca como real
+  (servidor 3000, pantallas 5173) o como demo (servidor 3001 con
+  `DB_NAME=anscito_demo`, pantallas 5174 con `VITE_MODO=demo` y franja
+  amarilla). `frontend/src/entorno.ts` (VITE_API_URL) y `CORS_ORIGENES` en
+  `main.ts`, con los valores de siempre por defecto. Scripts en
+  `backend/scripts/demo/`: `iniciar-demo.ps1` y `reiniciar-demo.ps1`
+  (→ `reiniciar-demo.js`: borra solo `anscito_demo`, migraciones, copia
+  catálogos activos del real o de `anscito_dev`, crea 4 usuarios demo.* con
+  contraseña nueva en el escritorio y datos inventados).
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los
