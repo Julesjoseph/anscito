@@ -35,8 +35,8 @@ commits se escriben **en español**. Marca visible en pantalla:
 ## Estructura
 
 ```
-backend/    API NestJS (TypeScript) — puerto 3000
-frontend/   SPA React + Vite + Tailwind — puerto 5173
+backend/    API NestJS (TypeScript) — pruebas en el puerto 3010
+frontend/   SPA React + Vite + Tailwind — pruebas en el puerto 5180
 database/   Migraciones SQL numeradas (NNN_descripcion.sql)
 docs/       Documentación (vacío por ahora)
 ```
@@ -152,7 +152,7 @@ npm run lint            # oxlint
 node test-db.js         # probar conexión a PostgreSQL
 
 # Frontend (desde frontend/)
-npm run dev             # Vite en http://localhost:5173
+npm run dev             # Vite en http://localhost:5180 (pruebas)
 npm run build           # tsc -b + build
 npm run lint            # oxlint
 ```

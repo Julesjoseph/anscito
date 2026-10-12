@@ -5,7 +5,7 @@
 # prueba" (prefijo PRB) y "Sin prefijo prueba". Cada ejecucion crea dos
 # productos de prueba nuevos y al final deja todo desactivado.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

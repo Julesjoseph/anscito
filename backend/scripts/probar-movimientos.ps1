@@ -4,7 +4,7 @@
 # Usa la categoria "Productos de prueba" (PRB). Cada ejecucion crea un
 # producto de prueba nuevo y al final deja todo desactivado.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

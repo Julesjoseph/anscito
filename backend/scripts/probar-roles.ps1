@@ -4,7 +4,7 @@
 # Crea (o reutiliza) el rol de prueba "prueba_roles" y al final lo deja
 # desactivado. Las contrasenas se piden ocultas y no se guardan.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

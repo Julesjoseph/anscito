@@ -4,7 +4,7 @@
 # NO cambia los datos reales de la empresa ni el logo: solo comprueba que se
 # rechacen los datos invalidos. Crea una sucursal de prueba y la desactiva.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

@@ -7,7 +7,7 @@
 # Al final deja todo en cero y desactivado. Los envios de prueba quedan en la
 # base de desarrollo (no se borran) y usan numeros E-000001...
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

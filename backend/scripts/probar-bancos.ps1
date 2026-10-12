@@ -9,7 +9,7 @@
 # y desactiva todo. Los movimientos quedan en la base de desarrollo
 # (no se borran, como en la vida real).
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

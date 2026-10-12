@@ -4,7 +4,7 @@
 # Cada ejecucion crea un cliente y un proveedor de prueba con una cedula
 # inventada distinta, y al final los deja desactivados.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

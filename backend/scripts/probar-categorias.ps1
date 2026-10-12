@@ -4,7 +4,7 @@
 # Crea (o reutiliza) "Unidad de prueba", su categoria "Categoria de prueba" y
 # el servicio PRUEBA-CAT; al final deja los tres desactivados.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 

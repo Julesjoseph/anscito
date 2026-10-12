@@ -3,6 +3,10 @@
 # El sistema real NO se toca.
 
 $backend = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$config = Join-Path (Split-Path -Parent $backend) 'publicado.json'
+if (Test-Path $config) {
+  $env:DOTENV_CONFIG_PATH = (Get-Content $config -Raw | ConvertFrom-Json).envPath
+}
 
 Write-Host ''
 Write-Host 'REINICIAR ANSCITO DEMO' -ForegroundColor Yellow

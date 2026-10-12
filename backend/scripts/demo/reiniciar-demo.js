@@ -20,7 +20,8 @@ const crypto = require('crypto');
 
 const BACKEND = path.resolve(__dirname, '..', '..');
 const MIGRACIONES = path.resolve(BACKEND, '..', 'database');
-require('dotenv').config({ path: path.join(BACKEND, '.env'), quiet: true });
+// En la versión publicada, el .env se lee de su lugar de siempre (publicado.json).
+require('dotenv').config({ path: process.env.DOTENV_CONFIG_PATH || path.join(BACKEND, '.env'), quiet: true });
 const { Client, Pool } = require('pg');
 const bcrypt = require('bcrypt');
 

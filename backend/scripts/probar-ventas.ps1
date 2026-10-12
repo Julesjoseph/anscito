@@ -8,7 +8,7 @@
 # y se desactiva al final (no toca la Caja 1). La transferencia llega a una
 # CUENTA DE PRUEBA que termina en 0 y se desactiva.
 
-$API = 'http://localhost:3000'
+$API = 'http://localhost:3010'
 # Cualquier error inesperado detiene el script en vez de seguir en cadena.
 $ErrorActionPreference = 'Stop'
 
