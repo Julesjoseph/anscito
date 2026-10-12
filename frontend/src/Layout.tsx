@@ -24,6 +24,7 @@ import type { Marca, Perfil } from './api'
 import Empresa from './Empresa'
 import Envios from './Envios'
 import Panel from './Panel'
+import Reportes from './Reportes'
 import { LogoMarca } from './marca'
 import Bancos from './Bancos'
 import Caja from './Caja'
@@ -41,7 +42,8 @@ type Modulo = {
   nombre: string
   Icono: LucideIcon
   listo: boolean
-  permiso?: string
+  // Se muestra si el usuario tiene alguno de estos permisos.
+  permiso?: string | string[]
 }
 
 const MODULOS: Modulo[] = [
@@ -105,7 +107,19 @@ const MODULOS: Modulo[] = [
   },
   { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
   { id: 'nomina', nombre: 'Nómina', Icono: Briefcase, listo: false },
-  { id: 'reportes', nombre: 'Reportes', Icono: FileText, listo: false },
+  {
+    id: 'reportes',
+    nombre: 'Reportes',
+    Icono: FileText,
+    listo: true,
+    // Cada reporte revisa su permiso en el servidor.
+    permiso: [
+      'reportes.ventas',
+      'reportes.envios',
+      'reportes.caja_bancos',
+      'reportes.inventario',
+    ],
+  },
   {
     id: 'clientes',
     nombre: 'Clientes',
@@ -161,7 +175,9 @@ export default function Layout({
   const [pagina, setPagina] = useState('panel')
 
   const visibles = MODULOS.filter(
-    (m) => !m.permiso || perfil.permisos.includes(m.permiso),
+    (m) =>
+      !m.permiso ||
+      [m.permiso].flat().some((p) => perfil.permisos.includes(p)),
   )
 
   return (
@@ -266,6 +282,8 @@ export default function Layout({
             permisos={perfil.permisos}
             onSesionVencida={onSalir}
           />
+        ) : pagina === 'reportes' ? (
+          <Reportes token={token} onSesionVencida={onSalir} />
         ) : pagina === 'calculadora' ? (
           <Calculadora token={token} onSesionVencida={onSalir} />
         ) : pagina === 'envios' ? (

@@ -36,7 +36,8 @@ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 # Se compila en una carpeta temporal: backend\dist lo usa el servidor de pruebas.
 Paso 'Compilando el servidor'
 Push-Location $backend
-npx tsc -p tsconfig.build.json --outDir (Join-Path $tmp 'backend-dist')
+# Sin cache (--incremental false): siempre se compilan TODOS los archivos.
+npx tsc -p tsconfig.build.json --outDir (Join-Path $tmp 'backend-dist') --incremental false --tsBuildInfoFile null
 if ($LASTEXITCODE -ne 0) { throw 'El servidor no compila' }
 Pop-Location
 

@@ -1852,3 +1852,83 @@ export const nuevaTarifa = (
   token: string,
   datos: { tasa: string; comisionPct: string; comisionAgentePct: string; motivo: string },
 ) => llamar<{ id: string }>('POST', '/remesas/tarifas', token, datos)
+
+// ---------- Reportes ----------
+
+export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario'
+
+export type TipoColumnaReporte =
+  | 'texto'
+  | 'dinero'
+  | 'entero'
+  | 'cantidad'
+  | 'porcentaje'
+  | 'fecha'
+  | 'fechahora'
+
+export type ColumnaReporte = {
+  clave: string
+  titulo: string
+  tipo: TipoColumnaReporte
+  total?: boolean
+}
+
+export type FilaReporte = Record<string, string | number | null>
+
+export type DatosReporte = {
+  codigo: string
+  titulo: string
+  periodo: string
+  detalle?: string
+  columnas: ColumnaReporte[]
+  filas: FilaReporte[]
+  totales: FilaReporte | null
+  notas: string[]
+}
+
+export type OpcionesReportes = {
+  reportes: { codigo: string; area: AreaReporte; titulo: string }[]
+  agentes: { id: string; codigo: string; nombre: string; is_active: boolean }[]
+  cuentas: { id: string; nombre: string; moneda: string; simbolo: string; is_active: boolean }[]
+}
+
+export type FiltrosReporte = {
+  desde: string
+  hasta: string
+  agenteId?: string
+  cuentaId?: string
+  estado?: string
+}
+
+function consultaReporte(f: FiltrosReporte): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(f)) if (v) q.set(k, v)
+  return q.toString()
+}
+
+export const opcionesReportes = (token: string) =>
+  llamar<OpcionesReportes>('GET', '/reportes', token)
+
+export const generarReporte = (token: string, codigo: string, f: FiltrosReporte) =>
+  llamar<DatosReporte>('GET', `/reportes/${codigo}?${consultaReporte(f)}`, token)
+
+// Descarga el reporte en Excel o PDF (con el nombre que da el servidor).
+export async function descargarReporte(
+  token: string,
+  codigo: string,
+  formato: 'xlsx' | 'pdf',
+  f: FiltrosReporte,
+): Promise<{ archivo: Blob; nombre: string }> {
+  const res = await fetch(`${API_URL}/reportes/${codigo}/${formato}?${consultaReporte(f)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el archivo')
+  }
+  const nombre =
+    /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ??
+    `${codigo}.${formato}`
+  return { archivo: await res.blob(), nombre }
+}

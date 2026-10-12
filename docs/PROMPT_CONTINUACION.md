@@ -37,6 +37,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 012 | Caja: cajas fijas, sesiones con arqueo, movimientos inmutables, categorías de gasto |
 | 013 | Bancos: monedas (DOP, USD, HTG), cuentas y billeteras, movimientos con tasa, confirmaciones, transferencias entre cuentas y caja |
 | 014 | Envíos a Haití (remesas): tarifas con historial, agentes, beneficiarios, motivos, envíos pendiente/confirmado/rechazado, entregas de agentes, pago de comisiones, roles de operadores |
+| 015 | Permisos de reportes por área (ventas, envíos, caja y bancos, inventario) |
 
 ## Módulos terminados
 
@@ -199,6 +200,14 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   `anscito_demo` antes de publicar. Las pantallas publicadas las sirve
   `backend/scripts/servir-pantallas.js` (solo Node). Los accesos verifican
   que el puerto lo use la versión publicada antes de reutilizarlo.
+- **Reportes** (`/reportes`, pantalla `Reportes.tsx`): 10 reportes por
+  período con totales, en pantalla, Excel (`exceljs` 4.4.0, con `uuid`
+  forzado a 11.1.1 por seguridad) y PDF: ventas por día, por artículo y por
+  vendedor; envíos por agente, estado de cuenta del agente y detalle de
+  envíos; cierres de caja, movimientos de una cuenta (saldo corrido) y
+  gastos por categoría; existencia y valor del inventario a una fecha.
+  Permisos por área (`reportes.*`); costos/ganancia con `inventario.ver_costos`
+  y comisiones con `remesas.entregas`.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los
