@@ -40,6 +40,9 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 015 | Permisos de reportes por área (ventas, envíos, caja y bancos, inventario) |
 | 016 | SAN: sanes, turnos, participaciones (completo/medio), recibos de cuotas, entregas de mano, pagos; % comisión/mora y días de gracia configurables; movimientos `san_cuota`/`san_mano` en caja y cuentas |
 | 017 | Facturación electrónica: tipos de e-CF (31, 32, 34 activos), tabla `ecf` (por emitir / emitido / cancelado, e-NCF único, nota de crédito), configuración `facturacion.*` (modo manual, fecha de inicio vacía, monto para identificar al comprador) |
+| 018 | SAN/SOL CASH: ficha del participante (`san_fichas`), referencias y fiador con confirmación (`san_garantes`), fotos del documento y contratos firmados (`san_archivos`), plantillas de contrato es/fr/ht con versiones y contratos congelados (`san_contratos`); tipo de documento CIN/NIU de Haití; 4 permisos |
+| 019 | Plantillas de contrato versión 2 con "SOL CASH" en lugar de "SAN" |
+| 020 | Permiso `reportes.clientes` |
 
 ## Módulos terminados
 
@@ -235,6 +238,20 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   Plazo DGII para pequeños: 15/11/2026 (confirmar). Siguiente
   paso posible: modo "proveedor" (envío automático por la API del proveedor
   que el dueño contrate; claves solo en `.env`).
+- **SOL CASH** (antes "SAN"; tablas y permisos siguen como `sanes`):
+  códigos SOL-0001. Para entrar a un número hace falta la ficha completa:
+  documento (cédula, pasaporte, CIN/NIU de Haití u otro), teléfono, ficha
+  (nacimiento, ocupación, dirección con sector/municipio/provincia), foto del
+  documento (frente), fiador confirmado y al menos una referencia confirmada.
+  Persona nueva desde la ventana de asignar. Contrato por número en español,
+  francés o criollo (plantillas editables con versiones, BORRADOR: abogado);
+  se sube el firmado (fotos o PDF). Las fotos se achican en el navegador
+  (límite del servidor 1 MB por petición; 750 KB por archivo).
+- **Menú**: Panel, Calculadora, SCITO TRANSFER, SCITO SERVICE, Facturación
+  (antes Ventas), SOL CASH, y el resto.
+- **Reportes de clientes** (permiso `reportes.clientes`): "Clientes por
+  servicio" (TRANSFER, SOL CASH, Facturación, Crédito Fiscal) y "Clientes y
+  sus servicios"; documento enmascarado sin `terceros.ver_documento`.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los

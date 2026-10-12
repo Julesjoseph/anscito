@@ -7,6 +7,7 @@ import {
 import { SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { DatabaseService } from '../database/database.service';
 import { SQL_SIGNO } from '../inventario/sql';
+import { enmascarar } from '../terceros/documentos';
 import { aExcel, aPdf } from './exportar';
 import { calcularTotales } from './tipos';
 import type { Columna, Fila, Reporte } from './tipos';
@@ -18,7 +19,8 @@ import type { Columna, Fila, Reporte } from './tipos';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type Area = 'ventas' | 'envios' | 'caja_bancos' | 'inventario';
+export type Area =
+  'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes';
 
 export const REPORTES: Record<string, { area: Area; titulo: string }> = {
   'ventas-dia': { area: 'ventas', titulo: 'Ventas por día' },
@@ -40,6 +42,16 @@ export const REPORTES: Record<string, { area: Area; titulo: string }> = {
     area: 'inventario',
     titulo: 'Existencia y valor del inventario',
   },
+  'clientes-servicio': { area: 'clientes', titulo: 'Clientes por servicio' },
+  'clientes-general': { area: 'clientes', titulo: 'Clientes y sus servicios' },
+};
+
+// Servicios del reporte "Clientes por servicio".
+export const SERVICIOS_CLIENTES: Record<string, string> = {
+  transfer: 'SCITO TRANSFER (remitentes)',
+  solcash: 'SOL CASH (participantes)',
+  facturacion: 'Facturación (compras)',
+  credito_fiscal: 'Crédito Fiscal (contribuyentes)',
 };
 
 export type Filtros = {
@@ -48,6 +60,7 @@ export type Filtros = {
   agenteId?: string;
   cuentaId?: string;
   estado?: string;
+  servicio?: string;
 };
 
 function texto(v: unknown): string {
@@ -77,8 +90,8 @@ const NOMBRE_TIPO_CUENTA: Record<string, string> = {
   ingreso: 'Otro ingreso',
   reverso: 'Reverso',
   remesa: 'Envío a Haití',
-  san_cuota: 'Cuota de SAN',
-  san_mano: 'Mano de SAN',
+  san_cuota: 'Cuota de SOL CASH',
+  san_mano: 'Mano de SOL CASH',
 };
 
 // Ganancia de una línea de venta "vl" (misma regla que el Panel).
@@ -174,7 +187,7 @@ export class ReportesService {
   async opciones(usuarioId: string) {
     const p = await this.permisos(usuarioId);
     const areas = (
-      ['ventas', 'envios', 'caja_bancos', 'inventario'] as Area[]
+      ['ventas', 'envios', 'caja_bancos', 'inventario', 'clientes'] as Area[]
     ).filter((a) => p.has(`reportes.${a}`));
     const [agentes, cuentas] = await Promise.all([
       p.has('reportes.envios')
@@ -196,6 +209,10 @@ export class ReportesService {
         .map(([codigo, r]) => ({ codigo, ...r })),
       agentes: agentes?.rows ?? [],
       cuentas: cuentas?.rows ?? [],
+      servicios: Object.entries(SERVICIOS_CLIENTES).map(([codigo, nombre]) => ({
+        codigo,
+        nombre,
+      })),
     };
   }
 
@@ -228,6 +245,10 @@ export class ReportesService {
         return this.movimientosCuenta(cx, texto(f.cuentaId));
       case 'gastos-categoria':
         return this.gastosCategoria(cx);
+      case 'clientes-servicio':
+        return this.clientesServicio(cx, texto(f.servicio));
+      case 'clientes-general':
+        return this.clientesGeneral(cx);
       default:
         return this.inventario(cx);
     }
@@ -764,7 +785,7 @@ export class ReportesService {
         },
         {
           clave: 'san_cuotas',
-          titulo: 'Cuotas SAN',
+          titulo: 'Cuotas SOL CASH',
           tipo: 'dinero',
           total: true,
         },
@@ -784,7 +805,7 @@ export class ReportesService {
         },
         {
           clave: 'san_manos',
-          titulo: 'Manos SAN',
+          titulo: 'Manos SOL CASH',
           tipo: 'dinero',
           total: true,
         },
@@ -1039,5 +1060,226 @@ export class ReportesService {
         'Existencia al final del día indicado. Costos y precios sin ITBIS.',
       ],
     });
+  }
+
+  // ---------- Clientes ----------
+
+  // El documento completo solo con el permiso de verlo (como en Clientes).
+  private documentos(cx: Contexto, filas: Fila[]): Fila[] {
+    if (cx.permisos.has('terceros.ver_documento')) return filas;
+    return filas.map((f) => ({
+      ...f,
+      documento: enmascarar((f.documento as string | null) ?? null),
+    }));
+  }
+
+  private async clientesServicio(cx: Contexto, servicio: string) {
+    const nombre = SERVICIOS_CLIENTES[servicio];
+    if (!nombre) throw new BadRequestException('Seleccione el servicio');
+    const enRango = (campo: string) =>
+      `(${campo} AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`;
+    const contacto: Columna[] = [
+      { clave: 'nombre', titulo: 'Cliente', tipo: 'texto' },
+      { clave: 'documento', titulo: 'Documento', tipo: 'texto' },
+      { clave: 'telefono', titulo: 'Teléfono', tipo: 'texto' },
+      { clave: 'whatsapp', titulo: 'WhatsApp', tipo: 'texto' },
+    ];
+    let columnas: Columna[];
+    let sql: string;
+    let params: unknown[] = [cx.zona, cx.desde, cx.hasta];
+    let periodo = cx.periodo;
+    const notas: string[] = [];
+    if (servicio === 'transfer') {
+      sql = `SELECT t.nombre, t.numero_documento AS documento, t.telefono, t.whatsapp,
+                    count(*)::int AS envios, sum(r.monto_enviado)::numeric(16,2) AS enviado,
+                    to_char(max(r.fecha AT TIME ZONE $1), 'YYYY-MM-DD') AS ultimo
+             FROM remesas r JOIN terceros t ON t.id = r.remitente_id
+             WHERE r.estado = 'confirmado' AND r.origen = 'sistema' AND ${enRango('r.fecha')}
+             GROUP BY t.id ORDER BY lower(t.nombre)`;
+      columnas = [
+        ...contacto,
+        { clave: 'envios', titulo: 'Envíos', tipo: 'entero', total: true },
+        {
+          clave: 'enviado',
+          titulo: 'Total enviado',
+          tipo: 'dinero',
+          total: true,
+        },
+        { clave: 'ultimo', titulo: 'Último envío', tipo: 'fecha' },
+      ];
+      notas.push('Remitentes con envíos confirmados en el período.');
+    } else if (servicio === 'solcash') {
+      sql = `SELECT t.nombre, t.numero_documento AS documento, t.telefono, t.whatsapp,
+                    string_agg('SOL-' || lpad(s.numero::text, 4, '0') || ' #' || p.numero
+                               || CASE WHEN p.parte = 'medio' THEN ' (medio)' ELSE '' END,
+                               ', ' ORDER BY s.numero, p.numero) AS numeros,
+                    count(*)::int AS cantidad,
+                    count(ct.id) FILTER (WHERE ct.estado = 'firmado')::int AS firmados
+             FROM san_participaciones p
+             JOIN sanes s ON s.id = p.san_id AND s.estado IN ('preparacion', 'activo')
+             JOIN terceros t ON t.id = p.tercero_id
+             LEFT JOIN san_contratos ct ON ct.participacion_id = p.id AND ct.estado <> 'anulado'
+             GROUP BY t.id ORDER BY lower(t.nombre)`;
+      params = [];
+      periodo = 'SOL CASH activos y en preparación';
+      columnas = [
+        ...contacto,
+        { clave: 'numeros', titulo: 'SOL CASH y números', tipo: 'texto' },
+        { clave: 'cantidad', titulo: 'Números', tipo: 'entero', total: true },
+        {
+          clave: 'firmados',
+          titulo: 'Contratos firmados',
+          tipo: 'entero',
+          total: true,
+        },
+      ];
+      notas.push('Las fechas no aplican: son los participantes de hoy.');
+    } else if (servicio === 'facturacion') {
+      sql = `SELECT t.nombre, t.numero_documento AS documento, t.telefono, t.whatsapp,
+                    count(*)::int AS compras, sum(v.total)::numeric(16,2) AS total,
+                    to_char(max(v.fecha AT TIME ZONE $1), 'YYYY-MM-DD') AS ultima
+             FROM ventas v JOIN terceros t ON t.id = v.cliente_id AND NOT t.es_protegido
+             WHERE v.estado = 'completada' AND ${enRango('v.fecha')}
+             GROUP BY t.id ORDER BY lower(t.nombre)`;
+      columnas = [
+        ...contacto,
+        { clave: 'compras', titulo: 'Compras', tipo: 'entero', total: true },
+        {
+          clave: 'total',
+          titulo: 'Total comprado',
+          tipo: 'dinero',
+          total: true,
+        },
+        { clave: 'ultima', titulo: 'Última compra', tipo: 'fecha' },
+      ];
+      notas.push(
+        'No incluye las ventas a "Consumidor final". Ventas anuladas no cuentan.',
+      );
+    } else {
+      sql = `SELECT t.nombre, t.nombre_comercial, t.numero_documento AS documento, t.telefono,
+                    t.correo, COALESCE(x.compras, 0) AS compras, COALESCE(x.total, 0)::numeric(16,2) AS total
+             FROM terceros t
+             LEFT JOIN LATERAL (
+               SELECT count(*)::int AS compras, sum(v.total) AS total FROM ventas v
+               WHERE v.cliente_id = t.id AND v.estado = 'completada' AND ${enRango('v.fecha')}
+             ) x ON true
+             WHERE t.rol = 'cliente' AND t.is_active AND t.es_contribuyente
+             ORDER BY lower(t.nombre)`;
+      columnas = [
+        { clave: 'nombre', titulo: 'Razón social', tipo: 'texto' },
+        {
+          clave: 'nombre_comercial',
+          titulo: 'Nombre comercial',
+          tipo: 'texto',
+        },
+        { clave: 'documento', titulo: 'RNC / Cédula', tipo: 'texto' },
+        { clave: 'telefono', titulo: 'Teléfono', tipo: 'texto' },
+        { clave: 'correo', titulo: 'Correo', tipo: 'texto' },
+        {
+          clave: 'compras',
+          titulo: 'Compras en el período',
+          tipo: 'entero',
+          total: true,
+        },
+        {
+          clave: 'total',
+          titulo: 'Total en el período',
+          tipo: 'dinero',
+          total: true,
+        },
+      ];
+      notas.push(
+        'Clientes activos marcados como contribuyentes (piden Crédito Fiscal).',
+      );
+    }
+    const r = await this.db.query(sql, params);
+    return this.armar(
+      'clientes-servicio',
+      cx,
+      columnas,
+      this.documentos(cx, r.rows),
+      {
+        detalle: nombre,
+        periodo,
+        notas: [...notas, `${r.rowCount ?? 0} cliente(s).`],
+      },
+    );
+  }
+
+  private async clientesGeneral(cx: Contexto) {
+    const r = await this.db.query(
+      `SELECT t.nombre, t.numero_documento AS documento, t.telefono, t.whatsapp, t.correo,
+              COALESCE(v.compras, 0) AS compras, COALESCE(v.total, 0)::numeric(16,2) AS total_compras,
+              COALESCE(e.envios, 0) AS envios, COALESCE(e.total, 0)::numeric(16,2) AS total_enviado,
+              COALESCE(sc.numeros, 0) AS numeros_sol,
+              CASE WHEN t.es_contribuyente THEN 'Sí' ELSE 'No' END AS credito_fiscal,
+              to_char(GREATEST(u.venta, u.envio, u.sol) AT TIME ZONE $1, 'YYYY-MM-DD') AS ultima
+       FROM terceros t
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS compras, sum(x.total) AS total FROM ventas x
+         WHERE x.cliente_id = t.id AND x.estado = 'completada'
+           AND (x.fecha AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       ) v ON true
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS envios, sum(x.monto_enviado) AS total FROM remesas x
+         WHERE x.remitente_id = t.id AND x.estado = 'confirmado' AND x.origen = 'sistema'
+           AND (x.fecha AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       ) e ON true
+       LEFT JOIN LATERAL (
+         SELECT count(*)::int AS numeros FROM san_participaciones p
+         JOIN sanes s ON s.id = p.san_id AND s.estado IN ('preparacion', 'activo')
+         WHERE p.tercero_id = t.id
+       ) sc ON true
+       LEFT JOIN LATERAL (
+         SELECT (SELECT max(fecha) FROM ventas WHERE cliente_id = t.id AND estado = 'completada') AS venta,
+                (SELECT max(fecha) FROM remesas WHERE remitente_id = t.id AND estado = 'confirmado') AS envio,
+                (SELECT max(created_at) FROM san_recibos WHERE tercero_id = t.id) AS sol
+       ) u ON true
+       WHERE t.rol = 'cliente' AND t.is_active AND NOT t.es_protegido
+       ORDER BY lower(t.nombre)`,
+      [cx.zona, cx.desde, cx.hasta],
+    );
+    const columnas: Columna[] = [
+      { clave: 'nombre', titulo: 'Cliente', tipo: 'texto' },
+      { clave: 'documento', titulo: 'Documento', tipo: 'texto' },
+      { clave: 'telefono', titulo: 'Teléfono', tipo: 'texto' },
+      { clave: 'whatsapp', titulo: 'WhatsApp', tipo: 'texto' },
+      { clave: 'correo', titulo: 'Correo', tipo: 'texto' },
+      { clave: 'compras', titulo: 'Compras', tipo: 'entero', total: true },
+      {
+        clave: 'total_compras',
+        titulo: 'Total comprado',
+        tipo: 'dinero',
+        total: true,
+      },
+      { clave: 'envios', titulo: 'Envíos', tipo: 'entero', total: true },
+      {
+        clave: 'total_enviado',
+        titulo: 'Total enviado',
+        tipo: 'dinero',
+        total: true,
+      },
+      {
+        clave: 'numeros_sol',
+        titulo: 'Números SOL CASH',
+        tipo: 'entero',
+        total: true,
+      },
+      { clave: 'credito_fiscal', titulo: 'Crédito Fiscal', tipo: 'texto' },
+      { clave: 'ultima', titulo: 'Última actividad', tipo: 'fecha' },
+    ];
+    return this.armar(
+      'clientes-general',
+      cx,
+      columnas,
+      this.documentos(cx, r.rows),
+      {
+        notas: [
+          'Compras y envíos: dentro del período. Números SOL CASH: los de hoy (activos y en preparación).',
+          'Última actividad: la compra, el envío o el pago de SOL CASH más reciente (de cualquier fecha).',
+          `${r.rowCount ?? 0} cliente(s) activos (sin "Consumidor final").`,
+        ],
+      },
+    );
   }
 }

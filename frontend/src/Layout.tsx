@@ -60,11 +60,11 @@ const MODULOS: Modulo[] = [
     permiso: 'remesas.ver',
   },
   {
-    id: 'ventas',
-    nombre: 'Ventas',
-    Icono: ShoppingCart,
+    id: 'envios',
+    nombre: 'SCITO TRANSFER',
+    Icono: Smartphone,
     listo: true,
-    permiso: 'ventas.ver',
+    permiso: 'remesas.ver',
   },
   {
     id: 'servicios',
@@ -72,6 +72,20 @@ const MODULOS: Modulo[] = [
     Icono: ClipboardList,
     listo: true,
     permiso: 'servicios.ver',
+  },
+  {
+    id: 'ventas',
+    nombre: 'Facturación',
+    Icono: ShoppingCart,
+    listo: true,
+    permiso: 'ventas.ver',
+  },
+  {
+    id: 'sanes',
+    nombre: 'SOL CASH',
+    Icono: HandCoins,
+    listo: true,
+    permiso: 'sanes.ver',
   },
   {
     id: 'categorias',
@@ -101,21 +115,7 @@ const MODULOS: Modulo[] = [
     listo: true,
     permiso: 'bancos.ver',
   },
-  {
-    id: 'sanes',
-    nombre: 'SAN',
-    Icono: HandCoins,
-    listo: true,
-    permiso: 'sanes.ver',
-  },
   { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
-  {
-    id: 'envios',
-    nombre: 'SCITO TRANSFER',
-    Icono: Smartphone,
-    listo: true,
-    permiso: 'remesas.ver',
-  },
   { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
   {
     id: 'facturacion',
@@ -136,6 +136,7 @@ const MODULOS: Modulo[] = [
       'reportes.envios',
       'reportes.caja_bancos',
       'reportes.inventario',
+      'reportes.clientes',
     ],
   },
   {

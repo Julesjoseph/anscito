@@ -21,6 +21,7 @@ const AREAS: [AreaReporte, string][] = [
   ['envios', 'SCITO TRANSFER'],
   ['caja_bancos', 'Caja y Bancos'],
   ['inventario', 'Inventario'],
+  ['clientes', 'Clientes'],
 ]
 
 // Fechas de hoy en República Dominicana.
@@ -65,6 +66,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
   const [[desde, hasta], setFechas] = useState<[string, string]>(rango('mes'))
   const [agenteId, setAgenteId] = useState('')
   const [cuentaId, setCuentaId] = useState('')
+  const [servicio, setServicio] = useState('')
   const [estado, setEstado] = useState('todos')
   const [datos, setDatos] = useState<DatosReporte | null>(null)
   const [error, setError] = useState('')
@@ -90,6 +92,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
 
   const necesitaAgente = codigo === 'estado-agente'
   const necesitaCuenta = codigo === 'movimientos-cuenta'
+  const necesitaServicio = codigo === 'clientes-servicio'
   const usaAgente = necesitaAgente || codigo === 'envios-detalle'
   const soloHasta = codigo === 'inventario'
   const filtros: FiltrosReporte = {
@@ -98,8 +101,13 @@ export default function Reportes({ token, onSesionVencida }: Props) {
     agenteId: usaAgente ? agenteId : undefined,
     cuentaId: necesitaCuenta ? cuentaId : undefined,
     estado: codigo === 'envios-detalle' ? estado : undefined,
+    servicio: necesitaServicio ? servicio : undefined,
   }
-  const listo = codigo !== '' && (!necesitaAgente || agenteId !== '') && (!necesitaCuenta || cuentaId !== '')
+  const listo =
+    codigo !== '' &&
+    (!necesitaAgente || agenteId !== '') &&
+    (!necesitaCuenta || cuentaId !== '') &&
+    (!necesitaServicio || servicio !== '')
   const clave = JSON.stringify([codigo, filtros])
 
   // Se actualiza solo al cambiar el reporte o los filtros.
@@ -240,6 +248,19 @@ export default function Reportes({ token, onSesionVencida }: Props) {
                 </select>
               </label>
             )}
+            {necesitaServicio && (
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                Servicio
+                <select value={servicio} onChange={(e) => setServicio(e.target.value)} className={CAMPO}>
+                  <option value="">Seleccione…</option>
+                  {opciones.servicios.map((s) => (
+                    <option key={s.codigo} value={s.codigo}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {necesitaCuenta && (
               <label className="flex flex-col gap-1 text-xs text-gray-500">
                 Cuenta
@@ -266,7 +287,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
           {error && <CajaError>{error}</CajaError>}
           {!listo && (
             <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-              {necesitaAgente ? 'Seleccione el agente.' : 'Seleccione la cuenta.'}
+              {necesitaAgente ? 'Seleccione el agente.' : necesitaServicio ? 'Seleccione el servicio.' : 'Seleccione la cuenta.'}
             </div>
           )}
 

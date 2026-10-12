@@ -1311,7 +1311,7 @@ export default function Ventas(props: Props) {
   return (
     <div>
       <div className="mb-4">
-        <h1 className="mb-1 text-xl font-medium">Ventas</h1>
+        <h1 className="mb-1 text-xl font-medium">Facturación</h1>
         <p className="text-sm text-gray-500">Registre ventas de productos y servicios; el inventario se descuenta solo.</p>
       </div>
       {puedeVender && puedeVer && (

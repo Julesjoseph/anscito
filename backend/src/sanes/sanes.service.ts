@@ -21,6 +21,7 @@ import {
   texto2,
 } from './calendario';
 import type { Frecuencia } from './calendario';
+import { faltantesFicha } from './ficha-requisitos';
 import { generarReciboSan } from './recibo-san-pdf';
 import type { FilaRecibo } from './recibo-san-pdf';
 import { dinero } from '../ventas/recibo-pdf';
@@ -70,7 +71,7 @@ function pct(v: unknown, que: string): string {
 }
 
 export function numeroSan(n: number | string) {
-  return `SAN-${String(n).padStart(4, '0')}`;
+  return `SOL-${String(n).padStart(4, '0')}`;
 }
 export function numeroRecibo(n: number | string) {
   return `R-${String(n).padStart(6, '0')}`;
@@ -108,19 +109,19 @@ export class SanesService {
   }
 
   private async san(c: Consulta, id: string, bloquear = false): Promise<San> {
-    if (!UUID.test(id)) throw new NotFoundException('SAN no encontrado');
+    if (!UUID.test(id)) throw new NotFoundException('SOL CASH no encontrado');
     const r = await c.query<San>(
       `${SQL_SAN} WHERE id = $1 ${bloquear ? 'FOR UPDATE' : ''}`,
       [id],
     );
-    if (r.rowCount === 0) throw new NotFoundException('SAN no encontrado');
+    if (r.rowCount === 0) throw new NotFoundException('SOL CASH no encontrado');
     return r.rows[0];
   }
 
   // ---------- Datos para la pantalla ----------
 
   async preparar() {
-    const [com, mora, gracia, cajas, cuentas] = await Promise.all([
+    const [com, mora, gracia, cajas, cuentas, tipos] = await Promise.all([
       this.config(this.db, 'sanes.comision_pct'),
       this.config(this.db, 'sanes.mora_pct'),
       this.config(this.db, 'sanes.dias_gracia'),
@@ -132,6 +133,9 @@ export class SanesService {
       this.db.query(
         `SELECT id, nombre FROM cuentas WHERE is_active AND moneda = 'DOP' ORDER BY lower(nombre)`,
       ),
+      this.db.query(
+        'SELECT id, codigo, nombre, ayuda FROM tipos_documento ORDER BY orden',
+      ),
     ]);
     return {
       comisionPct: com ?? '5.00',
@@ -139,6 +143,7 @@ export class SanesService {
       diasGracia: Number(gracia ?? 3),
       cajas: cajas.rows,
       cuentas: cuentas.rows,
+      tiposDocumento: tipos.rows,
     };
   }
 
@@ -210,7 +215,7 @@ export class SanesService {
     const nombre = texto(datos.nombre);
     if (nombre.length < 3 || nombre.length > 80)
       throw new BadRequestException(
-        'Escriba el nombre del SAN (3 a 80 caracteres)',
+        'Escriba el nombre del SOL CASH (3 a 80 caracteres)',
       );
     const frecuencia = texto(datos.frecuencia) as Frecuencia;
     if (!FRECUENCIAS.includes(frecuencia))
@@ -310,7 +315,7 @@ export class SanesService {
       });
     } catch (e) {
       if ((e as { code?: string }).code === '23505')
-        throw new ConflictException('Ya existe un SAN con ese nombre');
+        throw new ConflictException('Ya existe un SOL CASH con ese nombre');
       throw e;
     }
   }
@@ -328,7 +333,7 @@ export class SanesService {
         const s = await this.san(c, id, true);
         if (s.estado !== 'preparacion')
           throw new BadRequestException(
-            'Solo se puede editar un SAN en preparación',
+            'Solo se puede editar un SOL CASH en preparación',
           );
         const fuera = await c.query(
           'SELECT 1 FROM san_participaciones WHERE san_id = $1 AND numero > $2 LIMIT 1',
@@ -369,7 +374,7 @@ export class SanesService {
       });
     } catch (e) {
       if ((e as { code?: string }).code === '23505')
-        throw new ConflictException('Ya existe un SAN con ese nombre');
+        throw new ConflictException('Ya existe un SOL CASH con ese nombre');
       throw e;
     }
   }
@@ -389,7 +394,7 @@ export class SanesService {
       const s = await this.san(c, id, true);
       if (s.estado !== 'preparacion')
         throw new BadRequestException(
-          'Las fechas solo se cambian antes de activar el SAN',
+          'Las fechas solo se cambian antes de activar el SOL CASH',
         );
       const r = await c.query<{
         antes: string | null;
@@ -443,7 +448,7 @@ export class SanesService {
       return await this.db.transaccion(async (c) => {
         const s = await this.san(c, id, true);
         if (s.estado !== 'preparacion' && s.estado !== 'activo')
-          throw new BadRequestException(`El SAN está ${s.estado}`);
+          throw new BadRequestException(`El SOL CASH está ${s.estado}`);
         if (
           !Number.isInteger(numero) ||
           numero < 1 ||
@@ -466,6 +471,12 @@ export class SanesService {
         if (!t.rows[0].numero_documento)
           throw new BadRequestException(
             'El participante no tiene documento (cédula o pasaporte). Agréguelo en Clientes.',
+          );
+        // Ficha completa: datos, foto del documento, fiador y referencia confirmados.
+        const falta = await faltantesFicha(c, terceroId);
+        if (falta.length)
+          throw new BadRequestException(
+            `A ${t.rows[0].nombre} le falta: ${falta.join(', ')}. Complete su ficha del SOL CASH.`,
           );
         const ocupado = await c.query<{ parte: string }>(
           'SELECT parte FROM san_participaciones WHERE san_id = $1 AND numero = $2',
@@ -546,6 +557,15 @@ export class SanesService {
         throw new BadRequestException(
           'No se puede quitar: ya tiene pagos o cobró su mano',
         );
+      // Los contratos quedan en el historial: con contrato ya no se quita.
+      const contrato = await c.query(
+        'SELECT 1 FROM san_contratos WHERE participacion_id = $1 LIMIT 1',
+        [participacionId],
+      );
+      if ((contrato.rowCount ?? 0) > 0)
+        throw new BadRequestException(
+          'No se puede quitar: ya se le hizo contrato para este número (queda en el historial)',
+        );
       await c.query('DELETE FROM san_participaciones WHERE id = $1', [
         participacionId,
       ]);
@@ -582,7 +602,7 @@ export class SanesService {
       const s = await this.san(c, id, true);
       if (estado === 'activo') {
         if (s.estado !== 'preparacion')
-          throw new BadRequestException('Solo se activa un SAN en preparación');
+          throw new BadRequestException('Solo se activa un SOL CASH en preparación');
         const incompletos = await c.query<{ numero: number }>(
           `SELECT n AS numero FROM generate_series(1, $2::int) n
            WHERE NOT EXISTS (SELECT 1 FROM san_participaciones p WHERE p.san_id = $1 AND p.numero = n AND p.parte = 'completo')
@@ -597,7 +617,7 @@ export class SanesService {
       } else if (estado === 'cancelado') {
         if (s.estado !== 'preparacion')
           throw new BadRequestException(
-            'Solo se cancela un SAN que no ha empezado (en preparación)',
+            'Solo se cancela un SOL CASH que no ha empezado (en preparación)',
           );
         if (motivo.length < 5)
           throw new BadRequestException(
@@ -605,7 +625,7 @@ export class SanesService {
           );
       } else {
         if (s.estado !== 'activo')
-          throw new BadRequestException('Solo se termina un SAN activo');
+          throw new BadRequestException('Solo se termina un SOL CASH activo');
         const pend = await c.query<{ n: number }>(
           `SELECT count(*)::int AS n FROM san_participaciones p
            WHERE p.san_id = $1 AND NOT EXISTS (SELECT 1 FROM san_entregas e WHERE e.participacion_id = p.id)`,
@@ -756,6 +776,33 @@ export class SanesService {
       [id],
     );
     const f = fondo.rows[0];
+    // Contrato vigente y requisitos de cada participante.
+    const contratos = await this.db.query<{
+      participacion_id: string;
+      id: string;
+      numero: string;
+      estado: string;
+      idioma: string;
+    }>(
+      `SELECT ct.participacion_id, ct.id, ct.numero, ct.estado, ct.idioma FROM san_contratos ct
+       JOIN san_participaciones p ON p.id = ct.participacion_id
+       WHERE p.san_id = $1 AND ct.estado <> 'anulado'`,
+      [id],
+    );
+    const contratoDe = new Map(
+      contratos.rows.map((x) => [
+        x.participacion_id,
+        {
+          id: x.id,
+          codigo: `C-${String(x.numero).padStart(6, '0')}`,
+          estado: x.estado,
+          idioma: x.idioma,
+        },
+      ]),
+    );
+    const faltaDe = new Map<string, string[]>();
+    for (const tid of new Set(est.participaciones.map((p) => p.tercero_id)))
+      faltaDe.set(tid, await faltantesFicha(this.db, tid));
     // Fondo = cuotas cobradas − manos entregadas (bruto). Negativo: SCITO adelantó.
     const saldo = centavos(f.cuotas) - centavos(f.bruto);
     return {
@@ -771,7 +818,11 @@ export class SanesService {
         duenos: est.participaciones.filter((p) => p.numero === t.turno).length,
       })),
       participaciones: est.participaciones.map(
-        ({ periodos: _p, ...resto }) => resto,
+        ({ periodos: _p, ...resto }) => ({
+          ...resto,
+          contrato: contratoDe.get(resto.id) ?? null,
+          falta: faltaDe.get(resto.tercero_id) ?? [],
+        }),
       ),
       dinero: {
         cuotas_cobradas: f.cuotas,
@@ -791,7 +842,7 @@ export class SanesService {
     const s = await this.san(this.db, id);
     const est = await this.estadoParticipaciones(this.db, s, { terceroId });
     if (est.participaciones.length === 0)
-      throw new NotFoundException('Esa persona no tiene números en este SAN');
+      throw new NotFoundException('Esa persona no tiene números en este SOL CASH');
     return {
       san: { ...s, codigo: numeroSan(s.numero) },
       hoy: est.hoy,
@@ -951,7 +1002,7 @@ export class SanesService {
     return this.db.transaccion(async (c) => {
       const s = await this.san(c, sanId, true);
       if (s.estado !== 'activo')
-        throw new BadRequestException('El SAN no está activo');
+        throw new BadRequestException('El SOL CASH no está activo');
       const est = await this.estadoParticipaciones(c, s, { terceroId });
       const lineas: {
         participacionId: string;
@@ -1163,7 +1214,7 @@ export class SanesService {
     return this.db.transaccion(async (c) => {
       const s = await this.san(c, sanId, true);
       if (s.estado !== 'activo')
-        throw new BadRequestException('El SAN no está activo');
+        throw new BadRequestException('El SOL CASH no está activo');
       const x = await this.calcularEntrega(c, s, participacionId);
       if (x.turno.fecha > x.est.hoy)
         throw new BadRequestException(
@@ -1333,7 +1384,7 @@ export class SanesService {
       [id],
     );
     const filas: FilaRecibo[] = [
-      { tipo: 'titulo', texto: 'RECIBO DE PAGO - SAN' },
+      { tipo: 'titulo', texto: 'RECIBO DE PAGO - SOL CASH' },
       {
         tipo: 'fila',
         izq: 'Recibo:',
@@ -1343,7 +1394,7 @@ export class SanesService {
       { tipo: 'fila', izq: 'Fecha:', der: await this.fechaLocal(x.created_at) },
       {
         tipo: 'fila',
-        izq: 'SAN:',
+        izq: 'SOL CASH:',
         der: `${numeroSan(x.san_numero)} ${x.san_nombre}`,
       },
       {
@@ -1396,7 +1447,7 @@ export class SanesService {
     const pdf = await generarReciboSan(
       { empresa: await this.empresa(), filas },
       f,
-      'Recibo de SAN',
+      'Recibo de SOL CASH',
     );
     return { pdf, nombre: `${numeroRecibo(x.numero)}.pdf` };
   }
@@ -1432,7 +1483,7 @@ export class SanesService {
     if (r.rowCount === 0) throw new NotFoundException('Entrega no encontrada');
     const x = r.rows[0];
     const filas: FilaRecibo[] = [
-      { tipo: 'titulo', texto: 'ENTREGA DE MANO - SAN' },
+      { tipo: 'titulo', texto: 'ENTREGA DE MANO - SOL CASH' },
       {
         tipo: 'fila',
         izq: 'Entrega:',
@@ -1442,7 +1493,7 @@ export class SanesService {
       { tipo: 'fila', izq: 'Fecha:', der: await this.fechaLocal(x.created_at) },
       {
         tipo: 'fila',
-        izq: 'SAN:',
+        izq: 'SOL CASH:',
         der: `${numeroSan(x.san_numero)} ${x.san_nombre}`,
       },
       {

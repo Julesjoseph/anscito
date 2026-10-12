@@ -661,7 +661,7 @@ export class BancosService {
       const m = r.rows[0];
       if (m.de_envios)
         throw new BadRequestException(
-          'Este movimiento viene de otro módulo (SCITO TRANSFER o SAN) y no se reversa desde Bancos',
+          'Este movimiento viene de otro módulo (SCITO TRANSFER o SOL CASH) y no se reversa desde Bancos',
         );
       if (m.tipo === 'reverso')
         throw new BadRequestException('Un reverso no se puede reversar');

@@ -66,8 +66,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   ingreso: 'Ingreso',
   deposito: 'Depósito',
   desde_cuenta: 'Traído de',
-  san_cuota: 'Cuota de SAN',
-  san_mano: 'Mano de SAN',
+  san_cuota: 'Cuota de SOL CASH',
+  san_mano: 'Mano de SOL CASH',
 };
 
 function fecha(iso: string, zona: string): string {
@@ -155,14 +155,14 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
   if (s.totales.desde_cuentas !== '0.00')
     fila('+ Traído de cuentas', dinero(s.totales.desde_cuentas));
   if (s.totales.san_cuotas !== '0.00')
-    fila('+ Cuotas de SAN', dinero(s.totales.san_cuotas));
+    fila('+ Cuotas de SOL CASH', dinero(s.totales.san_cuotas));
   fila('- Gastos', menos(s.totales.gastos));
   fila('- Retiros', menos(s.totales.retiros));
   fila('- Devoluciones', menos(s.totales.devoluciones));
   if (s.totales.depositos !== '0.00')
     fila('- Depósitos a cuentas', menos(s.totales.depositos));
   if (s.totales.san_manos !== '0.00')
-    fila('- Manos de SAN entregadas', menos(s.totales.san_manos));
+    fila('- Manos de SOL CASH entregadas', menos(s.totales.san_manos));
   doc.moveDown(0.2);
   fila('Debería haber', dinero(s.esperado), true, m.letra + 1);
 

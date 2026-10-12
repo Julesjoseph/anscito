@@ -1872,7 +1872,7 @@ export const nuevaTarifa = (
 
 // ---------- Reportes ----------
 
-export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario'
+export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes'
 
 export type TipoColumnaReporte =
   | 'texto'
@@ -1907,6 +1907,7 @@ export type OpcionesReportes = {
   reportes: { codigo: string; area: AreaReporte; titulo: string }[]
   agentes: { id: string; codigo: string; nombre: string; is_active: boolean }[]
   cuentas: { id: string; nombre: string; moneda: string; simbolo: string; is_active: boolean }[]
+  servicios: { codigo: string; nombre: string }[]
 }
 
 export type FiltrosReporte = {
@@ -1915,6 +1916,7 @@ export type FiltrosReporte = {
   agenteId?: string
   cuentaId?: string
   estado?: string
+  servicio?: string
 }
 
 function consultaReporte(f: FiltrosReporte): string {
@@ -1961,6 +1963,7 @@ export type PrepararSanes = {
   diasGracia: number
   cajas: { id: string; nombre: string; sesion_id: string | null }[]
   cuentas: { id: string; nombre: string }[]
+  tiposDocumento: TipoDocumento[]
 }
 
 export type FilaSan = {
@@ -2007,6 +2010,9 @@ export type ParticipacionSan = {
   debe_cuotas: string
   debe_mora: string
   entrega: { id: string; numero: string; neto: string; fecha: string } | null
+  // Solo en el detalle del SAN.
+  contrato?: { id: string; codigo: string; estado: 'generado' | 'firmado'; idioma: IdiomaContrato } | null
+  falta?: string[]
 }
 
 export type PeriodoSan = {
@@ -2261,3 +2267,173 @@ export const cambiarTipoEcf = (token: string, id: string, tipo: string) =>
 
 export const configurarFacturacion = (token: string, datos: { inicio: string; umbral: string }) =>
   llamar<{ ok: boolean }>('PATCH', '/facturacion/configuracion', token, datos)
+
+// ---------- SAN: ficha, referencias, fiador, fotos y contratos ----------
+
+export type IdiomaContrato = 'es' | 'fr' | 'ht'
+
+export type DatosFichaSan = {
+  fechaNacimiento: string
+  ocupacion: string
+  lugarTrabajo: string
+  sector: string
+  municipio: string
+  provincia: string
+  referenciaDireccion: string
+  emergenciaNombre: string
+  emergenciaTelefono: string
+  emergenciaRelacion: string
+  idioma: IdiomaContrato
+  telefono: string
+  whatsapp: string
+  direccion: string
+}
+
+export type DatosGaranteSan = {
+  nombre: string
+  telefono: string
+  relacion: string
+  tipoDocumentoId?: string
+  numeroDocumento?: string
+  direccion?: string
+  ocupacion?: string
+}
+
+export type DatosPersonaSan = DatosFichaSan & {
+  nombre: string
+  tipoDocumentoId: string
+  numeroDocumento: string
+  correo: string
+  referencias: DatosGaranteSan[]
+  fiador: DatosGaranteSan
+}
+
+export type GaranteSan = {
+  id: string
+  tipo: 'referencia' | 'fiador'
+  nombre: string
+  telefono: string
+  relacion: string
+  tipo_documento: string | null
+  numero_documento: string | null
+  direccion: string | null
+  ocupacion: string | null
+  confirmado: boolean
+  confirmado_en: string | null
+  confirmado_por_usuario: string | null
+  nota_confirmacion: string | null
+}
+
+export type ContratoSan = {
+  id: string
+  codigo: string
+  idioma: IdiomaContrato
+  estado: 'generado' | 'firmado' | 'anulado'
+  created_at: string
+  firmado_en: string | null
+  san_codigo: string
+  san_nombre: string
+  numero_san: number
+  parte: string
+}
+
+export type FichaSan = {
+  cliente: {
+    id: string
+    nombre: string
+    tipo_documento: string | null
+    numero_documento: string | null
+    telefono: string | null
+    whatsapp: string | null
+    direccion: string | null
+    correo: string | null
+  }
+  ficha: {
+    fecha_nacimiento: string
+    ocupacion: string
+    lugar_trabajo: string | null
+    sector: string
+    municipio: string
+    provincia: string
+    referencia_direccion: string
+    emergencia_nombre: string | null
+    emergencia_telefono: string | null
+    emergencia_relacion: string | null
+    idioma: IdiomaContrato
+  } | null
+  garantes: GaranteSan[]
+  archivos: { id: string; tipo: 'documento_frente' | 'documento_dorso' | 'contrato_firmado'; mime: string; bytes: number; created_at: string; contrato_id: string | null }[]
+  contratos: ContratoSan[]
+  falta: string[]
+}
+
+export type PlantillaSan = {
+  id: string
+  idioma: IdiomaContrato
+  nombre_idioma: string
+  version: number
+  titulo: string
+  texto: string
+  created_at: string
+  creada_por: string | null
+}
+
+export const crearPersonaSan = (token: string, datos: DatosPersonaSan) =>
+  llamar<{ id: string }>('POST', '/sanes/personas', token, datos)
+
+export const fichaSan = (token: string, terceroId: string) =>
+  llamar<FichaSan>('GET', `/sanes/fichas/${terceroId}`, token)
+
+export const guardarFichaSan = (token: string, terceroId: string, datos: DatosFichaSan) =>
+  llamar<{ ok: boolean }>('PUT', `/sanes/fichas/${terceroId}`, token, datos)
+
+export const agregarGaranteSan = (
+  token: string,
+  terceroId: string,
+  datos: DatosGaranteSan & { tipo: 'referencia' | 'fiador' },
+) => llamar<{ id: string }>('POST', `/sanes/fichas/${terceroId}/garantes`, token, datos)
+
+export const confirmarGaranteSan = (token: string, id: string, nota: string) =>
+  llamar<{ ok: boolean }>('POST', `/sanes/garantes/${id}/confirmar`, token, { nota })
+
+export const quitarGaranteSan = (token: string, id: string, motivo: string) =>
+  llamar<{ ok: boolean }>('POST', `/sanes/garantes/${id}/quitar`, token, { motivo })
+
+export const subirFotoSan = (
+  token: string,
+  terceroId: string,
+  tipo: 'documento_frente' | 'documento_dorso',
+  datos: string,
+) => llamar<{ id: string }>('POST', `/sanes/fichas/${terceroId}/fotos`, token, { tipo, datos })
+
+export const plantillasSan = (token: string) =>
+  llamar<{ plantillas: PlantillaSan[]; marcadores: string[] }>('GET', '/sanes/plantillas', token)
+
+export const nuevaPlantillaSan = (
+  token: string,
+  datos: { idioma: IdiomaContrato; titulo: string; texto: string },
+) => llamar<{ id: string; version: number }>('POST', '/sanes/plantillas', token, datos)
+
+export const generarContratoSan = (
+  token: string,
+  datos: { participacionId: string; idioma: IdiomaContrato; lugar: string },
+) => llamar<{ id: string; codigo: string }>('POST', '/sanes/contratos', token, datos)
+
+export const firmadoContratoSan = (token: string, id: string, datos: string) =>
+  llamar<{ id: string }>('POST', `/sanes/contratos/${id}/firmado`, token, { datos })
+
+export const anularContratoSan = (token: string, id: string, motivo: string) =>
+  llamar<{ ok: boolean }>('POST', `/sanes/contratos/${id}/anular`, token, { motivo })
+
+// Archivo (foto del documento, contrato firmado) o contrato en PDF.
+export async function descargarSan(token: string, ruta: string): Promise<Blob> {
+  const res = await fetch(`${API_URL}${ruta}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo abrir el archivo')
+  }
+  return res.blob()
+}

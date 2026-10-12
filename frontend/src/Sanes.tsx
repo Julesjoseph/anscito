@@ -6,6 +6,8 @@ import {
   Banknote,
   CalendarDays,
   CheckCircle2,
+  ClipboardList,
+  FileSignature,
   HandCoins,
   Pencil,
   Play,
@@ -30,6 +32,7 @@ import {
   editarSan,
   entregarSan,
   estadoSan,
+  fichaSan,
   fechaTurnoSan,
   listarSanes,
   pdfSan,
@@ -53,6 +56,8 @@ import type {
   PreviaEntregaSan,
 } from './api'
 import { cajaDeEstaComputadora } from './cajaLocal'
+import { FichaVista, FormPersona, GenerarContrato, Plantillas } from './SanFicha'
+import { abrirArchivo } from './sanArchivos'
 import {
   AREA,
   BOTON_PELIGRO,
@@ -73,7 +78,7 @@ type Props = {
   onSesionVencida: () => void
 }
 
-type Pestana = 'cobrar' | 'sanes' | 'atrasados' | 'config'
+type Pestana = 'cobrar' | 'sanes' | 'atrasados' | 'contratos' | 'config'
 
 const FRECUENCIAS: [FrecuenciaSan, string][] = [
   ['semanal', 'Semanal (cada 7 días)'],
@@ -380,7 +385,7 @@ function BuscarCliente({
       {buscando && <p className="text-sm text-gray-500">Buscando…</p>}
       {!buscando && texto.trim().length >= 2 && lista.length === 0 && (
         <p className="text-sm text-gray-500">
-          {soloParticipantes ? 'Nadie con ese dato tiene números en un SAN activo.' : 'No se encontró ningún cliente.'}
+          {soloParticipantes ? 'Nadie con ese dato tiene números en un SOL CASH activo.' : 'No se encontró ningún cliente.'}
         </p>
       )}
       {lista.length > 0 && (
@@ -435,15 +440,16 @@ export default function Sanes({ token, permisos, onSesionVencida }: Props) {
 
   const pestanas: [Pestana, string, boolean][] = [
     ['cobrar', 'Cobrar cuotas', puedeCobrar],
-    ['sanes', 'Los SAN', true],
+    ['sanes', 'Los SOL CASH', true],
     ['atrasados', 'Atrasados', true],
+    ['contratos', 'Texto de contratos', permisos.includes('sanes.contratos') || permisos.includes('sanes.plantillas')],
     ['config', 'Configuración', puedeGestionar],
   ]
 
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-2xl font-medium">SAN</h1>
+        <h1 className="text-2xl font-medium">SOL CASH</h1>
         <p className="text-sm text-gray-500">
           Cobro de cuotas en la oficina, números, turnos y entrega de la mano.
         </p>
@@ -482,6 +488,8 @@ export default function Sanes({ token, permisos, onSesionVencida }: Props) {
         />
       ) : pestana === 'sanes' ? (
         <ListaSanes token={token} prep={prep} permisos={permisos} onSesionVencida={onSesionVencida} />
+      ) : pestana === 'contratos' ? (
+        <Plantillas token={token} puedeEditar={permisos.includes('sanes.plantillas')} onSesionVencida={onSesionVencida} />
       ) : pestana === 'atrasados' ? (
         <Atrasados
           token={token}
@@ -620,8 +628,8 @@ function Cobrar({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {sanes && sanes.length > 1 && (
-            <select className={CAMPO} value={sanId} onChange={(e) => setSanId(e.target.value)} aria-label="SAN">
-              <option value="">Elija el SAN…</option>
+            <select className={CAMPO} value={sanId} onChange={(e) => setSanId(e.target.value)} aria-label="SOL CASH">
+              <option value="">Elija el SOL CASH…</option>
               {sanes.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.codigo} · {s.nombre}
@@ -646,7 +654,7 @@ function Cobrar({
 
       {error && <CajaError>{error}</CajaError>}
       {sanes && sanes.length === 0 && (
-        <p className="text-sm text-gray-500">Esta persona no tiene números en ningún SAN activo.</p>
+        <p className="text-sm text-gray-500">Esta persona no tiene números en ningún SOL CASH activo.</p>
       )}
 
       {cuenta && (
@@ -879,7 +887,7 @@ function ListaSanes({
         {permisos.includes('sanes.gestionar') && (
           <button type="button" className={BOTON_PRINCIPAL} onClick={() => setNuevo(true)}>
             <Plus size={16} />
-            Nuevo SAN
+            Nuevo SOL CASH
           </button>
         )}
         <button type="button" className={BOTON_SECUNDARIO} onClick={() => void cargar()}>
@@ -894,14 +902,14 @@ function ListaSanes({
         !error && <p className="text-sm text-gray-500">Cargando…</p>
       ) : filas.length === 0 ? (
         <p className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
-          Todavía no hay ningún SAN. {permisos.includes('sanes.gestionar') && 'Cree el primero con "Nuevo SAN".'}
+          Todavía no hay ningún SOL CASH. {permisos.includes('sanes.gestionar') && 'Cree el primero con "Nuevo SOL CASH".'}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500">
               <tr>
-                <th className="px-3 py-2 font-medium">SAN</th>
+                <th className="px-3 py-2 font-medium">SOL CASH</th>
                 <th className="px-3 py-2 font-medium">Frecuencia</th>
                 <th className="px-3 py-2 text-right font-medium">Cuota</th>
                 <th className="px-3 py-2 text-right font-medium">Mano</th>
@@ -1005,7 +1013,7 @@ function FormSan({
   const comision = mano !== null && pctOk ? (mano * centavos(d.comisionPct.trim()) + 5000n) / 10000n : null
 
   return (
-    <Ventana titulo={san ? `Editar ${san.codigo}` : 'Nuevo SAN'} onCerrar={onCerrar} ancho="max-w-lg">
+    <Ventana titulo={san ? `Editar ${san.codigo}` : 'Nuevo SOL CASH'} onCerrar={onCerrar} ancho="max-w-lg">
       <form
         className="flex flex-col gap-3"
         onSubmit={(e) => {
@@ -1025,8 +1033,8 @@ function FormSan({
         }}
       >
         <label className="flex flex-col gap-1 text-sm">
-          Nombre del SAN
-          <input className={CAMPO} value={d.nombre} onChange={poner('nombre')} maxLength={80} placeholder="Ej.: SAN quincenal de enero" />
+          Nombre del SOL CASH
+          <input className={CAMPO} value={d.nombre} onChange={poner('nombre')} maxLength={80} placeholder="Ej.: SOL CASH quincenal de enero" />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           Frecuencia
@@ -1091,7 +1099,7 @@ function FormSan({
             Cancelar
           </button>
           <button type="submit" className={BOTON_PRINCIPAL} disabled={guardando}>
-            {guardando ? 'Guardando…' : san ? 'Guardar cambios' : 'Crear SAN'}
+            {guardando ? 'Guardando…' : san ? 'Guardar cambios' : 'Crear SOL CASH'}
           </button>
         </div>
       </form>
@@ -1106,6 +1114,8 @@ type Accion =
   | { tipo: 'quitar'; p: ParticipacionSan }
   | { tipo: 'entregar'; p: ParticipacionSan }
   | { tipo: 'estado'; estado: EstadoSan }
+  | { tipo: 'ficha'; terceroId: string }
+  | { tipo: 'contrato'; p: ParticipacionSan }
 
 function DetalleVista({
   token,
@@ -1124,6 +1134,8 @@ function DetalleVista({
 }) {
   const gestionar = permisos.includes('sanes.gestionar')
   const puedeEntregar = permisos.includes('sanes.entregar')
+  const puedeFichas = permisos.includes('sanes.fichas')
+  const puedeContratos = permisos.includes('sanes.contratos')
   const [s, setS] = useState<DetalleSan | null>(null)
   const [error, setError] = useState('')
   const [accion, setAccion] = useState<Accion | null>(null)
@@ -1196,7 +1208,7 @@ function DetalleVista({
                     <Play size={16} /> Activar
                   </button>
                   <button type="button" className={BOTON_PELIGRO} onClick={() => setAccion({ tipo: 'estado', estado: 'cancelado' })}>
-                    <XCircle size={16} /> Cancelar SAN
+                    <XCircle size={16} /> Cancelar SOL CASH
                   </button>
                 </>
               )}
@@ -1278,11 +1290,49 @@ function DetalleVista({
                   <td className="px-3 py-2">
                     <div className="flex flex-col gap-1">
                       {duenos.map((p) => (
-                        <div key={p.id} className="flex items-center gap-2">
+                        <div key={p.id} className="flex flex-wrap items-center gap-2">
                           <span>
                             {p.nombre}
                             <span className="text-gray-500">{parteTexto(p.parte)}</span>
                           </span>
+                          {puedeFichas && (
+                            <button
+                              type="button"
+                              className="text-gray-400 hover:text-gray-700"
+                              aria-label={`Ficha de ${p.nombre}`}
+                              title="Ficha, fiador, referencias y contratos"
+                              onClick={() => setAccion({ tipo: 'ficha', terceroId: p.tercero_id })}
+                            >
+                              <ClipboardList size={15} />
+                            </button>
+                          )}
+                          {p.falta && p.falta.length > 0 && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title={`Falta: ${p.falta.join(', ')}`}>
+                              Ficha incompleta
+                            </span>
+                          )}
+                          {p.contrato ? (
+                            <button
+                              type="button"
+                              className={`rounded-full px-2 py-0.5 text-xs ${p.contrato.estado === 'firmado' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}
+                              title="Abrir el contrato"
+                              onClick={() => void abrirArchivo(token, `/sanes/contratos/${p.contrato?.id}/pdf`, onSesionVencida, setError)}
+                            >
+                              {p.contrato.codigo} · {p.contrato.estado === 'firmado' ? 'firmado' : 'sin firmar'}
+                            </button>
+                          ) : (
+                            puedeContratos &&
+                            (enPreparacion || activo) &&
+                            p.falta?.length === 0 && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-1 text-xs text-[#C8102E] hover:underline"
+                                onClick={() => setAccion({ tipo: 'contrato', p })}
+                              >
+                                <FileSignature size={14} /> Contrato
+                              </button>
+                            )
+                          )}
                           {gestionar && (enPreparacion || activo) && p.pagados === 0 && !p.entrega && (
                             <button
                               type="button"
@@ -1366,8 +1416,35 @@ function DetalleVista({
       {accion?.tipo === 'asignar' && (
         <FormAsignar
           token={token}
+          prep={prep}
+          permisos={permisos}
           san={s}
           numero={accion.numero}
+          onCerrar={() => setAccion(null)}
+          onListo={listo}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
+      {accion?.tipo === 'ficha' && (
+        <FichaVista
+          token={token}
+          prep={prep}
+          terceroId={accion.terceroId}
+          permisos={permisos}
+          onCerrar={() => {
+            setAccion(null)
+            void cargar()
+          }}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
+      {accion?.tipo === 'contrato' && (
+        <GenerarContrato
+          token={token}
+          participacionId={accion.p.id}
+          terceroId={accion.p.tercero_id}
+          nombre={accion.p.nombre}
+          numero={accion.p.numero}
           onCerrar={() => setAccion(null)}
           onListo={listo}
           onSesionVencida={onSesionVencida}
@@ -1503,6 +1580,8 @@ function FormFecha({
 
 function FormAsignar({
   token,
+  prep,
+  permisos,
   san,
   numero,
   onCerrar,
@@ -1510,16 +1589,45 @@ function FormAsignar({
   onSesionVencida,
 }: {
   token: string
+  prep: PrepararSanes
+  permisos: string[]
   san: DetalleSan
   numero: number
   onCerrar: () => void
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const puedeFichas = permisos.includes('sanes.fichas')
   const yaHayMedio = san.participaciones.some((p) => p.numero === numero)
   const [cliente, setCliente] = useState<ClienteSan | null>(null)
   const [parte, setParte] = useState<'completo' | 'medio'>(yaHayMedio ? 'medio' : 'completo')
-  const { error, guardando, enviar } = useEnviar(onSesionVencida)
+  const [falta, setFalta] = useState<string[] | null>(null)
+  const [nueva, setNueva] = useState(false)
+  const [fichaAbierta, setFichaAbierta] = useState(false)
+  const { error, setError, guardando, enviar } = useEnviar(onSesionVencida)
+
+  // Lo que le falta a la persona elegida para entrar al SAN.
+  const revisar = useCallback(
+    async (id: string) => {
+      if (!puedeFichas) return
+      try {
+        const f = await fichaSan(token, id)
+        setFalta(f.falta)
+        return f
+      } catch (e) {
+        if (e instanceof SesionVencida) onSesionVencida()
+        else setError(mensajeDe(e))
+      }
+    },
+    [token, puedeFichas, onSesionVencida, setError],
+  )
+
+  function elegir(c: ClienteSan) {
+    setCliente(c)
+    setFalta(null)
+    void revisar(c.id)
+  }
+
   return (
     <Ventana titulo={`Número ${numero}: asignar dueño`} onCerrar={onCerrar}>
       <div className="flex flex-col gap-3">
@@ -1534,7 +1642,30 @@ function FormAsignar({
             </button>
           </div>
         ) : (
-          <BuscarCliente token={token} soloParticipantes={false} onElegir={setCliente} onSesionVencida={onSesionVencida} />
+          <>
+            <BuscarCliente token={token} soloParticipantes={false} onElegir={elegir} onSesionVencida={onSesionVencida} />
+            {puedeFichas && (
+              <button type="button" className="flex items-center gap-1 self-start text-sm text-[#C8102E] hover:underline" onClick={() => setNueva(true)}>
+                <UserPlus size={16} /> Nueva persona (con ficha completa)
+              </button>
+            )}
+          </>
+        )}
+        {cliente && falta && falta.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <span>Para entrar al SOL CASH le falta: {falta.join(', ')}.</span>
+            <button type="button" className={`${BOTON_SECUNDARIO} self-start`} onClick={() => setFichaAbierta(true)}>
+              Completar su ficha
+            </button>
+          </div>
+        )}
+        {cliente && falta && falta.length === 0 && (
+          <div className="flex items-center gap-2 text-sm text-green-700">
+            <CheckCircle2 size={16} /> Ficha completa
+            <button type="button" className="text-xs text-gray-600 underline" onClick={() => setFichaAbierta(true)}>
+              Ver ficha
+            </button>
+          </div>
         )}
         <div className="flex flex-col gap-1 text-sm">
           <label className={`flex items-center gap-2 ${yaHayMedio ? 'text-gray-400' : ''}`}>
@@ -1546,7 +1677,9 @@ function FormAsignar({
             Medio número (cuota {dinero(texto2(centavos(san.cuota) / 2n))}, mano {dinero(texto2(centavos(san.mano) / 2n))})
           </label>
         </div>
-        <p className="text-xs text-gray-500">El participante debe ser un cliente con cédula o pasaporte.</p>
+        <p className="text-xs text-gray-500">
+          Para entrar necesita: documento, teléfono, ficha, foto del documento, fiador confirmado y al menos una referencia confirmada.
+        </p>
         {error && <CajaError>{error}</CajaError>}
         <div className="flex justify-end gap-2">
           <button type="button" className={BOTON_SECUNDARIO} onClick={onCerrar}>
@@ -1555,7 +1688,7 @@ function FormAsignar({
           <button
             type="button"
             className={BOTON_PRINCIPAL}
-            disabled={!cliente || guardando}
+            disabled={!cliente || guardando || (falta !== null && falta.length > 0)}
             onClick={() =>
               cliente && void enviar(() => asignarNumeroSan(token, san.id, { numero: String(numero), terceroId: cliente.id, parte }), onListo)
             }
@@ -1564,6 +1697,32 @@ function FormAsignar({
           </button>
         </div>
       </div>
+      {nueva && (
+        <FormPersona
+          token={token}
+          prep={prep}
+          onCerrar={() => setNueva(false)}
+          onCreada={(id) => {
+            setNueva(false)
+            void revisar(id).then((f) => {
+              if (f) setCliente({ id, nombre: f.cliente.nombre, numero_documento: f.cliente.numero_documento, telefono: f.cliente.telefono ?? f.cliente.whatsapp })
+              setFichaAbierta(true)
+            })
+          }}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
+      {fichaAbierta && cliente && (
+        <FichaVista
+          token={token}
+          prep={prep}
+          terceroId={cliente.id}
+          permisos={permisos}
+          onCerrar={() => setFichaAbierta(false)}
+          onCambio={() => void revisar(cliente.id)}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
     </Ventana>
   )
 }
@@ -1590,7 +1749,7 @@ function FormEstado({
       `Activar ${san.codigo}`,
       'Al activarlo ya no se pueden cambiar la cuota, la cantidad de números ni las fechas. Desde ese momento se cobran las cuotas.',
     ],
-    cancelado: [`Cancelar ${san.codigo}`, 'El SAN queda cancelado y no se podrá usar. Escriba el motivo.'],
+    cancelado: [`Cancelar ${san.codigo}`, 'El SOL CASH queda cancelado y no se podrá usar. Escriba el motivo.'],
     terminado: [`Terminar ${san.codigo}`, 'Solo se puede terminar cuando todas las manos fueron entregadas.'],
   }
   const [titulo, texto] = textos[estado] ?? ['', '']
@@ -1778,7 +1937,7 @@ function Atrasados({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-gray-600">
-          Personas con cuotas vencidas sin pagar en los SAN activos.
+          Personas con cuotas vencidas sin pagar en los SOL CASH activos.
           {filas && filas.length > 0 && <strong> Total por cobrar: {dinero(texto2(total))}</strong>}
         </p>
         <button type="button" className={BOTON_SECUNDARIO} onClick={() => void cargar()}>
@@ -1799,7 +1958,7 @@ function Atrasados({
             <thead className="bg-gray-50 text-xs text-gray-500">
               <tr>
                 <th className="px-3 py-2 font-medium">Persona</th>
-                <th className="px-3 py-2 font-medium">SAN / número</th>
+                <th className="px-3 py-2 font-medium">SOL CASH / número</th>
                 <th className="px-3 py-2 font-medium">Desde</th>
                 <th className="px-3 py-2 text-right font-medium">Cuotas</th>
                 <th className="px-3 py-2 text-right font-medium">Mora</th>
@@ -1880,9 +2039,9 @@ function Configuracion({
         )
       }}
     >
-      <h2 className="font-medium">Valores por defecto para los SAN nuevos</h2>
+      <h2 className="font-medium">Valores por defecto para los SOL CASH nuevos</h2>
       <p className="text-sm text-gray-500">
-        Cada SAN guarda sus propios porcentajes al crearse; cambiar esto no modifica los SAN que ya existen.
+        Cada SOL CASH guarda sus propios porcentajes al crearse; cambiar esto no modifica los SOL CASH que ya existen.
       </p>
       <label className="flex flex-col gap-1 text-sm">
         Comisión de SCITO por mano (%)

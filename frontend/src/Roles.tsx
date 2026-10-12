@@ -53,12 +53,12 @@ const NOMBRES_MODULO: Record<string, string> = {
   terceros: 'Datos personales de clientes y proveedores',
   empresa: 'Empresa',
   sucursales: 'Sucursales',
-  ventas: 'Ventas',
+  ventas: 'Facturación (ventas)',
   caja: 'Caja',
   bancos: 'Bancos',
   remesas: 'SCITO TRANSFER',
   reportes: 'Reportes',
-  sanes: 'SAN',
+  sanes: 'SOL CASH (SAN)',
   facturacion: 'Facturación electrónica',
 }
 
