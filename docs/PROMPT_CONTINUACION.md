@@ -38,6 +38,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 013 | Bancos: monedas (DOP, USD, HTG), cuentas y billeteras, movimientos con tasa, confirmaciones, transferencias entre cuentas y caja |
 | 014 | Envíos a Haití (remesas): tarifas con historial, agentes, beneficiarios, motivos, envíos pendiente/confirmado/rechazado, entregas de agentes, pago de comisiones, roles de operadores |
 | 015 | Permisos de reportes por área (ventas, envíos, caja y bancos, inventario) |
+| 016 | SAN: sanes, turnos, participaciones (completo/medio), recibos de cuotas, entregas de mano, pagos; % comisión/mora y días de gracia configurables; movimientos `san_cuota`/`san_mano` en caja y cuentas |
 
 ## Módulos terminados
 
@@ -208,6 +209,18 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   gastos por categoría; existencia y valor del inventario a una fecha.
   Permisos por área (`reportes.*`); costos/ganancia con `inventario.ver_costos`
   y comisiones con `remesas.entregas`.
+- **SAN** (`/sanes`, pantalla `Sanes.tsx`, menú "SAN"): SCITO organiza y
+  cobra comisión por mano (5 % por defecto) y mora (10 % de la cuota tras 3
+  días de gracia), todo modificable en Configuración y copiado en cada SAN.
+  Frecuencia semanal (cada 7 días), quincenal (días 15 y 30; febrero el
+  último día) o mensual. Un dueño por número o dos medios números; los
+  participantes son clientes con documento. Pestañas: Cobrar cuotas (en
+  orden, con adelantos; recibo R-000001), Los SAN (crear, asignar números,
+  fechas en preparación, activar/cancelar/terminar, entregar la mano con
+  recibo M-000001), Atrasados y Configuración. La mano se entrega completa
+  aunque otros deban (SCITO adelanta) y a quien cobra se le descuentan sus
+  cuotas vencidas. Las cuotas son dinero de terceros; solo comisión y mora
+  son ganancia. Requiere validación legal antes de usarlo con clientes.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los

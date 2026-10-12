@@ -71,6 +71,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   ingreso: 'Otro ingreso',
   reverso: 'Reverso',
   remesa: 'Envío a Haití',
+  san_cuota: 'Cuota de SAN',
+  san_mano: 'Mano de SAN entregada',
 }
 
 const CAMBIADO_POR: [string, string][] = [

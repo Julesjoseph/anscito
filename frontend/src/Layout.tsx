@@ -6,6 +6,7 @@ import {
   Building2,
   ClipboardList,
   FileText,
+  HandCoins,
   Landmark,
   LayoutDashboard,
   LogOut,
@@ -32,6 +33,7 @@ import Calculadora from './Calculadora'
 import Categorias from './Categorias'
 import Inventario from './Inventario'
 import Roles from './Roles'
+import Sanes from './Sanes'
 import Servicios from './Servicios'
 import Terceros from './Terceros'
 import Usuarios from './Usuarios'
@@ -96,6 +98,13 @@ const MODULOS: Modulo[] = [
     Icono: Landmark,
     listo: true,
     permiso: 'bancos.ver',
+  },
+  {
+    id: 'sanes',
+    nombre: 'SAN',
+    Icono: HandCoins,
+    listo: true,
+    permiso: 'sanes.ver',
   },
   { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
   {
@@ -294,6 +303,12 @@ export default function Layout({
           />
         ) : pagina === 'bancos' ? (
           <Bancos
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'sanes' ? (
+          <Sanes
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

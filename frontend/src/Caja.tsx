@@ -66,6 +66,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   ingreso: 'Ingreso',
   deposito: 'Depósito a cuenta',
   desde_cuenta: 'Traído de cuenta',
+  san_cuota: 'Cuota de SAN',
+  san_mano: 'Mano de SAN entregada',
 }
 
 // ---------- Dinero con enteros (solo para el conteo en pantalla) ----------
@@ -685,10 +687,12 @@ function VerSesion({
         <div className="flex justify-between"><dt className="text-gray-500">+ Ventas en efectivo ({t.cantidad_ventas})</dt><dd>{dinero(t.ventas)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">+ Ingresos</dt><dd>{dinero(t.ingresos)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">+ Traído de cuentas</dt><dd>{dinero(t.desde_cuentas)}</dd></div>
+        <div className="flex justify-between"><dt className="text-gray-500">+ Cuotas de SAN</dt><dd>{dinero(t.san_cuotas)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Gastos</dt><dd>{dinero(t.gastos)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Retiros</dt><dd>{dinero(t.retiros)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Devoluciones</dt><dd>{dinero(t.devoluciones)}</dd></div>
         <div className="flex justify-between"><dt className="text-gray-500">− Depósitos a cuentas</dt><dd>{dinero(t.depositos)}</dd></div>
+        <div className="flex justify-between"><dt className="text-gray-500">− Manos de SAN entregadas</dt><dd>{dinero(t.san_manos)}</dd></div>
       </dl>
       <div className="flex flex-col gap-1 rounded-lg bg-gray-50 p-3">
         <div className="flex justify-between text-base font-medium"><span>Debería haber</span><span>{dinero(s.esperado)}</span></div>
@@ -747,7 +751,7 @@ function VerSesion({
               </thead>
               <tbody>
                 {s.movimientos.map((m) => {
-                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta'
+                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota'
                   return (
                     <tr key={m.id} className="border-t border-gray-100 align-top">
                       <td className="py-1.5 pr-2 whitespace-nowrap text-gray-500">{new Date(m.fecha).toLocaleTimeString('es-DO', { hour: 'numeric', minute: '2-digit' })}</td>

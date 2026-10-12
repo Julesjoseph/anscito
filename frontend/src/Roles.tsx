@@ -58,6 +58,7 @@ const NOMBRES_MODULO: Record<string, string> = {
   bancos: 'Bancos',
   remesas: 'SCITO TRANSFER',
   reportes: 'Reportes',
+  sanes: 'SAN',
 }
 
 function nombreModulo(modulo: string): string {

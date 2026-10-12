@@ -1155,6 +1155,8 @@ export type TipoMovimientoCaja =
   | 'ingreso'
   | 'deposito'
   | 'desde_cuenta'
+  | 'san_cuota'
+  | 'san_mano'
 
 export type MovimientoCaja = {
   id: string
@@ -1179,6 +1181,8 @@ export type TotalesCaja = {
   devoluciones: string
   depositos: string
   desde_cuentas: string
+  san_cuotas: string
+  san_manos: string
   cantidad_ventas: number
 }
 
@@ -1931,4 +1935,238 @@ export async function descargarReporte(
     /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ??
     `${codigo}.${formato}`
   return { archivo: await res.blob(), nombre }
+}
+
+// ---------- SAN ----------
+
+export type FrecuenciaSan = 'semanal' | 'quincenal' | 'mensual'
+export type EstadoSan = 'preparacion' | 'activo' | 'terminado' | 'cancelado'
+
+export type PrepararSanes = {
+  comisionPct: string
+  moraPct: string
+  diasGracia: number
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
+  cuentas: { id: string; nombre: string }[]
+}
+
+export type FilaSan = {
+  id: string
+  codigo: string
+  nombre: string
+  frecuencia: FrecuenciaSan
+  cuota: string
+  cantidad_numeros: number
+  fecha_inicio: string
+  comision_pct: string
+  mora_pct: string
+  dias_gracia: number
+  estado: EstadoSan
+  mano: string
+  asignados: number
+  entregas: number
+  proximo_turno: string | null
+}
+
+export type DatosSan = {
+  nombre: string
+  frecuencia: FrecuenciaSan
+  cuota: string
+  cantidadNumeros: string
+  fechaInicio: string
+  comisionPct: string
+  moraPct: string
+  diasGracia: string
+  notas: string
+}
+
+export type ParticipacionSan = {
+  id: string
+  numero: number
+  parte: 'completo' | 'medio'
+  tercero_id: string
+  nombre: string
+  telefono: string | null
+  cuota: string
+  mano: string
+  pagados: number
+  vencidos: number
+  debe_cuotas: string
+  debe_mora: string
+  entrega: { id: string; numero: string; neto: string; fecha: string } | null
+}
+
+export type PeriodoSan = {
+  turno: number
+  fecha: string
+  estado: 'pagado' | 'vencido' | 'por_vencer'
+  cuota: string
+  mora: string
+  dias_atraso: number
+}
+
+export type DetalleSan = FilaSan & {
+  notas: string | null
+  hoy: string
+  turnos: { turno: number; fecha: string; entregado: number; duenos: number }[]
+  participaciones: ParticipacionSan[]
+  dinero: {
+    cuotas_cobradas: string
+    mora_cobrada: string
+    manos_entregadas: string
+    comision_ganada: string
+    fondo: string
+    adelantado_scito: string
+  }
+}
+
+export type CuentaSan = {
+  san: Omit<FilaSan, 'mano' | 'asignados' | 'entregas' | 'proximo_turno'>
+  hoy: string
+  participaciones: (ParticipacionSan & { periodos: PeriodoSan[] })[]
+}
+
+export type AtrasadoSan = {
+  san_id: string
+  san: string
+  san_nombre: string
+  numero: number
+  parte: string
+  tercero_id: string
+  nombre: string
+  telefono: string | null
+  vencidos: number
+  debe_cuotas: string
+  debe_mora: string
+  mas_antiguo: string | null
+}
+
+export type PreviaEntregaSan = {
+  numero: number
+  nombre: string
+  parte: string
+  fecha_turno: string
+  puede: boolean
+  bruto: string
+  comision: string
+  descuento: string
+  neto: string
+  cuotas_descontadas: { turno: number; fecha: string; cuota: string; mora: string }[]
+}
+
+export const prepararSanes = (token: string) =>
+  llamar<PrepararSanes>('GET', '/sanes/preparar', token)
+
+export const configurarSanes = (
+  token: string,
+  datos: { comisionPct: string; moraPct: string; diasGracia: string },
+) => llamar<{ ok: boolean }>('PATCH', '/sanes/configuracion', token, datos)
+
+export const listarSanes = (token: string) => llamar<FilaSan[]>('GET', '/sanes', token)
+
+export const crearSan = (token: string, datos: DatosSan) =>
+  llamar<{ id: string; codigo: string }>('POST', '/sanes', token, datos)
+
+export const editarSan = (token: string, id: string, datos: DatosSan) =>
+  llamar<{ ok: boolean }>('PATCH', `/sanes/${id}`, token, datos)
+
+export const detalleSan = (token: string, id: string) =>
+  llamar<DetalleSan>('GET', `/sanes/${id}`, token)
+
+export const fechaTurnoSan = (token: string, id: string, turno: number, fecha: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/sanes/${id}/turnos`, token, { turno, fecha })
+
+export const asignarNumeroSan = (
+  token: string,
+  id: string,
+  datos: { numero: string; terceroId: string; parte: 'completo' | 'medio' },
+) => llamar<{ id: string }>('POST', `/sanes/${id}/numeros`, token, datos)
+
+export const quitarNumeroSan = (token: string, id: string, participacionId: string) =>
+  llamar<{ ok: boolean }>('POST', `/sanes/${id}/numeros/${participacionId}/quitar`, token)
+
+export const estadoSan = (token: string, id: string, estado: EstadoSan, motivo?: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/sanes/${id}/estado`, token, { estado, motivo })
+
+export const sanesDePersona = (token: string, terceroId: string) =>
+  llamar<{ id: string; codigo: string; nombre: string; estado: EstadoSan }[]>(
+    'GET',
+    `/sanes/persona/${terceroId}`,
+    token,
+  )
+
+export const cuentaSan = (token: string, id: string, terceroId: string) =>
+  llamar<CuentaSan>('GET', `/sanes/${id}/cuenta/${terceroId}`, token)
+
+export const cobrarSan = (
+  token: string,
+  datos: {
+    sanId: string
+    terceroId: string
+    periodos: { participacionId: string; turno: number }[]
+    forma: 'efectivo' | 'transferencia'
+    cajaId?: string
+    cuentaId?: string
+    referencia?: string
+  },
+) =>
+  llamar<{ id: string; recibo: string; cuotas: string; mora: string; total: string }>(
+    'POST',
+    '/sanes/cobros',
+    token,
+    datos,
+  )
+
+export const previaEntregaSan = (token: string, id: string, participacionId: string) =>
+  llamar<PreviaEntregaSan>('GET', `/sanes/${id}/entrega/${participacionId}`, token)
+
+export const entregarSan = (
+  token: string,
+  datos: {
+    sanId: string
+    participacionId: string
+    forma: 'efectivo' | 'transferencia'
+    cajaId?: string
+    cuentaId?: string
+    referencia?: string
+  },
+) =>
+  llamar<{ id: string; entrega: string; bruto: string; comision: string; descuento: string; neto: string }>(
+    'POST',
+    '/sanes/entregas',
+    token,
+    datos,
+  )
+
+export const atrasadosSan = (token: string) => llamar<AtrasadoSan[]>('GET', '/sanes/atrasados', token)
+
+// Recibo de cobro (recibos) o de entrega de mano (entregas) en PDF.
+export async function pdfSan(
+  token: string,
+  tipo: 'recibos' | 'entregas',
+  id: string,
+  formato: FormatoRecibo,
+): Promise<Blob> {
+  const res = await fetch(`${API_URL}/sanes/${tipo}/${id}/pdf?formato=${formato}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el recibo')
+  }
+  return res.blob()
+}
+
+export type ClienteSan = {
+  id: string
+  nombre: string
+  numero_documento: string | null
+  telefono: string | null
+}
+
+export const buscarClientesSan = (token: string, texto: string, soloParticipantes: boolean) => {
+  const q = new URLSearchParams({ texto: texto.trim() })
+  if (soloParticipantes) q.set('participantes', 'si')
+  return llamar<ClienteSan[]>('GET', `/sanes/clientes?${q.toString()}`, token)
 }

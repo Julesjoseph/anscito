@@ -6,6 +6,7 @@ import { BancosModule } from './bancos/bancos.module';
 import { CajaModule } from './caja/caja.module';
 import { RemesasModule } from './remesas/remesas.module';
 import { ReportesModule } from './reportes/reportes.module';
+import { SanesModule } from './sanes/sanes.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { DatabaseModule } from './database/database.module';
 import { EmpresaModule } from './empresa/empresa.module';
@@ -33,6 +34,7 @@ import { VentasModule } from './ventas/ventas.module';
     CajaModule,
     RemesasModule,
     ReportesModule,
+    SanesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

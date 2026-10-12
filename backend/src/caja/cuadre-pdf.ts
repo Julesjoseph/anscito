@@ -29,6 +29,8 @@ export type DatosCuadre = {
       devoluciones: string;
       depositos: string;
       desde_cuentas: string;
+      san_cuotas: string;
+      san_manos: string;
       cantidad_ventas: number;
     };
     movimientos: {
@@ -64,6 +66,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   ingreso: 'Ingreso',
   deposito: 'Depósito',
   desde_cuenta: 'Traído de',
+  san_cuota: 'Cuota de SAN',
+  san_mano: 'Mano de SAN',
 };
 
 function fecha(iso: string, zona: string): string {
@@ -150,11 +154,15 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
   fila('+ Ingresos', dinero(s.totales.ingresos));
   if (s.totales.desde_cuentas !== '0.00')
     fila('+ Traído de cuentas', dinero(s.totales.desde_cuentas));
+  if (s.totales.san_cuotas !== '0.00')
+    fila('+ Cuotas de SAN', dinero(s.totales.san_cuotas));
   fila('- Gastos', menos(s.totales.gastos));
   fila('- Retiros', menos(s.totales.retiros));
   fila('- Devoluciones', menos(s.totales.devoluciones));
   if (s.totales.depositos !== '0.00')
     fila('- Depósitos a cuentas', menos(s.totales.depositos));
+  if (s.totales.san_manos !== '0.00')
+    fila('- Manos de SAN entregadas', menos(s.totales.san_manos));
   doc.moveDown(0.2);
   fila('Debería haber', dinero(s.esperado), true, m.letra + 1);
 
@@ -204,7 +212,11 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
       .text('Otros movimientos', m.margen, doc.y, centro);
     for (const x of otros) {
       const signo =
-        x.tipo === 'ingreso' || x.tipo === 'desde_cuenta' ? '' : '-';
+        x.tipo === 'ingreso' ||
+        x.tipo === 'desde_cuenta' ||
+        x.tipo === 'san_cuota'
+          ? ''
+          : '-';
       fila(
         `${NOMBRE_TIPO[x.tipo] ?? x.tipo}${x.categoria ? ` (${x.categoria})` : ''}${x.venta ? ` ${x.venta}` : ''}${x.cuenta ? ` ${x.cuenta}` : ''}`,
         `${signo}${dinero(x.monto)}`,
