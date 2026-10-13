@@ -1,6 +1,6 @@
 // La dirección del servidor se configura al arrancar (ver entorno.ts).
 import { API_URL } from './entorno'
-import type { DatosTicket } from './ticket'
+import type { DatosTicket, TicketFilas } from './ticket'
 export { API_URL }
 
 export type Usuario = {
@@ -2442,3 +2442,13 @@ export async function descargarSan(token: string, ruta: string): Promise<Blob> {
   }
   return res.blob()
 }
+
+// Recibos "de filas" para imprimir directo (se ajustan al papel).
+export const ticketEnvio = (token: string, id: string) =>
+  llamar<TicketFilas>('GET', `/remesas/envios/${id}/ticket`, token)
+
+export const ticketCuadre = (token: string, sesionId: string) =>
+  llamar<TicketFilas>('GET', `/caja/sesiones/${sesionId}/ticket`, token)
+
+export const ticketSan = (token: string, tipo: 'recibos' | 'entregas', id: string) =>
+  llamar<TicketFilas>('GET', `/sanes/${tipo}/${id}/ticket`, token)

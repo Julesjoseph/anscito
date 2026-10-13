@@ -189,6 +189,12 @@ export class RemesasController {
     return this.remesas.rechazar(req.usuario.id, id, req.ip, body?.motivo);
   }
 
+  @Get('envios/:id/ticket')
+  @RequierePermiso('remesas.ver')
+  reciboTicket(@Req() req: Peticion, @Param('id') id: string) {
+    return this.remesas.reciboTicket(req.usuario.id, id);
+  }
+
   @Get('envios/:id/recibo')
   @RequierePermiso('remesas.ver')
   async recibo(

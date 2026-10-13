@@ -10,7 +10,6 @@ import {
   Pencil,
   Plus,
   Power,
-  Printer,
   Unlock,
   Wallet,
 } from 'lucide-react'
@@ -27,13 +26,14 @@ import {
   listarSesionesCaja,
   movimientoCaja,
   obtenerCuadre,
+  ticketCuadre,
   prepararCaja,
   traerACaja,
 } from './api'
+import BotonesImprimir from './BotonesImprimir'
 import type {
   FiltrosSesionesCaja,
   FilaCaja,
-  FormatoRecibo,
   PaginaSesionesCaja,
   PrepararCaja,
   SesionCaja,
@@ -95,23 +95,6 @@ function hoy(): string {
 
 // ---------- Imprimir el cuadre ----------
 
-const FORMATOS: [FormatoRecibo, string][] = [
-  ['80', 'Rollo 80 mm'],
-  ['58', 'Rollo 58 mm'],
-  ['carta', 'Hoja carta'],
-]
-
-// Mismo tamaño de papel que el comprobante de venta de esta computadora.
-function formatoGuardado(): FormatoRecibo {
-  try {
-    const f = localStorage.getItem('anscito.formatoRecibo')
-    if (f === '80' || f === '58' || f === 'carta') return f
-  } catch {
-    // Sin almacenamiento disponible: se usa el de 80 mm.
-  }
-  return '80'
-}
-
 function BotonCuadre({
   token,
   sesionId,
@@ -123,62 +106,14 @@ function BotonCuadre({
   abierta: boolean
   onSesionVencida: () => void
 }) {
-  const [formato, setFormato] = useState<FormatoRecibo>(formatoGuardado)
-  const [error, setError] = useState('')
-  const [generando, setGenerando] = useState(false)
-
-  async function imprimir() {
-    setError('')
-    setGenerando(true)
-    try {
-      localStorage.setItem('anscito.formatoRecibo', formato)
-    } catch {
-      // No pasa nada si no se puede recordar.
-    }
-    // La pestaña se abre en el mismo clic para que el navegador no la bloquee.
-    const pestana = window.open('', '_blank')
-    try {
-      const pdf = await obtenerCuadre(token, sesionId, formato)
-      const url = URL.createObjectURL(pdf)
-      if (pestana) {
-        pestana.location.href = url
-      } else {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'cuadre.pdf'
-        a.click()
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (e) {
-      pestana?.close()
-      if (e instanceof SesionVencida) onSesionVencida()
-      else setError(mensajeDe(e))
-    } finally {
-      setGenerando(false)
-    }
-  }
-
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={formato}
-          onChange={(e) => setFormato(e.target.value as FormatoRecibo)}
-          className="h-10 rounded-lg border border-gray-300 px-2 text-sm"
-          aria-label="Tamaño del papel"
-        >
-          {FORMATOS.map(([id, nombre]) => (
-            <option key={id} value={id}>
-              {nombre}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={() => void imprimir()} disabled={generando} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
-          <Printer size={16} /> {generando ? 'Generando…' : abierta ? 'Imprimir estado' : 'Imprimir cuadre'}
-        </button>
-      </div>
-      {error && <span className="text-xs text-red-600">{error}</span>}
-    </div>
+    <BotonesImprimir
+      texto={abierta ? 'Imprimir estado' : 'Imprimir cuadre'}
+      nombrePdf="cuadre.pdf"
+      cargarTicket={() => ticketCuadre(token, sesionId)}
+      cargarPdf={(formato) => obtenerCuadre(token, sesionId, formato)}
+      onSesionVencida={onSesionVencida}
+    />
   )
 }
 

@@ -63,7 +63,6 @@ const NOMBRE_ECF: Record<string, string> = {
 }
 
 export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
-  const m = MEDIDAS[ancho]
   const v = d.venta
   const e = d.empresa
   const carta = ancho === 'carta'
@@ -155,7 +154,14 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
     </div>
     <div class="centro negrita">¡Gracias por su compra!</div>`
 
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(v.numero_texto)}</title>
+  return pagina(v.numero_texto, cuerpo, ancho)
+}
+
+// Página completa del comprobante: estilos según el papel elegido.
+function pagina(titulo: string, cuerpo: string, ancho: AnchoTicket): string {
+  const m = MEDIDAS[ancho]
+  const carta = ancho === 'carta'
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(titulo)}</title>
 <style>
   @page { ${m.pagina} }
   * { box-sizing: border-box; }
@@ -180,7 +186,42 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
   .n { text-align: right; white-space: nowrap; }
   .totales { width: 45%; margin-left: auto; }
   b { font-weight: bold; }
-</style></head><body><div class="ticket">${cuerpo}</div></body></html>`
+  .firma { margin-top: 10mm; }
+  .columna { max-width: 110mm; margin: 0 auto; }
+</style>
+</head><body><div class="ticket">${cuerpo}</div></body></html>`
+}
+
+// ---------- Recibos "de filas" (envíos, SOL CASH, cuadre de caja) ----------
+
+export type ElementoTicket =
+  | { tipo: 'linea' }
+  | { tipo: 'titulo'; texto: string }
+  | { tipo: 'fila'; izq: string; der: string; negrita?: boolean; grande?: boolean }
+  | { tipo: 'nota'; texto: string; negrita?: boolean }
+  | { tipo: 'firma'; texto: string }
+
+export type TicketFilas = {
+  documento: string
+  encabezado: { nombre: string; lineas: string[] }
+  elementos: ElementoTicket[]
+}
+
+export function htmlTicketFilas(t: TicketFilas, ancho: AnchoTicket): string {
+  const partes = t.elementos.map((e) => {
+    if (e.tipo === 'linea') return '<hr>'
+    if (e.tipo === 'titulo') return `<div class="centro titulo">${esc(e.texto)}</div>`
+    if (e.tipo === 'nota') return `<div class="centro pequena${e.negrita ? ' negrita' : ''}">${esc(e.texto)}</div>`
+    if (e.tipo === 'firma') return `<div class="centro firma">______________________<br>${esc(e.texto)}</div>`
+    return fila(esc(e.izq), esc(e.der), [e.negrita ? 'negrita' : '', e.grande ? 'grande' : ''].join(' '))
+  })
+  const cuerpo = `
+    <div class="centro"><div class="nombre">${esc(t.encabezado.nombre)}</div>${t.encabezado.lineas
+      .map((l) => `<div>${esc(l)}</div>`)
+      .join('')}</div>
+    <hr>
+    <div class="${ancho === 'carta' ? 'columna' : ''}">${partes.join('')}</div>`
+  return pagina(t.documento, cuerpo, ancho)
 }
 
 // Imprime el HTML en un marco invisible (abre el cuadro de impresión).

@@ -40,6 +40,7 @@ import {
   previaEntregaSan,
   quitarNumeroSan,
   sanesDePersona,
+  ticketSan,
 } from './api'
 import type {
   AtrasadoSan,
@@ -49,12 +50,12 @@ import type {
   DetalleSan,
   EstadoSan,
   FilaSan,
-  FormatoRecibo,
   FrecuenciaSan,
   ParticipacionSan,
   PrepararSanes,
   PreviaEntregaSan,
 } from './api'
+import BotonesImprimir from './BotonesImprimir'
 import { cajaDeEstaComputadora } from './cajaLocal'
 import { FichaVista, FormPersona, GenerarContrato, Plantillas } from './SanFicha'
 import { abrirArchivo } from './sanArchivos'
@@ -106,12 +107,6 @@ const COLOR_ESTADO: Record<EstadoSan, string> = {
   cancelado: 'bg-red-100 text-red-800',
 }
 
-const FORMATOS: [FormatoRecibo, string][] = [
-  ['80', 'Rollo 80 mm'],
-  ['58', 'Rollo 58 mm'],
-  ['carta', 'Hoja carta'],
-]
-
 // ---------- Utilidades ----------
 
 // Dinero con enteros (centavos) para sumar en pantalla sin errores.
@@ -136,22 +131,6 @@ function fechaCorta(dia: string | null | undefined): string {
 
 function hoy(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santo_Domingo' }).format(new Date())
-}
-
-function guardado(clave: string): string {
-  try {
-    return localStorage.getItem(clave) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function guardar(clave: string, valor: string) {
-  try {
-    localStorage.setItem(clave, valor)
-  } catch {
-    // No pasa nada si no se puede recordar.
-  }
 }
 
 function useEnviar(onSesionVencida: () => void) {
@@ -200,61 +179,14 @@ function Imprimir({
   texto?: string
   onSesionVencida: () => void
 }) {
-  const [formato, setFormato] = useState<FormatoRecibo>(
-    (guardado('anscito.formatoRecibo') as FormatoRecibo) || '80',
-  )
-  const [error, setError] = useState('')
-  const [generando, setGenerando] = useState(false)
-
-  async function imprimir() {
-    setError('')
-    setGenerando(true)
-    guardar('anscito.formatoRecibo', formato)
-    // La pestaña se abre en el mismo clic para que el navegador no la bloquee.
-    const pestana = window.open('', '_blank')
-    try {
-      const url = URL.createObjectURL(await pdfSan(token, tipo, id, formato))
-      if (pestana) pestana.location.href = url
-      else {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = tipo === 'recibos' ? 'recibo-san.pdf' : 'entrega-san.pdf'
-        a.click()
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (e) {
-      pestana?.close()
-      if (e instanceof SesionVencida) onSesionVencida()
-      else setError(mensajeDe(e))
-    } finally {
-      setGenerando(false)
-    }
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          className={CAMPO}
-          value={formato}
-          onChange={(e) => setFormato(e.target.value as FormatoRecibo)}
-          aria-label="Formato del recibo"
-        >
-          {FORMATOS.map(([v, t]) => (
-            <option key={v} value={v}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <button type="button" className={BOTON_SECUNDARIO} onClick={() => void imprimir()} disabled={generando}>
-          <span className="flex items-center gap-2">
-            <Printer size={16} />
-            {generando ? 'Generando…' : texto}
-          </span>
-        </button>
-      </div>
-      {error && <CajaError>{error}</CajaError>}
-    </div>
+    <BotonesImprimir
+      texto={texto}
+      nombrePdf={tipo === 'recibos' ? 'recibo-sol-cash.pdf' : 'entrega-sol-cash.pdf'}
+      cargarTicket={() => ticketSan(token, tipo, id)}
+      cargarPdf={(formato) => pdfSan(token, tipo, id, formato)}
+      onSesionVencida={onSesionVencida}
+    />
   )
 }
 

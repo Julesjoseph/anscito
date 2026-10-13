@@ -1,22 +1,13 @@
 import PDFDocument from 'pdfkit';
+import type { ElementoTicket } from '../comun/ticket';
 import { dinero } from '../ventas/recibo-pdf';
 import type { Formato } from '../ventas/recibo-pdf';
 
 // Recibos del SAN (rollo de 80 o 58 mm, u hoja carta): cobro de cuotas y
 // entrega de la mano. Se arman como una lista de filas.
 
-export type FilaRecibo =
-  | { tipo: 'linea' }
-  | { tipo: 'titulo'; texto: string }
-  | {
-      tipo: 'fila';
-      izq: string;
-      der: string;
-      negrita?: boolean;
-      grande?: boolean;
-    }
-  | { tipo: 'nota'; texto: string }
-  | { tipo: 'firma'; texto: string };
+// Las filas son las mismas del comprobante para imprimir directo.
+export type FilaRecibo = ElementoTicket;
 
 export type DatosReciboSan = {
   empresa: {

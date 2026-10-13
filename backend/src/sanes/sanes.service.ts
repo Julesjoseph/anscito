@@ -22,6 +22,8 @@ import {
 } from './calendario';
 import type { Frecuencia } from './calendario';
 import { faltantesFicha } from './ficha-requisitos';
+import { encabezado } from '../comun/ticket';
+import type { Ticket } from '../comun/ticket';
 import { generarReciboSan } from './recibo-san-pdf';
 import type { FilaRecibo } from './recibo-san-pdf';
 import { dinero } from '../ventas/recibo-pdf';
@@ -602,7 +604,9 @@ export class SanesService {
       const s = await this.san(c, id, true);
       if (estado === 'activo') {
         if (s.estado !== 'preparacion')
-          throw new BadRequestException('Solo se activa un SOL CASH en preparación');
+          throw new BadRequestException(
+            'Solo se activa un SOL CASH en preparación',
+          );
         const incompletos = await c.query<{ numero: number }>(
           `SELECT n AS numero FROM generate_series(1, $2::int) n
            WHERE NOT EXISTS (SELECT 1 FROM san_participaciones p WHERE p.san_id = $1 AND p.numero = n AND p.parte = 'completo')
@@ -842,7 +846,9 @@ export class SanesService {
     const s = await this.san(this.db, id);
     const est = await this.estadoParticipaciones(this.db, s, { terceroId });
     if (est.participaciones.length === 0)
-      throw new NotFoundException('Esa persona no tiene números en este SOL CASH');
+      throw new NotFoundException(
+        'Esa persona no tiene números en este SOL CASH',
+      );
     return {
       san: { ...s, codigo: numeroSan(s.numero) },
       hoy: est.hoy,
@@ -1345,8 +1351,7 @@ export class SanesService {
     }).format(new Date(iso));
   }
 
-  async reciboPdf(id: string, formato: unknown) {
-    const f = this.formato(formato);
+  private async reciboFilas(id: string) {
     if (!UUID.test(id)) throw new NotFoundException('Recibo no encontrado');
     const r = await this.db.query<{
       numero: string;
@@ -1444,16 +1449,31 @@ export class SanesService {
       { tipo: 'linea' },
       { tipo: 'nota', texto: 'Conserve este recibo. ¡Gracias!' },
     ];
+    return { filas, codigo: numeroRecibo(x.numero) };
+  }
+
+  async reciboPdf(id: string, formato: unknown) {
+    const f = this.formato(formato);
+    const { filas, codigo } = await this.reciboFilas(id);
     const pdf = await generarReciboSan(
       { empresa: await this.empresa(), filas },
       f,
       'Recibo de SOL CASH',
     );
-    return { pdf, nombre: `${numeroRecibo(x.numero)}.pdf` };
+    return { pdf, nombre: `${codigo}.pdf` };
   }
 
-  async entregaPdf(id: string, formato: unknown) {
-    const f = this.formato(formato);
+  // Para imprimir directo (se ajusta al papel de la impresora).
+  async reciboTicket(id: string): Promise<Ticket> {
+    const { filas, codigo } = await this.reciboFilas(id);
+    return {
+      documento: codigo,
+      encabezado: encabezado(await this.empresa()),
+      elementos: filas,
+    };
+  }
+
+  private async entregaFilas(id: string) {
     if (!UUID.test(id)) throw new NotFoundException('Entrega no encontrada');
     const r = await this.db.query<{
       numero: string;
@@ -1536,11 +1556,26 @@ export class SanesService {
       { tipo: 'fila', izq: 'Entregó:', der: x.usuario },
       { tipo: 'firma', texto: 'Recibí conforme' },
     ];
+    return { filas, codigo: numeroEntrega(x.numero) };
+  }
+
+  async entregaPdf(id: string, formato: unknown) {
+    const f = this.formato(formato);
+    const { filas, codigo } = await this.entregaFilas(id);
     const pdf = await generarReciboSan(
       { empresa: await this.empresa(), filas },
       f,
       'Entrega de mano',
     );
-    return { pdf, nombre: `${numeroEntrega(x.numero)}.pdf` };
+    return { pdf, nombre: `${codigo}.pdf` };
+  }
+
+  async entregaTicket(id: string): Promise<Ticket> {
+    const { filas, codigo } = await this.entregaFilas(id);
+    return {
+      documento: codigo,
+      encabezado: encabezado(await this.empresa()),
+      elementos: filas,
+    };
   }
 }

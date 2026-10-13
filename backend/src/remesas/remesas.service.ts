@@ -12,7 +12,7 @@ import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { enmascarar } from '../terceros/documentos';
 import { calcularEnvio, esEntero, numeroEnvio, telefonoHaiti } from './calculo';
-import { generarReciboEnvio } from './recibo-envio-pdf';
+import { generarReciboEnvio, ticketEnvio } from './recibo-envio-pdf';
 import type { DatosReciboEnvio } from './recibo-envio-pdf';
 import type { Formato } from '../ventas/recibo-pdf';
 import type { Tarifa } from './calculo';
@@ -1366,10 +1366,10 @@ export class RemesasService {
 
   // ---------- Recibo ----------
 
-  async recibo(actorId: string, id: string, formato: unknown) {
-    const f = texto(formato) || '80';
-    if (f !== '80' && f !== '58' && f !== 'carta')
-      throw new BadRequestException('Formato inválido: use 80, 58 o carta');
+  private async datosRecibo(
+    actorId: string,
+    id: string,
+  ): Promise<DatosReciboEnvio> {
     const envio = (await this.detalle(
       actorId,
       id,
@@ -1380,14 +1380,24 @@ export class RemesasService {
     const e = await this.db.query<DatosReciboEnvio['empresa']>(
       'SELECT nombre_comercial, rnc, telefono, correo FROM empresa WHERE id = 1',
     );
-    const pdf = await generarReciboEnvio(
-      {
-        empresa: e.rows[0],
-        envio: { ...envio, agente: `${envio.agente_codigo} ${envio.agente}` },
-        zonaHoraria: await this.config(this.db, 'empresa.zona_horaria'),
-      },
-      f as Formato,
-    );
-    return { pdf, nombre: `${envio.numero_texto}.pdf` };
+    return {
+      empresa: e.rows[0],
+      envio: { ...envio, agente: `${envio.agente_codigo} ${envio.agente}` },
+      zonaHoraria: await this.config(this.db, 'empresa.zona_horaria'),
+    };
+  }
+
+  async recibo(actorId: string, id: string, formato: unknown) {
+    const f = texto(formato) || '80';
+    if (f !== '80' && f !== '58' && f !== 'carta')
+      throw new BadRequestException('Formato inválido: use 80, 58 o carta');
+    const d = await this.datosRecibo(actorId, id);
+    const pdf = await generarReciboEnvio(d, f as Formato);
+    return { pdf, nombre: `${d.envio.numero_texto}.pdf` };
+  }
+
+  // Para imprimir directo (se ajusta al papel de la impresora).
+  async reciboTicket(actorId: string, id: string) {
+    return ticketEnvio(await this.datosRecibo(actorId, id));
   }
 }

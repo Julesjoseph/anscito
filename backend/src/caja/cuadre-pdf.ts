@@ -1,6 +1,8 @@
 import PDFDocument from 'pdfkit';
 import { dinero } from '../ventas/recibo-pdf';
 import type { Formato } from '../ventas/recibo-pdf';
+import { encabezado } from '../comun/ticket';
+import type { ElementoTicket, Ticket } from '../comun/ticket';
 
 // Cuadre de caja en PDF (rollo de 80 o 58 mm, u hoja carta).
 
@@ -54,7 +56,7 @@ const MEDIDAS: Record<
   { ancho: number; margen: number; letra: number }
 > = {
   '80': { ancho: 80 * MM, margen: 4 * MM, letra: 8 },
-  '58': { ancho: 58 * MM, margen: 3 * MM, letra: 7 },
+  '58': { ancho: 58 * MM, margen: 5 * MM, letra: 7 },
   carta: { ancho: 612, margen: 48, letra: 10 },
 };
 
@@ -249,6 +251,135 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
     .text('_______________________', m.margen, doc.y, centro);
   doc.text('Firma del cajero', m.margen, doc.y, centro);
   return doc.y + m.margen;
+}
+
+// Las mismas líneas del cuadre, para imprimir directo desde la pantalla.
+export function ticketCuadre(d: DatosCuadre): Ticket {
+  const s = d.sesion;
+  const t = s.totales;
+  const menos = (v: string) => (v === '0.00' ? dinero(v) : `-${dinero(v)}`);
+  const fila = (
+    izq: string,
+    der: string,
+    negrita = false,
+    grande = false,
+  ): ElementoTicket => ({
+    tipo: 'fila',
+    izq,
+    der,
+    negrita,
+    grande,
+  });
+  const el: ElementoTicket[] = [
+    {
+      tipo: 'titulo',
+      texto:
+        s.estado === 'cerrada' ? 'CUADRE DE CAJA' : 'ESTADO DE CAJA (ABIERTA)',
+    },
+    fila('Sesión:', s.sesion_texto, true),
+    fila('Caja:', `${s.caja} · ${s.sucursal}`),
+    fila(
+      'Abierta:',
+      `${fecha(s.abierta_en, d.zonaHoraria)} · ${s.abierta_por_usuario}`,
+    ),
+  ];
+  if (s.cerrada_en)
+    el.push(
+      fila(
+        'Cerrada:',
+        `${fecha(s.cerrada_en, d.zonaHoraria)} · ${s.cerrada_por_usuario ?? ''}`,
+      ),
+    );
+  el.push(
+    { tipo: 'linea' },
+    fila('Fondo inicial', dinero(s.fondo_inicial)),
+    fila(`+ Ventas en efectivo (${t.cantidad_ventas})`, dinero(t.ventas)),
+    fila('+ Ingresos', dinero(t.ingresos)),
+  );
+  if (t.desde_cuentas !== '0.00')
+    el.push(fila('+ Traído de cuentas', dinero(t.desde_cuentas)));
+  if (t.san_cuotas !== '0.00')
+    el.push(fila('+ Cuotas de SOL CASH', dinero(t.san_cuotas)));
+  el.push(
+    fila('- Gastos', menos(t.gastos)),
+    fila('- Retiros', menos(t.retiros)),
+    fila('- Devoluciones', menos(t.devoluciones)),
+  );
+  if (t.depositos !== '0.00')
+    el.push(fila('- Depósitos a cuentas', menos(t.depositos)));
+  if (t.san_manos !== '0.00')
+    el.push(fila('- Manos de SOL CASH entregadas', menos(t.san_manos)));
+  el.push(fila('Debería haber', dinero(s.esperado), true));
+  if (s.contado !== null && s.diferencia !== null) {
+    const dif = s.diferencia;
+    el.push(
+      fila('Contado', dinero(s.contado), true),
+      fila(
+        dif === '0.00'
+          ? 'Diferencia (cuadra)'
+          : dif.startsWith('-')
+            ? 'FALTANTE'
+            : 'SOBRANTE',
+        dinero(dif.replace('-', '')),
+        true,
+        true,
+      ),
+    );
+    if (s.motivo_diferencia)
+      el.push({ tipo: 'nota', texto: `Motivo: ${s.motivo_diferencia}` });
+    if (s.conteo && Object.keys(s.conteo).length > 0) {
+      el.push(
+        { tipo: 'linea' },
+        { tipo: 'nota', texto: 'Conteo', negrita: true },
+      );
+      for (const den of d.denominaciones) {
+        const n = s.conteo[den];
+        if (!n) continue;
+        el.push(
+          fila(
+            `${n} x RD$${den}`,
+            dinero(`${(BigInt(den) * BigInt(n)).toString()}.00`),
+          ),
+        );
+      }
+    }
+  }
+  const otros = s.movimientos.filter((x) => x.tipo !== 'venta');
+  if (otros.length > 0) {
+    el.push(
+      { tipo: 'linea' },
+      { tipo: 'nota', texto: 'Otros movimientos', negrita: true },
+    );
+    for (const x of otros) {
+      const signo =
+        x.tipo === 'ingreso' ||
+        x.tipo === 'desde_cuenta' ||
+        x.tipo === 'san_cuota'
+          ? ''
+          : '-';
+      el.push(
+        fila(
+          `${NOMBRE_TIPO[x.tipo] ?? x.tipo}${x.categoria ? ` (${x.categoria})` : ''}${x.venta ? ` ${x.venta}` : ''}${x.cuenta ? ` ${x.cuenta}` : ''}`,
+          `${signo}${dinero(x.monto)}`,
+        ),
+      );
+      if (x.motivo)
+        el.push({ tipo: 'nota', texto: `${x.motivo} · ${x.usuario}` });
+    }
+  }
+  el.push(
+    { tipo: 'linea' },
+    {
+      tipo: 'nota',
+      texto: `Impreso: ${fecha(new Date().toISOString(), d.zonaHoraria)}`,
+    },
+    { tipo: 'firma', texto: 'Firma del cajero' },
+  );
+  return {
+    documento: s.sesion_texto,
+    encabezado: encabezado(d.empresa),
+    elementos: el,
+  };
 }
 
 function crear(tamano: [number, number], f: Formato) {

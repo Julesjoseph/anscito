@@ -1,6 +1,8 @@
 import PDFDocument from 'pdfkit';
 import { dinero } from '../ventas/recibo-pdf';
 import type { Formato } from '../ventas/recibo-pdf';
+import { encabezado } from '../comun/ticket';
+import type { ElementoTicket, Ticket } from '../comun/ticket';
 
 // Recibo de un envío (rollo de 80 o 58 mm, u hoja carta): provisional
 // mientras está pendiente, definitivo al confirmarse.
@@ -39,7 +41,7 @@ const MEDIDAS: Record<
   { ancho: number; margen: number; letra: number }
 > = {
   '80': { ancho: 80 * MM, margen: 4 * MM, letra: 8 },
-  '58': { ancho: 58 * MM, margen: 3 * MM, letra: 7 },
+  '58': { ancho: 58 * MM, margen: 5 * MM, letra: 7 },
   carta: { ancho: 612, margen: 48, letra: 10 },
 };
 
@@ -156,6 +158,88 @@ function dibujar(
     doc.text('El agente le devuelve el total pagado.', m.margen, doc.y, centro);
   }
   return doc.y + m.margen;
+}
+
+// Las mismas líneas del recibo, para imprimir directo desde la pantalla.
+export function ticketEnvio(d: DatosReciboEnvio): Ticket {
+  const e = d.envio;
+  const el: ElementoTicket[] = [
+    { tipo: 'titulo', texto: TITULO[e.estado] },
+    { tipo: 'fila', izq: 'Envío:', der: e.numero_texto, negrita: true },
+    { tipo: 'fila', izq: 'Fecha:', der: fecha(e.fecha, d.zonaHoraria) },
+    { tipo: 'fila', izq: 'Agente:', der: e.agente },
+  ];
+  if (e.billetera)
+    el.push({ tipo: 'fila', izq: 'Servicio:', der: e.billetera });
+  if (e.estado === 'confirmado' && e.codigo_externo)
+    el.push({
+      tipo: 'fila',
+      izq: 'Código:',
+      der: e.codigo_externo,
+      negrita: true,
+    });
+  el.push(
+    { tipo: 'linea' },
+    { tipo: 'fila', izq: 'Remitente:', der: e.remitente_nombre, negrita: true },
+  );
+  if (e.remitente_telefono)
+    el.push({ tipo: 'fila', izq: 'Tel.:', der: e.remitente_telefono });
+  el.push({
+    tipo: 'fila',
+    izq: 'Beneficiario:',
+    der: e.beneficiario_nombre,
+    negrita: true,
+  });
+  if (e.beneficiario_telefono)
+    el.push({ tipo: 'fila', izq: 'Tel.:', der: e.beneficiario_telefono });
+  el.push(
+    { tipo: 'linea' },
+    { tipo: 'fila', izq: 'Monto enviado:', der: dinero(e.monto_enviado) },
+    {
+      tipo: 'fila',
+      izq: 'Tasa:',
+      der: `1 RD$ = ${e.tasa.replace(/\.?0+$/, '')} HTG`,
+    },
+    {
+      tipo: 'fila',
+      izq: 'Monto a recibir:',
+      der: gourdes(e.monto_recibir),
+      negrita: true,
+    },
+    { tipo: 'fila', izq: 'Comisión:', der: dinero(e.comision) },
+    {
+      tipo: 'fila',
+      izq: 'TOTAL A PAGAR:',
+      der: dinero(e.total_pagar),
+      negrita: true,
+      grande: true,
+    },
+    { tipo: 'linea' },
+  );
+  if (e.estado === 'pendiente')
+    el.push(
+      { tipo: 'nota', texto: 'Su envío está en proceso.' },
+      {
+        tipo: 'nota',
+        texto: 'Conserve este recibo hasta recibir el definitivo.',
+      },
+    );
+  else if (e.estado === 'confirmado')
+    el.push({
+      tipo: 'nota',
+      texto: 'Envío realizado. ¡Gracias por elegirnos!',
+    });
+  else {
+    el.push({ tipo: 'nota', texto: 'Este envío no se realizó.' });
+    if (e.motivo_rechazo)
+      el.push({ tipo: 'nota', texto: `Motivo: ${e.motivo_rechazo}` });
+    el.push({ tipo: 'nota', texto: 'El agente le devuelve el total pagado.' });
+  }
+  return {
+    documento: e.numero_texto,
+    encabezado: encabezado(d.empresa),
+    elementos: el,
+  };
 }
 
 function crear(tamano: [number, number], f: Formato) {

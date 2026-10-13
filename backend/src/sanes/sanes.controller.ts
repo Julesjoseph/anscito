@@ -72,6 +72,18 @@ export class SanesController {
     return this.sanes.entregar(req.usuario.id, req.ip, body ?? {});
   }
 
+  @Get('recibos/:id/ticket')
+  @RequierePermiso('sanes.ver')
+  reciboTicket(@Param('id') id: string) {
+    return this.sanes.reciboTicket(id);
+  }
+
+  @Get('entregas/:id/ticket')
+  @RequierePermiso('sanes.ver')
+  entregaTicket(@Param('id') id: string) {
+    return this.sanes.entregaTicket(id);
+  }
+
   @Get('recibos/:id/pdf')
   @RequierePermiso('sanes.ver')
   async reciboPdf(

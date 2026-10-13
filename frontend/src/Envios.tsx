@@ -10,7 +10,6 @@ import {
   Pencil,
   Plus,
   Power,
-  Printer,
   RefreshCw,
   Search,
   Send,
@@ -41,6 +40,7 @@ import {
   registrarEntregaAgente,
   registrarEnvio,
   reporteDiaEnvios,
+  ticketEnvio,
   tiposDocumento,
 } from './api'
 import type {
@@ -52,13 +52,13 @@ import type {
   FilaEnvio,
   FilaTarifa,
   FiltrosEnvios,
-  FormatoRecibo,
   MovimientosAgente,
   PaginaEnvios,
   PrepararEnvios,
   ReporteDiaAgente,
   TipoDocumento,
 } from './api'
+import BotonesImprimir from './BotonesImprimir'
 import { cajaDeEstaComputadora } from './cajaLocal'
 import {
   AREA,
@@ -161,61 +161,15 @@ function useEnviar(onSesionVencida: () => void) {
 
 // ---------- Recibo en PDF ----------
 
-const FORMATOS: [FormatoRecibo, string][] = [
-  ['80', 'Rollo 80 mm'],
-  ['58', 'Rollo 58 mm'],
-  ['carta', 'Hoja carta'],
-]
-
 function BotonRecibo({ token, id, onSesionVencida }: { token: string; id: string; onSesionVencida: () => void }) {
-  const [formato, setFormato] = useState<FormatoRecibo>(() => {
-    const f = guardado('anscito.formatoRecibo')
-    return f === '58' || f === 'carta' ? f : '80'
-  })
-  const [error, setError] = useState('')
-  const [generando, setGenerando] = useState(false)
-
-  async function imprimir() {
-    setError('')
-    setGenerando(true)
-    guardar('anscito.formatoRecibo', formato)
-    // La pestaña se abre en el mismo clic para que el navegador no la bloquee.
-    const pestana = window.open('', '_blank')
-    try {
-      const url = URL.createObjectURL(await obtenerReciboEnvio(token, id, formato))
-      if (pestana) pestana.location.href = url
-      else {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'recibo-envio.pdf'
-        a.click()
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (e) {
-      pestana?.close()
-      if (e instanceof SesionVencida) onSesionVencida()
-      else setError(mensajeDe(e))
-    } finally {
-      setGenerando(false)
-    }
-  }
-
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <select value={formato} onChange={(e) => setFormato(e.target.value as FormatoRecibo)} className="h-10 rounded-lg border border-gray-300 px-2 text-sm" aria-label="Tamaño del papel">
-          {FORMATOS.map(([v, t]) => (
-            <option key={v} value={v}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={() => void imprimir()} disabled={generando} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
-          <Printer size={16} /> {generando ? 'Generando…' : 'Imprimir recibo'}
-        </button>
-      </div>
-      {error && <span className="text-xs text-red-600">{error}</span>}
-    </div>
+    <BotonesImprimir
+      texto="Imprimir recibo"
+      nombrePdf="recibo-envio.pdf"
+      cargarTicket={() => ticketEnvio(token, id)}
+      cargarPdf={(formato) => obtenerReciboEnvio(token, id, formato)}
+      onSesionVencida={onSesionVencida}
+    />
   )
 }
 

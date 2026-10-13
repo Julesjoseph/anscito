@@ -186,6 +186,12 @@ export class CajaController {
     return this.caja.cerrar(req.usuario.id, id, req.ip, body ?? {});
   }
 
+  @Get('sesiones/:id/ticket')
+  @RequierePermiso('caja.ver')
+  cuadreTicket(@Param('id') id: string) {
+    return this.caja.cuadreTicket(id);
+  }
+
   @Get('sesiones/:id/cuadre')
   @RequierePermiso('caja.ver')
   async cuadre(

@@ -256,8 +256,10 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   un marco invisible, `frontend/src/ticket.ts`) que se ajusta al papel: rollo
   58 mm (imprime 48 mm), 80 mm (imprime 72 mm), ancho automático u hoja
   carta/A4; margen interno de 2 mm. "PDF" queda para guardar o compartir.
-  Probado en POS-58C y POS-80C. Los demás recibos (envíos, SOL CASH, cuadre
-  de caja) siguen en PDF.
+  Probado en POS-58C y POS-80C. Los recibos de envíos, de SOL CASH (cuota y
+  mano) y el cuadre de caja usan lo mismo: el backend devuelve un "ticket de
+  filas" (`backend/src/comun/ticket.ts`, rutas `.../ticket`) armado con los
+  mismos datos del PDF, y la pantalla usa `BotonesImprimir.tsx`.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los
