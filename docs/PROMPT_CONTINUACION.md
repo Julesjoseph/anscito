@@ -252,6 +252,12 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 - **Reportes de clientes** (permiso `reportes.clientes`): "Clientes por
   servicio" (TRANSFER, SOL CASH, Facturación, Crédito Fiscal) y "Clientes y
   sus servicios"; documento enmascarado sin `terceros.ver_documento`.
+- **Impresión del comprobante de venta**: botón "Imprimir" directo (HTML en
+  un marco invisible, `frontend/src/ticket.ts`) que se ajusta al papel: rollo
+  58 mm (imprime 48 mm), 80 mm (imprime 72 mm), ancho automático u hoja
+  carta/A4; margen interno de 2 mm. "PDF" queda para guardar o compartir.
+  Probado en POS-58C y POS-80C. Los demás recibos (envíos, SOL CASH, cuadre
+  de caja) siguen en PDF.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los

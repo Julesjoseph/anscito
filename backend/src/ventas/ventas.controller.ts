@@ -76,6 +76,13 @@ export class VentasController {
     return this.ventas.detalle(req.usuario.id, id);
   }
 
+  // Datos del comprobante para imprimir directo en cualquier impresora.
+  @Get(':id/ticket')
+  @RequierePermiso('ventas.ver')
+  ticket(@Req() req: Peticion, @Param('id') id: string) {
+    return this.ventas.ticket(req.usuario.id, id);
+  }
+
   // Comprobante interno en PDF, listo para imprimir o guardar.
   @Get(':id/recibo')
   @RequierePermiso('ventas.ver')

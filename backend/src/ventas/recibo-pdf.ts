@@ -82,8 +82,10 @@ function fecha(iso: string, zona: string): string {
 type Medidas = { ancho: number; margen: number; letra: number };
 
 const MEDIDAS: Record<Formato, Medidas> = {
+  // El rollo de 80 mm imprime unos 72 mm y el de 58 mm unos 48 mm: el resto
+  // es margen para que no se corte nada en ninguna impresora.
   '80': { ancho: 80 * MM, margen: 4 * MM, letra: 8 },
-  '58': { ancho: 58 * MM, margen: 3 * MM, letra: 7 },
+  '58': { ancho: 58 * MM, margen: 5 * MM, letra: 7 },
   carta: { ancho: 612, margen: 48, letra: 10 },
 };
 

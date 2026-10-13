@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  FileText,
   Minus,
   Printer,
   Plus,
@@ -25,6 +26,7 @@ import {
   buscarClientesVenta,
   crearTercero,
   detalleVenta,
+  obtenerTicket,
   listarVentas,
   obtenerRecibo,
   prepararVenta,
@@ -45,6 +47,8 @@ import type {
   TipoDocumento,
 } from './api'
 import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
+import { ANCHOS_TICKET, htmlTicket, imprimirHtml } from './ticket'
+import type { AnchoTicket } from './ticket'
 import {
   AREA,
   BOTON_PELIGRO,
@@ -97,25 +101,21 @@ function hoy(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santo_Domingo' })
 }
 
-// ---------- Imprimir el comprobante (PDF) ----------
+// ---------- Imprimir el comprobante ----------
 
-const FORMATOS: [FormatoRecibo, string][] = [
-  ['80', 'Rollo 80 mm'],
-  ['58', 'Rollo 58 mm'],
-  ['carta', 'Hoja carta'],
-]
-
-// Se recuerda el último tamaño usado en esta computadora.
-function formatoGuardado(): FormatoRecibo {
+// Se recuerda el último papel usado en esta computadora.
+function anchoGuardado(): AnchoTicket {
   try {
-    const f = localStorage.getItem('anscito.formatoRecibo')
-    if (f === '80' || f === '58' || f === 'carta') return f
+    const f = localStorage.getItem('anscito.anchoTicket') ?? localStorage.getItem('anscito.formatoRecibo')
+    if (f === '80' || f === '58' || f === 'auto' || f === 'carta') return f
   } catch {
     // Sin almacenamiento disponible: se usa el de 80 mm.
   }
   return '80'
 }
 
+// "Imprimir" va directo a la impresora (se ajusta al papel); "PDF" es para
+// guardar o enviar por WhatsApp o correo.
 function BotonImprimir({
   token,
   ventaId,
@@ -125,23 +125,41 @@ function BotonImprimir({
   ventaId: string
   onSesionVencida: () => void
 }) {
-  const [formato, setFormato] = useState<FormatoRecibo>(formatoGuardado)
+  const [ancho, setAncho] = useState<AnchoTicket>(anchoGuardado)
   const [error, setError] = useState('')
-  const [generando, setGenerando] = useState(false)
+  const [ocupado, setOcupado] = useState<'' | 'imprimir' | 'pdf'>('')
 
-  async function imprimir() {
-    setError('')
-    setGenerando(true)
+  function recordar() {
     try {
-      localStorage.setItem('anscito.formatoRecibo', formato)
+      localStorage.setItem('anscito.anchoTicket', ancho)
     } catch {
       // No pasa nada si no se puede recordar.
     }
+  }
+
+  async function imprimir() {
+    setError('')
+    setOcupado('imprimir')
+    recordar()
+    try {
+      await imprimirHtml(htmlTicket(await obtenerTicket(token, ventaId), ancho))
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    } finally {
+      setOcupado('')
+    }
+  }
+
+  async function pdf() {
+    setError('')
+    setOcupado('pdf')
+    recordar()
     // La pestaña se abre en el mismo clic para que el navegador no la bloquee.
     const pestana = window.open('', '_blank')
     try {
-      const pdf = await obtenerRecibo(token, ventaId, formato)
-      const url = URL.createObjectURL(pdf)
+      const formato: FormatoRecibo = ancho === 'auto' ? '80' : ancho
+      const url = URL.createObjectURL(await obtenerRecibo(token, ventaId, formato))
       if (pestana) {
         pestana.location.href = url
       } else {
@@ -157,7 +175,7 @@ function BotonImprimir({
       if (e instanceof SesionVencida) onSesionVencida()
       else setError(mensajeDe(e))
     } finally {
-      setGenerando(false)
+      setOcupado('')
     }
   }
 
@@ -165,19 +183,22 @@ function BotonImprimir({
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
         <select
-          value={formato}
-          onChange={(e) => setFormato(e.target.value as FormatoRecibo)}
+          value={ancho}
+          onChange={(e) => setAncho(e.target.value as AnchoTicket)}
           className="h-10 rounded-lg border border-gray-300 px-2 text-sm"
           aria-label="Tamaño del papel"
         >
-          {FORMATOS.map(([id, nombre]) => (
+          {ANCHOS_TICKET.map(([id, nombre]) => (
             <option key={id} value={id}>
               {nombre}
             </option>
           ))}
         </select>
-        <button type="button" onClick={() => void imprimir()} disabled={generando} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
-          <Printer size={16} /> {generando ? 'Generando…' : 'Imprimir / PDF'}
+        <button type="button" onClick={() => void imprimir()} disabled={ocupado !== ''} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
+          <Printer size={16} /> {ocupado === 'imprimir' ? 'Preparando…' : 'Imprimir'}
+        </button>
+        <button type="button" onClick={() => void pdf()} disabled={ocupado !== ''} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
+          <FileText size={16} /> {ocupado === 'pdf' ? 'Generando…' : 'PDF'}
         </button>
       </div>
       {error && <span className="text-xs text-red-600">{error}</span>}

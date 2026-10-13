@@ -1,5 +1,6 @@
 // La dirección del servidor se configura al arrancar (ver entorno.ts).
 import { API_URL } from './entorno'
+import type { DatosTicket } from './ticket'
 export { API_URL }
 
 export type Usuario = {
@@ -990,6 +991,10 @@ export type EcfDeVenta = {
   fecha_emision: string | null
   codigo_seguridad: string | null
 }
+
+// Datos para imprimir el comprobante directo (se arma en ticket.ts).
+export const obtenerTicket = (token: string, id: string) =>
+  llamar<DatosTicket>('GET', `/ventas/${id}/ticket`, token)
 
 export const prepararVenta = (token: string) =>
   llamar<PrepararVenta>('GET', '/ventas/preparar', token)

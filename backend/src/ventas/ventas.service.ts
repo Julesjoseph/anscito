@@ -887,6 +887,33 @@ export class VentasService {
     return { pdf, nombre: `${venta.numero_texto}.pdf` };
   }
 
+  // ---------- Datos del comprobante para imprimir directo (HTML) ----------
+
+  // La pantalla arma el ticket y lo ajusta al ancho del papel de cada impresora.
+  async ticket(actorId: string, id: string) {
+    const venta = await this.detalle(actorId, id);
+    const e = await this.db.query<
+      Omit<DatosRecibo['empresa'], 'logo'> & { logo: Buffer | null }
+    >(
+      `SELECT nombre_comercial, razon_social, rnc, direccion, telefono, whatsapp,
+              correo, logo, logo_tipo
+       FROM empresa WHERE id = 1`,
+    );
+    const { logo, logo_tipo, ...empresa } = e.rows[0];
+    const zona = await this.config(this.db, 'empresa.zona_horaria');
+    return {
+      empresa: {
+        ...empresa,
+        logo:
+          logo && logo_tipo
+            ? `data:${logo_tipo};base64,${logo.toString('base64')}`
+            : null,
+      },
+      venta,
+      zonaHoraria: zona,
+    };
+  }
+
   // ---------- Comprobante fiscal (NCF/e-CF emitido en el sistema actual) ----------
 
   async comprobante(
