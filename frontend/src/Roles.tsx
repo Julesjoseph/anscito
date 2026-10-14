@@ -62,6 +62,7 @@ const NOMBRES_MODULO: Record<string, string> = {
   facturacion: 'Facturación electrónica',
   compras: 'Reg. Facturas de Compras y Gastos',
   cxc: 'Cuentas por cobrar',
+  cxp: 'Cuentas por pagar',
 }
 
 function nombreModulo(modulo: string): string {

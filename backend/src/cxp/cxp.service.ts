@@ -629,6 +629,21 @@ export class CxpService {
 
   // ---------- Gastos fijos ----------
 
+  // Proveedores activos para elegir en un gasto fijo.
+  async buscarProveedores(textoBuscado: unknown) {
+    const t = texto(textoBuscado).slice(0, 60);
+    if (t.length < 2) return [];
+    const r = await this.db.query(
+      `SELECT id, nombre, numero_documento FROM terceros
+       WHERE rol = 'proveedor' AND is_active
+         AND (nombre ILIKE '%' || $1 || '%' OR nombre_comercial ILIKE '%' || $1 || '%'
+              OR numero_documento ILIKE '%' || $1 || '%')
+       ORDER BY lower(nombre) LIMIT 20`,
+      [t],
+    );
+    return r.rows;
+  }
+
   async gastosFijos() {
     const r = await this.db.query(
       `SELECT g.id, g.nombre, g.proveedor_id, t.nombre AS proveedor, g.tipo_gasto, tg.nombre AS tipo_gasto_nombre,

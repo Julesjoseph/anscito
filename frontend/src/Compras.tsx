@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { AlertTriangle, Ban, CheckCircle2, PackagePlus, Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarClock, CheckCircle2, PackagePlus, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import {
   SesionVencida,
   anularCompra,
@@ -16,6 +16,7 @@ import {
   tiposDocumento,
 } from './api'
 import type {
+  AvisoGastoFijo,
   CatalogosInventario,
   DetalleCompra,
   FilaCompra,
@@ -35,6 +36,9 @@ type Props = {
   token: string
   permisos: string[]
   onSesionVencida: () => void
+  // Gasto fijo que se registra (viene del botón de Cuentas por Pagar).
+  gastoFijo?: AvisoGastoFijo | null
+  onGastoFijoUsado?: () => void
 }
 
 const MONTO = /^\d{1,12}(\.\d{1,2})?$/
@@ -68,13 +72,20 @@ function fechaCorta(dia: string | null | undefined): string {
   return `${d}/${m}/${a}`
 }
 
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+function mesTexto(fecha: string): string {
+  const [a, m] = fecha.split('-')
+  return `${MESES[Number(m) - 1]} ${a}`
+}
+
 function sumarDias(fecha: string, dias: number): string {
   const [a, m, d] = fecha.split('-').map(Number)
   const x = new Date(Date.UTC(a, m - 1, d + dias))
   return x.toISOString().slice(0, 10)
 }
 
-export default function Compras({ token, permisos, onSesionVencida }: Props) {
+export default function Compras({ token, permisos, onSesionVencida, gastoFijo = null, onGastoFijoUsado }: Props) {
   const puedeRegistrar = permisos.includes('compras.registrar')
   const [pestana, setPestana] = useState<'nueva' | 'lista'>(puedeRegistrar ? 'nueva' : 'lista')
   const [prep, setPrep] = useState<PrepararCompras | null>(null)
@@ -124,7 +135,15 @@ export default function Compras({ token, permisos, onSesionVencida }: Props) {
       {!prep ? (
         !error && <p className="text-sm text-gray-500">Cargando…</p>
       ) : pestana === 'nueva' ? (
-        <NuevaFactura token={token} prep={prep} permisos={permisos} onVer={setAbierta} onSesionVencida={onSesionVencida} />
+        <NuevaFactura
+          token={token}
+          prep={prep}
+          permisos={permisos}
+          gastoFijo={gastoFijo}
+          onGastoFijoUsado={onGastoFijoUsado}
+          onVer={setAbierta}
+          onSesionVencida={onSesionVencida}
+        />
       ) : (
         <Lista token={token} onVer={setAbierta} onSesionVencida={onSesionVencida} />
       )}
@@ -217,12 +236,16 @@ function NuevaFactura({
   token,
   prep,
   permisos,
+  gastoFijo,
+  onGastoFijoUsado,
   onVer,
   onSesionVencida,
 }: {
   token: string
   prep: PrepararCompras
   permisos: string[]
+  gastoFijo: AvisoGastoFijo | null
+  onGastoFijoUsado?: () => void
   onVer: (id: string) => void
   onSesionVencida: () => void
 }) {
@@ -231,23 +254,28 @@ function NuevaFactura({
   const [nuevoProveedor, setNuevoProveedor] = useState(false)
   const [nuevoProducto, setNuevoProducto] = useState(false)
   const local = cajaDeEstaComputadora()
-  const [proveedor, setProveedor] = useState<ProveedorCompra | null>(null)
+  const [gasto, setGasto] = useState<AvisoGastoFijo | null>(gastoFijo)
+  const [proveedor, setProveedor] = useState<ProveedorCompra | null>(
+    gastoFijo
+      ? { id: gastoFijo.proveedor_id, nombre: gastoFijo.proveedor, nombre_comercial: null, numero_documento: null, dias_credito: null }
+      : null,
+  )
   const [ncf, setNcf] = useState('')
   const [fecha, setFecha] = useState(prep.hoy)
-  const [tipoGasto, setTipoGasto] = useState('09')
+  const [tipoGasto, setTipoGasto] = useState(gastoFijo?.tipo_gasto ?? '09')
   const [lineas, setLineas] = useState<LineaForm[]>([])
   const [otrosBienes, setOtrosBienes] = useState('')
-  const [servicios, setServicios] = useState('')
-  const [itbis, setItbis] = useState('')
+  const [servicios, setServicios] = useState(gastoFijo?.monto ?? '')
+  const [itbis, setItbis] = useState(gastoFijo?.itbis ?? '')
   const [itbisRetenido, setItbisRetenido] = useState('')
   const [isrRetenido, setIsrRetenido] = useState('')
-  const [condicion, setCondicion] = useState<'contado' | 'credito'>('contado')
-  const [vencimiento, setVencimiento] = useState('')
+  const [condicion, setCondicion] = useState<'contado' | 'credito'>(gastoFijo ? 'credito' : 'contado')
+  const [vencimiento, setVencimiento] = useState(gastoFijo?.fecha ?? '')
   const [forma, setForma] = useState<'efectivo' | 'banco'>('efectivo')
   const [cajaId, setCajaId] = useState(prep.cajas.some((c) => c.id === local && c.sesion_id) ? (local ?? '') : '')
   const [cuentaId, setCuentaId] = useState('')
   const [referencia, setReferencia] = useState('')
-  const [descripcion, setDescripcion] = useState('')
+  const [descripcion, setDescripcion] = useState(gastoFijo ? `${gastoFijo.nombre} (${mesTexto(gastoFijo.fecha)})` : '')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [hecha, setHecha] = useState<{ id: string; codigo: string; total: string; aPagar: string } | null>(null)
@@ -266,7 +294,13 @@ function NuevaFactura({
     if (condicion === 'credito' && !vencimiento) setVencimiento(sumarDias(fecha, p.dias_credito ?? 0))
   }
 
+  function quitarGasto() {
+    setGasto(null)
+    onGastoFijoUsado?.()
+  }
+
   function limpiar() {
+    if (gasto) quitarGasto()
     setProveedor(null)
     setNcf('')
     setLineas([])
@@ -301,6 +335,8 @@ function NuevaFactura({
         isrRetenido,
         descripcion,
         notas: '',
+        gastoFijoId: gasto?.id,
+        gastoFijoMes: gasto ? gasto.fecha.slice(0, 7) : undefined,
         pago:
           condicion === 'contado'
             ? { forma, cajaId: forma === 'efectivo' ? cajaId : undefined, cuentaId: forma === 'banco' ? cuentaId : undefined, referencia: referencia.trim() || undefined }
@@ -331,6 +367,18 @@ function NuevaFactura({
           </div>
         )}
 
+        {gasto && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <span className="flex items-center gap-2">
+              <CalendarClock size={18} /> Factura del gasto fijo <strong>{gasto.nombre}</strong> de {mesTexto(gasto.fecha)} (vence{' '}
+              {fechaCorta(gasto.fecha)}). Al registrarla, se apaga su aviso.
+            </span>
+            <button type="button" className="flex items-center gap-1 text-xs underline" onClick={quitarGasto}>
+              <X size={14} /> No es de este gasto fijo
+            </button>
+          </div>
+        )}
+
         <section className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
           <h2 className="font-medium">1. Proveedor y comprobante</h2>
           {proveedor ? (
@@ -342,7 +390,14 @@ function NuevaFactura({
                   {proveedor.dias_credito ? ` · ${proveedor.dias_credito} días de crédito` : ''}
                 </span>
               </span>
-              <button type="button" className="text-xs text-[#C8102E] hover:underline" onClick={() => setProveedor(null)}>
+              <button
+                type="button"
+                className="text-xs text-[#C8102E] hover:underline"
+                onClick={() => {
+                  setProveedor(null)
+                  if (gasto) quitarGasto()
+                }}
+              >
                 Cambiar
               </button>
             </div>
@@ -994,7 +1049,8 @@ function VerCompra({
     void cargar()
   }, [cargar])
 
-  const pagoEfectivo = d?.pagos.some((p) => p.forma === 'efectivo') ?? false
+  // Solo el pago de contado vuelve a la caja al anular (los de Cuentas por Pagar se anulan allá).
+  const pagoEfectivo = d?.pagos.some((p) => p.forma === 'efectivo' && !p.comprobante) ?? false
 
   async function anular(e: FormEvent) {
     e.preventDefault()
@@ -1072,8 +1128,12 @@ function VerCompra({
             <div className="flex flex-col gap-1">
               <div className="font-medium">Pagos</div>
               {d.pagos.map((p) => (
-                <div key={p.id} className="flex justify-between gap-2 text-gray-600">
-                  <span>{fechaCorta(p.fecha)} · {p.forma === 'efectivo' ? 'Efectivo' : 'Banco'} · {p.origen ?? ''}{p.referencia ? ` · ref. ${p.referencia}` : ''} · {p.usuario}</span>
+                <div key={p.id} className={`flex justify-between gap-2 ${p.vigente ? 'text-gray-600' : 'text-gray-400 line-through'}`}>
+                  <span>
+                    {p.comprobante ? `${p.comprobante} · ` : ''}
+                    {fechaCorta(p.fecha)} · {p.forma === 'efectivo' ? 'Efectivo' : 'Banco'} · {p.origen ?? ''}{p.referencia ? ` · ref. ${p.referencia}` : ''} · {p.usuario}
+                    {!p.vigente && ' (pago anulado)'}
+                  </span>
                   <span>{dinero(p.monto)}</span>
                 </div>
               ))}

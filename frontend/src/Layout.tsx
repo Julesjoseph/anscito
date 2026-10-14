@@ -14,6 +14,7 @@ import {
   LogOut,
   Package,
   PackagePlus,
+  Receipt,
   ShieldCheck,
   ShoppingCart,
   Smartphone,
@@ -24,7 +25,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { Marca, Perfil } from './api'
+import type { AvisoGastoFijo, Marca, Perfil } from './api'
 import Empresa from './Empresa'
 import Envios from './Envios'
 import Facturacion from './Facturacion'
@@ -37,6 +38,7 @@ import Calculadora from './Calculadora'
 import Categorias from './Categorias'
 import Compras from './Compras'
 import CuentasCobrar from './CuentasCobrar'
+import CuentasPagar from './CuentasPagar'
 import Inventario from './Inventario'
 import Roles from './Roles'
 import Sanes from './Sanes'
@@ -90,6 +92,13 @@ const MODULOS: Modulo[] = [
     Icono: CreditCard,
     listo: true,
     permiso: 'cxc.ver',
+  },
+  {
+    id: 'cxp',
+    nombre: 'Cuentas por pagar',
+    Icono: Receipt,
+    listo: true,
+    permiso: 'cxp.ver',
   },
   {
     id: 'sanes',
@@ -156,6 +165,7 @@ const MODULOS: Modulo[] = [
       'reportes.inventario',
       'reportes.clientes',
       'cxc.ver',
+      'cxp.ver',
     ],
   },
   {
@@ -211,6 +221,8 @@ export default function Layout({
   onSalir,
 }: Props) {
   const [pagina, setPagina] = useState('panel')
+  // Gasto fijo que se va a registrar en "Reg. Facturas de Compras y Gastos".
+  const [gastoFijo, setGastoFijo] = useState<AvisoGastoFijo | null>(null)
 
   const visibles = MODULOS.filter(
     (m) =>
@@ -354,11 +366,23 @@ export default function Layout({
             permisos={perfil.permisos}
             onSesionVencida={onSalir}
           />
+        ) : pagina === 'cxp' ? (
+          <CuentasPagar
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+            onRegistrarGasto={(aviso) => {
+              setGastoFijo(aviso)
+              setPagina('compras')
+            }}
+          />
         ) : pagina === 'compras' ? (
           <Compras
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}
+            gastoFijo={gastoFijo}
+            onGastoFijoUsado={() => setGastoFijo(null)}
           />
         ) : pagina === 'caja' ? (
           <Caja

@@ -23,6 +23,7 @@ const AREAS: [AreaReporte, string][] = [
   ['inventario', 'Inventario'],
   ['clientes', 'Clientes'],
   ['cxc', 'Cuentas por cobrar'],
+  ['cxp', 'Cuentas por pagar'],
 ]
 
 // Fechas de hoy en República Dominicana.
@@ -69,6 +70,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
   const [cuentaId, setCuentaId] = useState('')
   const [servicio, setServicio] = useState('')
   const [clienteId, setClienteId] = useState('')
+  const [proveedorId, setProveedorId] = useState('')
   const [estado, setEstado] = useState('todos')
   const [datos, setDatos] = useState<DatosReporte | null>(null)
   const [error, setError] = useState('')
@@ -96,9 +98,10 @@ export default function Reportes({ token, onSesionVencida }: Props) {
   const necesitaCuenta = codigo === 'movimientos-cuenta'
   const necesitaServicio = codigo === 'clientes-servicio'
   const necesitaCliente = codigo === 'cxc-estado-cuenta'
+  const necesitaProveedor = codigo === 'cxp-estado-cuenta'
   const usaAgente = necesitaAgente || codigo === 'envios-detalle'
   // Reportes "al día" (una sola fecha).
-  const soloHasta = codigo === 'inventario' || codigo.startsWith('cxc-')
+  const soloHasta = codigo === 'inventario' || codigo.startsWith('cxc-') || codigo.startsWith('cxp-')
   const filtros: FiltrosReporte = {
     desde: soloHasta ? hasta : desde,
     hasta,
@@ -107,13 +110,15 @@ export default function Reportes({ token, onSesionVencida }: Props) {
     estado: codigo === 'envios-detalle' ? estado : undefined,
     servicio: necesitaServicio ? servicio : undefined,
     clienteId: necesitaCliente ? clienteId : undefined,
+    proveedorId: necesitaProveedor ? proveedorId : undefined,
   }
   const listo =
     codigo !== '' &&
     (!necesitaAgente || agenteId !== '') &&
     (!necesitaCuenta || cuentaId !== '') &&
     (!necesitaServicio || servicio !== '') &&
-    (!necesitaCliente || clienteId !== '')
+    (!necesitaCliente || clienteId !== '') &&
+    (!necesitaProveedor || proveedorId !== '')
   const clave = JSON.stringify([codigo, filtros])
 
   // Se actualiza solo al cambiar el reporte o los filtros.
@@ -267,6 +272,19 @@ export default function Reportes({ token, onSesionVencida }: Props) {
                 </select>
               </label>
             )}
+            {necesitaProveedor && (
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                Proveedor
+                <select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)} className={CAMPO}>
+                  <option value="">Seleccione…</option>
+                  {opciones.proveedoresCxp.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {necesitaServicio && (
               <label className="flex flex-col gap-1 text-xs text-gray-500">
                 Servicio
@@ -306,7 +324,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
           {error && <CajaError>{error}</CajaError>}
           {!listo && (
             <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-              {necesitaAgente ? 'Seleccione el agente.' : necesitaServicio ? 'Seleccione el servicio.' : necesitaCliente ? 'Seleccione el cliente.' : 'Seleccione la cuenta.'}
+              {necesitaAgente ? 'Seleccione el agente.' : necesitaServicio ? 'Seleccione el servicio.' : necesitaCliente ? 'Seleccione el cliente.' : necesitaProveedor ? 'Seleccione el proveedor.' : 'Seleccione la cuenta.'}
             </div>
           )}
 

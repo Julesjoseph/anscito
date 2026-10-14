@@ -1148,6 +1148,13 @@ export type ResumenPanel = {
     valor_al_costo?: string
     criticos: { codigo: string; nombre: string; existencia: string; minimo: string }[]
   }
+  cxp?: {
+    dias: number
+    deuda: string
+    vencidas: { cantidad: number; monto: string }
+    porVencer: { cantidad: number; monto: string }
+    gastosFijos: AvisoGastoFijo[]
+  }
 }
 
 export const resumenPanel = (token: string, periodo: PeriodoPanel) =>
@@ -1896,7 +1903,7 @@ export const nuevaTarifa = (
 
 // ---------- Reportes ----------
 
-export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes' | 'cxc'
+export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes' | 'cxc' | 'cxp'
 
 export type TipoColumnaReporte =
   | 'texto'
@@ -1933,6 +1940,7 @@ export type OpcionesReportes = {
   cuentas: { id: string; nombre: string; moneda: string; simbolo: string; is_active: boolean }[]
   servicios: { codigo: string; nombre: string }[]
   clientesCxc: { id: string; nombre: string }[]
+  proveedoresCxp: { id: string; nombre: string }[]
 }
 
 export type FiltrosReporte = {
@@ -1943,6 +1951,7 @@ export type FiltrosReporte = {
   estado?: string
   servicio?: string
   clienteId?: string
+  proveedorId?: string
 }
 
 function consultaReporte(f: FiltrosReporte): string {
@@ -2516,6 +2525,8 @@ export type DatosCompra = {
   descripcion: string
   notas: string
   pago?: { forma: 'efectivo' | 'banco'; cajaId?: string; cuentaId?: string; referencia?: string }
+  gastoFijoId?: string
+  gastoFijoMes?: string // YYYY-MM: mes al que corresponde la factura
 }
 
 export type FilaCompra = {
@@ -2552,7 +2563,17 @@ export type DetalleCompra = FilaCompra & {
   anulada_por_usuario: string | null
   motivo_anulacion: string | null
   lineas: { id: string; codigo: string; nombre: string; unidad: string; cantidad: string; costo_unitario: string; subtotal: string }[]
-  pagos: { id: string; monto: string; forma: 'efectivo' | 'banco'; fecha: string; referencia: string | null; usuario: string; origen: string | null }[]
+  pagos: {
+    id: string
+    monto: string
+    forma: 'efectivo' | 'banco'
+    fecha: string
+    referencia: string | null
+    usuario: string
+    origen: string | null
+    comprobante: string | null // PP-000001 si se pagó en Cuentas por Pagar
+    vigente: boolean // false si ese pago se anuló
+  }[]
 }
 
 export const prepararCompras = (token: string) => llamar<PrepararCompras>('GET', '/compras/preparar', token)
@@ -2722,3 +2743,162 @@ export async function pdfAbono(token: string, id: string, formato: FormatoRecibo
   }
   return res.blob()
 }
+
+// ---------- Cuentas por Pagar ----------
+
+export type AvisoGastoFijo = {
+  id: string
+  nombre: string
+  proveedor_id: string
+  proveedor: string
+  tipo_gasto: string
+  monto: string | null
+  itbis: string | null
+  fecha: string // cuándo vence (este mes o el próximo)
+  dias: number // días que faltan (negativo: ya pasó)
+}
+
+export type FacturaCxp = {
+  id: string
+  codigo: string
+  proveedor_id: string
+  proveedor: string
+  ncf: string | null
+  fecha: string
+  vencimiento: string
+  condicion: string
+  a_pagar: string
+  pagado: string
+  saldo: string
+  vencida: boolean
+  dias_atraso: number
+  por_vencer: boolean
+  dias_para_vencer: number
+}
+
+export type PrepararCxp = {
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
+  cuentas: { id: string; nombre: string }[]
+  tiposGasto: { codigo: string; nombre: string }[]
+  hoy: string
+  diasAlerta: number
+}
+
+export type AlertasCxp = {
+  hoy: string
+  dias: number
+  vencidas: FacturaCxp[]
+  porVencer: FacturaCxp[]
+  gastosFijos: AvisoGastoFijo[]
+}
+
+export type ProveedorCxp = { id: string; nombre: string; debe: string; vencido: string; por_vencer: string; facturas: number }
+
+export type PagoCxp = {
+  id: string
+  codigo: string
+  numero: string
+  fecha: string
+  total: string
+  forma: 'efectivo' | 'banco'
+  referencia: string | null
+  estado: 'activo' | 'anulado'
+  motivo_anulacion: string | null
+  usuario: string
+}
+
+export type DetalleProveedorCxp = {
+  proveedor: { id: string; nombre: string; numero_documento: string | null; dias_credito: number | null }
+  hoy: string
+  facturas: FacturaCxp[]
+  totales: { debe: string; vencido: string }
+  pagos: PagoCxp[]
+}
+
+export type GastoFijo = {
+  id: string
+  nombre: string
+  proveedor_id: string
+  proveedor: string
+  tipo_gasto: string
+  tipo_gasto_nombre: string
+  dia_mes: number
+  monto: string | null
+  itbis: string | null
+  notas: string | null
+  is_active: boolean
+}
+
+export type DatosGastoFijo = {
+  nombre: string
+  proveedorId: string
+  tipoGasto: string
+  diaMes: string
+  monto: string
+  itbis: string
+  notas: string
+  activo: boolean
+}
+
+export const prepararCxp = (token: string) => llamar<PrepararCxp>('GET', '/cxp/preparar', token)
+
+export const alertasCxp = (token: string) => llamar<AlertasCxp>('GET', '/cxp/alertas', token)
+
+export const proveedoresCxp = (token: string) => llamar<ProveedorCxp[]>('GET', '/cxp/proveedores', token)
+
+export const proveedorCxp = (token: string, id: string) => llamar<DetalleProveedorCxp>('GET', `/cxp/proveedores/${id}`, token)
+
+export const pagarProveedor = (
+  token: string,
+  datos: {
+    proveedorId: string
+    monto: string
+    forma: 'efectivo' | 'banco'
+    cajaId?: string
+    cuentaId?: string
+    referencia?: string
+    distribucion?: { compraId: string; monto: string }[]
+  },
+) =>
+  llamar<{
+    id: string
+    codigo: string
+    aplicado: { factura: string; ncf: string | null; monto: string }[]
+    debiaAntes: string
+    debeAhora: string
+  }>('POST', '/cxp/pagos', token, datos)
+
+export const anularPagoProveedor = (token: string, id: string, datos: { motivo: string; cajaId?: string }) =>
+  llamar<{ ok: boolean }>('POST', `/cxp/pagos/${id}/anular`, token, datos)
+
+export const ticketPagoProveedor = (token: string, id: string) =>
+  llamar<TicketFilas>('GET', `/cxp/pagos/${id}/ticket`, token)
+
+export async function pdfPagoProveedor(token: string, id: string, formato: FormatoRecibo): Promise<Blob> {
+  const res = await fetch(`${API_URL}/cxp/pagos/${id}/pdf?formato=${formato}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el comprobante')
+  }
+  return res.blob()
+}
+
+export const listarGastosFijos = (token: string) => llamar<GastoFijo[]>('GET', '/cxp/gastos-fijos', token)
+
+export const guardarGastoFijo = (token: string, id: string | null, datos: DatosGastoFijo) =>
+  id
+    ? llamar<{ id: string }>('PUT', `/cxp/gastos-fijos/${id}`, token, datos)
+    : llamar<{ id: string }>('POST', '/cxp/gastos-fijos', token, datos)
+
+export const configurarDiasCxp = (token: string, dias: string) =>
+  llamar<{ ok: boolean }>('PATCH', '/cxp/configuracion', token, { dias })
+
+export const buscarProveedoresCxp = (token: string, texto: string) =>
+  llamar<{ id: string; nombre: string; numero_documento: string | null }[]>(
+    'GET',
+    `/cxp/buscar-proveedores?${new URLSearchParams({ texto }).toString()}`,
+    token,
+  )

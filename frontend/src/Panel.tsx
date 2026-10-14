@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
   Package,
   PackageX,
+  Receipt,
   RefreshCw,
   TrendingUp,
   Wallet,
@@ -125,6 +126,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
   const bancos = datos?.bancos
   const envios = datos?.remesas
   const serv = datos?.servicios
+  const cxp = datos?.cxp
   const cambio = v ? variacion(v.total, v.total_anterior) : null
 
   return (
@@ -169,7 +171,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
       {error && <CajaError>{error}</CajaError>}
       {!datos && !error && <div className="text-gray-500">Cargando…</div>}
 
-      {datos && !v && !inv && !caja && !bancos && !envios && (
+      {datos && !v && !inv && !caja && !bancos && !envios && !cxp && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
           Su usuario no tiene permisos para ver indicadores de ventas, caja ni
           inventario. Pídale al administrador que se los asigne en Roles y
@@ -177,7 +179,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
         </div>
       )}
 
-      {(v || inv || caja || bancos || envios) && (
+      {(v || inv || caja || bancos || envios || cxp) && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {v && (
             <Tarjeta
@@ -262,6 +264,44 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               valor={dinero(inv.valor_al_costo)}
               detalle="Existencia actual × costo promedio, sin ITBIS (hoy, no depende del período)"
             />
+          )}
+          {cxp && (
+            <Tarjeta
+              titulo="Cuentas por pagar"
+              alerta={cxp.vencidas.cantidad + cxp.porVencer.cantidad + cxp.gastosFijos.length > 0}
+              icono={
+                cxp.vencidas.cantidad + cxp.porVencer.cantidad + cxp.gastosFijos.length > 0 ? (
+                  <AlertTriangle size={16} className="text-amber-600" />
+                ) : (
+                  <Receipt size={16} />
+                )
+              }
+              valor={dinero(cxp.deuda)}
+              detalle={
+                <>
+                  {cxp.vencidas.cantidad > 0 && (
+                    <span className="block text-red-700">
+                      {cxp.vencidas.cantidad} vencida{cxp.vencidas.cantidad === 1 ? '' : 's'}: {dinero(cxp.vencidas.monto)}
+                    </span>
+                  )}
+                  {cxp.porVencer.cantidad > 0 && (
+                    <span className="block">
+                      {cxp.porVencer.cantidad} vence{cxp.porVencer.cantidad === 1 ? '' : 'n'} en {cxp.dias} días: {dinero(cxp.porVencer.monto)}
+                    </span>
+                  )}
+                  {cxp.gastosFijos.map((g) => (
+                    <span key={`${g.id}-${g.fecha}`} className="block">
+                      Gasto fijo: {g.nombre} ({g.dias < 0 ? `venció hace ${-g.dias} días` : g.dias === 0 ? 'vence hoy' : `en ${g.dias} días`})
+                    </span>
+                  ))}
+                  {cxp.vencidas.cantidad + cxp.porVencer.cantidad + cxp.gastosFijos.length === 0 && 'Nada vencido ni por vencer (ahora, no depende del período)'}
+                </>
+              }
+            >
+              <button type="button" onClick={() => onIr('cxp')} className="self-start text-xs text-[#C8102E] hover:underline">
+                Ver cuentas por pagar
+              </button>
+            </Tarjeta>
           )}
           {caja && (
             <Tarjeta

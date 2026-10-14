@@ -86,6 +86,12 @@ export class CxpController {
     res.send(pdf);
   }
 
+  @Get('buscar-proveedores')
+  @RequierePermiso('cxp.gastos_fijos')
+  buscarProveedores(@Query('texto') texto: string | undefined) {
+    return this.cxp.buscarProveedores(texto);
+  }
+
   @Get('gastos-fijos')
   @RequierePermiso('cxp.ver')
   gastosFijos() {
