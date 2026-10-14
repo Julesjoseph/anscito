@@ -32,6 +32,7 @@ import {
   prepararVenta,
   previsualizarVenta,
   registrarVenta,
+  resumenCreditoVenta,
   tiposDocumento,
 } from './api'
 import type {
@@ -44,6 +45,7 @@ import type {
   PaginaVentas,
   PrepararVenta,
   PrevisualizacionVenta,
+  ResumenCreditoVenta,
   TipoDocumento,
 } from './api'
 import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
@@ -345,9 +347,23 @@ function NuevaVenta({
   const [previa, setPrevia] = useState<{ clave: string; datos: PrevisualizacionVenta | null; error: string } | null>(null)
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
-  const [hecha, setHecha] = useState<{ id: string; numero: string; total: string; devuelta: string | null; ecf: string | null } | null>(null)
+  const [hecha, setHecha] = useState<{
+    id: string
+    numero: string
+    total: string
+    devuelta: string | null
+    ecf: string | null
+    credito: { monto: string; vencimiento: string } | null
+  } | null>(null)
   const [tipoEcf, setTipoEcf] = useState('')
   const [nuevoCliente, setNuevoCliente] = useState(false)
+  // Venta a crédito: inicial (puede ser 0), plazo y el resumen del cliente.
+  const [aCredito, setACredito] = useState(false)
+  const [inicial, setInicial] = useState('0')
+  const [plazo, setPlazo] = useState('')
+  const [motivoAut, setMotivoAut] = useState('')
+  const [resumen, setResumen] = useState<ResumenCreditoVenta | null>(null)
+  const [cargandoCred, setCargandoCred] = useState(false)
   const puedeCrearCliente = permisos.includes('clientes.crear') && permisos.includes('clientes.ver')
   const [cajaId, setCajaId] = useState<string | null>(cajaDeEstaComputadora)
   // Última cuenta usada para transferencias en esta computadora.
@@ -501,10 +517,45 @@ function NuevaVenta({
 
   const vigente = previa?.clave === clave ? previa : null
   const totales = vigente?.datos?.totales ?? null
+  const inicialC = aCredito ? (MONTO.test(inicial.trim()) ? centavos(inicial) : -1n) : 0n
+  const cobroAhora = totales ? (aCredito ? (inicialC < 0n ? 0n : inicialC) : centavos(totales.total)) : 0n
+  const montoCredito = totales && aCredito && inicialC >= 0n ? centavos(totales.total) - inicialC : 0n
+  const pideForma = !aCredito || inicialC > 0n
   const devuelta =
-    totales && forma?.calcula_devuelta && MONTO.test(recibido.trim())
-      ? centavos(recibido) - centavos(totales.total)
+    totales && pideForma && forma?.calcula_devuelta && MONTO.test(recibido.trim())
+      ? centavos(recibido) - cobroAhora
       : null
+  const esConsumidorFinal = cliente?.id === prep?.consumidorFinal?.id
+  const credActivo = resumen?.credito?.is_active ?? false
+  const vencidas = resumen?.totales.cuentas_vencidas ?? 0
+  const creditoListo =
+    !aCredito ||
+    (credActivo &&
+      inicialC >= 0n &&
+      montoCredito > 0n &&
+      resumen?.disponible !== null &&
+      montoCredito <= centavos(resumen?.disponible ?? '0') &&
+      /^\d{1,3}$/.test(plazo.trim()) &&
+      (vencidas === 0 || resumen?.autorizacionHoy !== null || (prep?.credito.puedeAutorizar === true && motivoAut.trim().length >= 5)))
+
+  async function activarCredito(si: boolean) {
+    setACredito(si)
+    setResumen(null)
+    setMotivoAut('')
+    setInicial('0')
+    if (!si || !cliente) return
+    setCargandoCred(true)
+    try {
+      const r = await resumenCreditoVenta(token, cliente.id)
+      setResumen(r)
+      setPlazo(String(r.credito?.plazo_dias ?? ''))
+    } catch (err) {
+      manejar(err)
+      setACredito(false)
+    } finally {
+      setCargandoCred(false)
+    }
+  }
 
   function agregar(a: ArticuloVenta) {
     setHecha(null)
@@ -537,6 +588,10 @@ function NuevaVenta({
     setReferencia('')
     setComprobante('')
     setTipoEcf('')
+    setACredito(false)
+    setResumen(null)
+    setInicial('0')
+    setMotivoAut('')
     setMotivoDescuento('')
     setNotas('')
     setPrevia(null)
@@ -545,7 +600,7 @@ function NuevaVenta({
 
   async function cobrar(e: FormEvent) {
     e.preventDefault()
-    if (!cliente || !forma) return
+    if (!cliente || (pideForma && !forma)) return
     setError('')
     setGuardando(true)
     try {
@@ -554,12 +609,13 @@ function NuevaVenta({
         lineas: entrada,
         motivoDescuento,
         pago: {
-          formaPagoId: forma.id,
-          recibido: forma.calcula_devuelta ? recibido.trim() : undefined,
+          formaPagoId: pideForma && forma ? forma.id : '',
+          recibido: pideForma && forma?.calcula_devuelta ? recibido.trim() : undefined,
           referencia: referencia.trim() || undefined,
-          cajaId: forma.usa_caja && miCaja ? miCaja.id : undefined,
-          cuentaId: forma.usa_cuenta && cuentaVenta ? cuentaVenta.id : undefined,
+          cajaId: pideForma && forma?.usa_caja && miCaja ? miCaja.id : undefined,
+          cuentaId: pideForma && forma?.usa_cuenta && cuentaVenta ? cuentaVenta.id : undefined,
         },
+        credito: aCredito ? { inicial: inicial.trim(), plazoDias: plazo.trim(), autorizarMotivo: motivoAut.trim() || undefined } : undefined,
         comprobanteFiscal: prep?.facturacion.activa ? '' : comprobante,
         tipoEcf: prep?.facturacion.activa ? tipoEcf : undefined,
         notas,
@@ -578,11 +634,13 @@ function NuevaVenta({
     lineas.length > 0 &&
     totales !== null &&
     cliente !== null &&
-    forma !== undefined &&
-    cajaLista &&
-    cuentaLista &&
-    (!forma.calcula_devuelta || (devuelta !== null && devuelta >= 0n)) &&
-    (!forma.requiere_referencia || referencia.trim() !== '') &&
+    creditoListo &&
+    (!pideForma ||
+      (forma !== undefined &&
+        cajaLista &&
+        cuentaLista &&
+        (!forma.calcula_devuelta || (devuelta !== null && devuelta >= 0n)) &&
+        (!forma.requiere_referencia || referencia.trim() !== ''))) &&
     (!hayDescuento || motivoDescuento.trim().length >= 5)
 
   if (!prep) return error ? <CajaError>{error}</CajaError> : <div className="text-gray-500">Cargando…</div>
@@ -738,6 +796,11 @@ function NuevaVenta({
             </div>
             <div>Total cobrado: {dinero(hecha.total)}</div>
             {hecha.devuelta !== null && <div className="text-lg font-medium">Devuelta: {dinero(hecha.devuelta)}</div>}
+            {hecha.credito && (
+              <div className="font-medium">
+                A crédito: {dinero(hecha.credito.monto)} · vence el {hecha.credito.vencimiento.split('-').reverse().join('/')}
+              </div>
+            )}
             {hecha.ecf && (
               <div>
                 Factura electrónica {hecha.ecf === '31' ? '31 (Crédito Fiscal)' : '32 (Consumo)'}: queda en la lista “Por emitir”.
@@ -787,6 +850,8 @@ function NuevaVenta({
                         setCliente({ id: c.id, nombre: c.nombre })
                         setClientes(null)
                         setBuscarCliente('')
+                        setACredito(false)
+                        setResumen(null)
                       }}
                       className="w-full px-3 py-2 text-left hover:bg-gray-50"
                     >
@@ -827,8 +892,80 @@ function NuevaVenta({
           </label>
         )}
 
+        {prep.credito.puedeVender && cliente && !esConsumidorFinal && (
+          <div className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 text-sm">
+            <label className="flex items-center gap-2 font-medium text-gray-800">
+              <input type="checkbox" checked={aCredito} onChange={(e) => void activarCredito(e.target.checked)} />
+              Vender a crédito
+            </label>
+            {aCredito && cargandoCred && <span className="text-gray-500">Revisando el crédito del cliente…</span>}
+            {aCredito && resumen && !credActivo && (
+              <div className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                Este cliente no tiene crédito autorizado. El administrador se lo da en Cuentas por cobrar.
+              </div>
+            )}
+            {aCredito && resumen && credActivo && (
+              <>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-gray-600">
+                  <span>Límite</span>
+                  <span className="text-right">{dinero(resumen.credito?.limite)}</span>
+                  <span>Ya debe</span>
+                  <span className="text-right">{dinero(resumen.totales.total)}</span>
+                  <span>Disponible</span>
+                  <span className="text-right font-medium text-gray-900">{dinero(resumen.disponible)}</span>
+                </div>
+                {vencidas > 0 && (
+                  <div className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+                    <span className="flex gap-2">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                      Tiene {vencidas} factura(s) vencida(s) por {dinero(resumen.totales.vencido)}.
+                    </span>
+                    {resumen.autorizacionHoy ? (
+                      <span className="text-green-800">
+                        Autorizado hoy por {resumen.autorizacionHoy.por}: {resumen.autorizacionHoy.motivo}
+                      </span>
+                    ) : prep.credito.puedeAutorizar ? (
+                      <input
+                        className={`${CAMPO} bg-white`}
+                        value={motivoAut}
+                        maxLength={300}
+                        onChange={(e) => setMotivoAut(e.target.value)}
+                        placeholder="Motivo para autorizar (administrador)"
+                      />
+                    ) : (
+                      <span>Solo el administrador puede autorizar esta venta a crédito.</span>
+                    )}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1 text-gray-600">
+                    Inicial ahora (RD$)
+                    <input className={CAMPO} value={inicial} inputMode="decimal" onChange={(e) => setInicial(e.target.value)} />
+                  </label>
+                  <label className="flex flex-col gap-1 text-gray-600">
+                    Plazo (días)
+                    <input className={CAMPO} value={plazo} inputMode="numeric" onChange={(e) => setPlazo(e.target.value)} />
+                  </label>
+                </div>
+                {totales && montoCredito > 0n && (
+                  <div className={`font-medium ${montoCredito > centavos(resumen.disponible ?? '0') ? 'text-red-700' : 'text-gray-900'}`}>
+                    Queda a crédito: {dinero(texto2(montoCredito))}
+                    {montoCredito > centavos(resumen.disponible ?? '0') && ' (pasa del disponible)'}
+                  </div>
+                )}
+                {totales && inicialC >= 0n && montoCredito <= 0n && (
+                  <div className="text-red-700">El inicial debe ser menor que el total.</div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {pideForma && (
+        <>
         <div className="flex flex-col gap-1 text-sm text-gray-600">
-          Forma de pago
+          {aCredito ? 'Forma de pago del inicial' : 'Forma de pago'}
           <div className="flex gap-2">
             {prep.formasPago.map((f) => (
               <button
@@ -911,6 +1048,9 @@ function NuevaVenta({
           </label>
         )}
 
+        </>
+        )}
+
         {prep?.facturacion.activa && (
           <label className="flex flex-col gap-1 text-sm text-gray-600">
             Factura electrónica
@@ -941,7 +1081,11 @@ function NuevaVenta({
         {error && <CajaError>{error}</CajaError>}
 
         <button type="submit" disabled={!puedeCobrar} className={`${BOTON_PRINCIPAL} h-12 text-base`}>
-          {guardando ? 'Registrando…' : `Cobrar ${totales ? dinero(totales.total) : ''}`}
+          {guardando
+            ? 'Registrando…'
+            : aCredito
+              ? `Registrar a crédito ${montoCredito > 0n ? dinero(texto2(montoCredito)) : ''}`
+              : `Cobrar ${totales ? dinero(totales.total) : ''}`}
         </button>
         {lineas.length > 0 && (
           <button type="button" onClick={limpiar} className="text-xs text-gray-500 hover:underline">
@@ -965,6 +1109,8 @@ function NuevaVenta({
             setClientes(null)
             setBuscarCliente('')
             setTipoEcf('')
+            setACredito(false)
+            setResumen(null)
             setNuevoCliente(false)
           }}
         />
@@ -1115,6 +1261,16 @@ function VerDetalle({
           <div className="flex justify-between text-base font-medium"><dt>Total</dt><dd>{dinero(d.total)}</dd></div>
         </dl>
       </div>
+
+      {d.credito && (
+        <div className="flex flex-wrap justify-between gap-2 rounded-lg border border-gray-200 p-3">
+          <span className="font-medium">Venta a crédito</span>
+          <span>
+            {dinero(d.credito.monto)} · {d.credito.plazo_dias} días · vence el {d.credito.vencimiento.split('-').reverse().join('/')}
+            {d.credito.estado === 'anulada' ? ' · anulada' : ''}
+          </span>
+        </div>
+      )}
 
       {d.ecf.length > 0 && (
         <div className="flex flex-col gap-1 rounded-lg border border-gray-200 p-3">

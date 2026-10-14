@@ -22,6 +22,7 @@ const AREAS: [AreaReporte, string][] = [
   ['caja_bancos', 'Caja y Bancos'],
   ['inventario', 'Inventario'],
   ['clientes', 'Clientes'],
+  ['cxc', 'Cuentas por cobrar'],
 ]
 
 // Fechas de hoy en República Dominicana.
@@ -67,6 +68,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
   const [agenteId, setAgenteId] = useState('')
   const [cuentaId, setCuentaId] = useState('')
   const [servicio, setServicio] = useState('')
+  const [clienteId, setClienteId] = useState('')
   const [estado, setEstado] = useState('todos')
   const [datos, setDatos] = useState<DatosReporte | null>(null)
   const [error, setError] = useState('')
@@ -93,8 +95,10 @@ export default function Reportes({ token, onSesionVencida }: Props) {
   const necesitaAgente = codigo === 'estado-agente'
   const necesitaCuenta = codigo === 'movimientos-cuenta'
   const necesitaServicio = codigo === 'clientes-servicio'
+  const necesitaCliente = codigo === 'cxc-estado-cuenta'
   const usaAgente = necesitaAgente || codigo === 'envios-detalle'
-  const soloHasta = codigo === 'inventario'
+  // Reportes "al día" (una sola fecha).
+  const soloHasta = codigo === 'inventario' || codigo.startsWith('cxc-')
   const filtros: FiltrosReporte = {
     desde: soloHasta ? hasta : desde,
     hasta,
@@ -102,12 +106,14 @@ export default function Reportes({ token, onSesionVencida }: Props) {
     cuentaId: necesitaCuenta ? cuentaId : undefined,
     estado: codigo === 'envios-detalle' ? estado : undefined,
     servicio: necesitaServicio ? servicio : undefined,
+    clienteId: necesitaCliente ? clienteId : undefined,
   }
   const listo =
     codigo !== '' &&
     (!necesitaAgente || agenteId !== '') &&
     (!necesitaCuenta || cuentaId !== '') &&
-    (!necesitaServicio || servicio !== '')
+    (!necesitaServicio || servicio !== '') &&
+    (!necesitaCliente || clienteId !== '')
   const clave = JSON.stringify([codigo, filtros])
 
   // Se actualiza solo al cambiar el reporte o los filtros.
@@ -204,7 +210,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
               </label>
             )}
             <label className="flex flex-col gap-1 text-xs text-gray-500">
-              {soloHasta ? 'Existencia al día' : 'Hasta'}
+              {codigo === 'inventario' ? 'Existencia al día' : soloHasta ? 'Al día' : 'Hasta'}
               <input type="date" value={hasta} max={hoy()} onChange={(e) => setFechas([desde, e.target.value || hasta])} className={CAMPO} />
             </label>
             {!soloHasta && (
@@ -248,6 +254,19 @@ export default function Reportes({ token, onSesionVencida }: Props) {
                 </select>
               </label>
             )}
+            {necesitaCliente && (
+              <label className="flex flex-col gap-1 text-xs text-gray-500">
+                Cliente
+                <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className={CAMPO}>
+                  <option value="">Seleccione…</option>
+                  {opciones.clientesCxc.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {necesitaServicio && (
               <label className="flex flex-col gap-1 text-xs text-gray-500">
                 Servicio
@@ -287,7 +306,7 @@ export default function Reportes({ token, onSesionVencida }: Props) {
           {error && <CajaError>{error}</CajaError>}
           {!listo && (
             <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-              {necesitaAgente ? 'Seleccione el agente.' : necesitaServicio ? 'Seleccione el servicio.' : 'Seleccione la cuenta.'}
+              {necesitaAgente ? 'Seleccione el agente.' : necesitaServicio ? 'Seleccione el servicio.' : necesitaCliente ? 'Seleccione el cliente.' : 'Seleccione la cuenta.'}
             </div>
           )}
 

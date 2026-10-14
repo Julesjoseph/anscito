@@ -843,6 +843,7 @@ export type PrepararVenta = {
   consumidorFinal: { id: string; nombre: string } | null
   // Facturación electrónica: si ya empezó, cada venta deja su e-CF por emitir.
   facturacion: { activa: boolean; umbral: string }
+  credito: { puedeVender: boolean; puedeAutorizar: boolean }
 }
 
 export type ArticuloVenta = {
@@ -901,6 +902,8 @@ export type DatosVenta = {
   comprobanteFiscal: string
   // '31' Crédito Fiscal, '32' Consumo o '' (según el cliente).
   tipoEcf?: string
+  // Venta a crédito: el inicial que paga ahora (puede ser 0) y el plazo.
+  credito?: { inicial: string; plazoDias?: string; autorizarMotivo?: string }
   notas: string
 }
 
@@ -975,6 +978,7 @@ export type DetalleVenta = {
   motivo_anulacion: string | null
   lineas: LineaDetalle[]
   ecf: EcfDeVenta[]
+  credito: { monto: string; plazo_dias: number; vencimiento: string; estado: string } | null
   pagos: {
     monto: string
     recibido: string | null
@@ -1017,7 +1021,14 @@ export const previsualizarVenta = (token: string, datos: DatosVenta) =>
   llamar<PrevisualizacionVenta>('POST', '/ventas/calcular', token, datos)
 
 export const registrarVenta = (token: string, datos: DatosVenta) =>
-  llamar<{ id: string; numero: string; total: string; devuelta: string | null; ecf: string | null }>(
+  llamar<{
+    id: string
+    numero: string
+    total: string
+    devuelta: string | null
+    ecf: string | null
+    credito: { monto: string; vencimiento: string } | null
+  }>(
     'POST',
     '/ventas',
     token,
@@ -1177,6 +1188,8 @@ export type TipoMovimientoCaja =
   | 'san_mano'
   | 'compra'
   | 'compra_reverso'
+  | 'abono_credito'
+  | 'abono_anulado'
 
 export type MovimientoCaja = {
   id: string
@@ -1205,6 +1218,8 @@ export type TotalesCaja = {
   san_manos: string
   compras: string
   compras_devueltas: string
+  abonos_credito: string
+  abonos_anulados: string
   cantidad_ventas: number
 }
 
@@ -1881,7 +1896,7 @@ export const nuevaTarifa = (
 
 // ---------- Reportes ----------
 
-export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes'
+export type AreaReporte = 'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes' | 'cxc'
 
 export type TipoColumnaReporte =
   | 'texto'
@@ -1917,6 +1932,7 @@ export type OpcionesReportes = {
   agentes: { id: string; codigo: string; nombre: string; is_active: boolean }[]
   cuentas: { id: string; nombre: string; moneda: string; simbolo: string; is_active: boolean }[]
   servicios: { codigo: string; nombre: string }[]
+  clientesCxc: { id: string; nombre: string }[]
 }
 
 export type FiltrosReporte = {
@@ -1926,6 +1942,7 @@ export type FiltrosReporte = {
   cuentaId?: string
   estado?: string
   servicio?: string
+  clienteId?: string
 }
 
 function consultaReporte(f: FiltrosReporte): string {
@@ -2562,3 +2579,146 @@ export const registrarCompra = (token: string, datos: DatosCompra) =>
 
 export const anularCompra = (token: string, id: string, datos: { motivo: string; cajaId?: string }) =>
   llamar<{ ok: boolean }>('POST', `/compras/${id}/anular`, token, datos)
+
+// ---------- Cuentas por Cobrar ----------
+
+export type RecargoCxc = { mes: number; fecha: string; base: string; pct: string; monto: string }
+
+export type CuentaCxc = {
+  id: string
+  venta_id: string
+  venta: string
+  fecha: string
+  plazo_dias: number
+  vencimiento: string
+  monto: string
+  capital_pagado: string
+  capital_pendiente: string
+  recargos: RecargoCxc[]
+  recargo_total: string
+  recargo_pagado: string
+  recargo_perdonado: string
+  recargo_pendiente: string
+  total_pendiente: string
+  vencida: boolean
+  dias_atraso: number
+}
+
+export type TotalesCxc = { capital: string; recargo: string; total: string; vencido: string; cuentas_vencidas: number }
+
+export type ResumenCreditoVenta = {
+  credito: { limite: string; plazo_dias: number; is_active: boolean } | null
+  disponible: string | null
+  totales: TotalesCxc
+  autorizacionHoy: { motivo: string; por: string } | null
+}
+
+export type ClienteCxc = ResumenCreditoVenta & {
+  cliente: { id: string; nombre: string; numero_documento: string | null; telefono: string | null; es_protegido: boolean }
+  hoy: string
+  cuentas: CuentaCxc[]
+  abonos: {
+    id: string
+    codigo: string
+    fecha: string
+    total: string
+    forma: 'efectivo' | 'transferencia'
+    referencia: string | null
+    estado: 'activo' | 'anulado'
+    motivo_anulacion: string | null
+    usuario: string
+  }[]
+}
+
+export type FilaClienteCxc = TotalesCxc & {
+  id: string
+  nombre: string
+  numero_documento: string | null
+  telefono: string | null
+  limite: string | null
+  plazo_dias: number | null
+  credito_activo: boolean
+  disponible: string | null
+}
+
+export type PrepararCxc = {
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
+  cuentas: { id: string; nombre: string }[]
+  tasas: { desde: string; porcentaje: string; created_at: string }[]
+  recargoVigente: string
+  hoy: string
+}
+
+export const resumenCreditoVenta = (token: string, clienteId: string) =>
+  llamar<ResumenCreditoVenta>('GET', `/cxc/clientes/${clienteId}/resumen`, token)
+
+export const prepararCxc = (token: string) => llamar<PrepararCxc>('GET', '/cxc/preparar', token)
+
+export const listarClientesCxc = (token: string, f: { texto: string; solo: string }) => {
+  const q = new URLSearchParams()
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.solo) q.set('solo', f.solo)
+  return llamar<{ filas: FilaClienteCxc[]; hoy: string }>('GET', `/cxc/clientes?${q.toString()}`, token)
+}
+
+export const buscarClientesCxc = (token: string, texto: string) =>
+  llamar<{ id: string; nombre: string; numero_documento: string | null; telefono: string | null }[]>(
+    'GET',
+    `/cxc/buscar-clientes?${new URLSearchParams({ texto }).toString()}`,
+    token,
+  )
+
+export const clienteCxc = (token: string, id: string) => llamar<ClienteCxc>('GET', `/cxc/clientes/${id}`, token)
+
+export const configurarCreditoCliente = (
+  token: string,
+  id: string,
+  datos: { limite: string; plazoDias: string; activo: boolean; notas?: string },
+) => llamar<{ ok: boolean }>('PUT', `/cxc/clientes/${id}/credito`, token, datos)
+
+export const autorizarCreditoHoy = (token: string, id: string, motivo: string) =>
+  llamar<{ ok: boolean; validaHasta: string }>('POST', `/cxc/clientes/${id}/autorizacion`, token, { motivo })
+
+export const nuevaTasaRecargo = (token: string, datos: { porcentaje: string; vigenteDesde: string }) =>
+  llamar<{ ok: boolean }>('POST', '/cxc/tasas', token, datos)
+
+export const perdonarRecargo = (token: string, cuentaId: string, datos: { monto?: string; motivo: string }) =>
+  llamar<{ ok: boolean; perdonado: string }>('POST', `/cxc/cuentas/${cuentaId}/perdonar`, token, datos)
+
+export const registrarAbono = (
+  token: string,
+  datos: {
+    clienteId: string
+    monto: string
+    forma: 'efectivo' | 'transferencia'
+    cajaId?: string
+    cuentaId?: string
+    referencia?: string
+    distribucion?: { cuentaId: string; monto: string }[]
+  },
+) =>
+  llamar<{
+    id: string
+    codigo: string
+    aplicado: { venta: string; recargo: string; capital: string }[]
+    debiaAntes: string
+    debeAhora: string
+  }>('POST', '/cxc/abonos', token, datos)
+
+export const anularAbono = (token: string, id: string, datos: { motivo: string; cajaId?: string }) =>
+  llamar<{ ok: boolean }>('POST', `/cxc/abonos/${id}/anular`, token, datos)
+
+export const ticketAbono = (token: string, id: string) =>
+  llamar<TicketFilas>('GET', `/cxc/abonos/${id}/ticket`, token)
+
+export async function pdfAbono(token: string, id: string, formato: FormatoRecibo): Promise<Blob> {
+  const res = await fetch(`${API_URL}/cxc/abonos/${id}/pdf?formato=${formato}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el recibo')
+  }
+  return res.blob()
+}

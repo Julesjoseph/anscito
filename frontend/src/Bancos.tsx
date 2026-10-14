@@ -74,6 +74,7 @@ const NOMBRE_TIPO: Record<string, string> = {
   san_cuota: 'Cuota de SOL CASH',
   san_mano: 'Mano de SOL CASH entregada',
   compra: 'Pago de compra',
+  abono_credito: 'Abono de crédito',
 }
 
 const CAMBIADO_POR: [string, string][] = [

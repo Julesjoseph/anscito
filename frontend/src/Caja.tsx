@@ -70,6 +70,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   san_mano: 'Mano de SOL CASH entregada',
   compra: 'Pago de compra',
   compra_reverso: 'Compra anulada (devuelto)',
+  abono_credito: 'Abono de crédito',
+  abono_anulado: 'Abono anulado (devuelto)',
 }
 
 // ---------- Dinero con enteros (solo para el conteo en pantalla) ----------
@@ -632,6 +634,8 @@ function VerSesion({
         <div className="flex justify-between"><dt className="text-gray-500">− Manos de SOL CASH entregadas</dt><dd>{dinero(t.san_manos)}</dd></div>
         {t.compras !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Pagos de compras</dt><dd>{dinero(t.compras)}</dd></div>}
         {t.compras_devueltas !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Compras anuladas (devuelto)</dt><dd>{dinero(t.compras_devueltas)}</dd></div>}
+        {t.abonos_credito !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Abonos de crédito</dt><dd>{dinero(t.abonos_credito)}</dd></div>}
+        {t.abonos_anulados !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Abonos anulados (devuelto)</dt><dd>{dinero(t.abonos_anulados)}</dd></div>}
       </dl>
       <div className="flex flex-col gap-1 rounded-lg bg-gray-50 p-3">
         <div className="flex justify-between text-base font-medium"><span>Debería haber</span><span>{dinero(s.esperado)}</span></div>
@@ -690,7 +694,7 @@ function VerSesion({
               </thead>
               <tbody>
                 {s.movimientos.map((m) => {
-                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota' || m.tipo === 'compra_reverso'
+                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota' || m.tipo === 'compra_reverso' || m.tipo === 'abono_credito'
                   return (
                     <tr key={m.id} className="border-t border-gray-100 align-top">
                       <td className="py-1.5 pr-2 whitespace-nowrap text-gray-500">{new Date(m.fecha).toLocaleTimeString('es-DO', { hour: 'numeric', minute: '2-digit' })}</td>

@@ -45,6 +45,7 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 020 | Permiso `reportes.clientes` |
 | 021 | Compras: `tipos_gasto` (606, códigos 01-11), `compras` (CP-000001, NCF B/E, bienes, servicios, ITBIS, retenciones, contado/crédito, vencimiento; solo se anula), `compra_lineas` (entran al inventario), `compra_pagos`; caja `compra`/`compra_reverso`, cuenta `compra`; permisos `compras.*` |
 | 022 | `caja_movimientos.tipo` de 12 a 20 letras (para `compra_reverso`) |
+| 023 | Cuentas por Cobrar: forma de pago `credito`, `clientes_credito` (límite, plazo), `cxc_tasas_recargo` (5% con vigencia), `cxc_autorizaciones` (previa del día / en la venta), `cuentas_cobrar` (una por venta a crédito), `cxc_abonos` (AC-000001), `cxc_aplicaciones` (recargo y capital), `cxc_perdones`; caja `abono_credito`/`abono_anulado`, cuenta `abono_credito`; 7 permisos `cxc.*` |
 
 ## Módulos terminados
 
@@ -270,9 +271,18 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   (vence con los días de crédito del proveedor) para Cuentas por Pagar.
   Anular devuelve mercancía y dinero (no si ya se vendió la mercancía).
   Proveedor y producto nuevos se pueden crear desde la misma factura.
-- **Plan en curso** (pedido del dueño): 1) Compras ✅, 2) Cuentas por Cobrar
-  (crédito con límite, abonos con recibo, bloqueo por vencidas, recargo 5%
-  por mes completo sin interés sobre interés, estado de cuenta y antigüedad),
+- **Cuentas por cobrar** (`/cxc`, pantalla `CuentasCobrar.tsx`; en Facturación
+  la casilla "Vender a crédito"): crédito solo a clientes con límite y plazo
+  (el límite nunca se pasa), inicial opcional, plazo del cliente o el de la
+  venta. Con facturas vencidas solo el administrador autoriza (en la venta
+  con motivo, o "Autorizar una venta hoy"). Recargo: % vigente (5%,
+  modificable con fecha) por cada mes completo de atraso sobre el capital
+  pendiente, sin interés sobre interés; se CALCULA desde el historial
+  (`backend/src/cxc/recargos.ts`, con pruebas) y se puede perdonar.
+  Abonos con recibo AC: a lo más viejo, primero el recargo, o repartidos por
+  el cajero. Venta a crédito con abonos no se anula. Reportes "al día":
+  antigüedad de saldos y estado de cuenta del cliente.
+- **Plan en curso** (pedido del dueño): 1) Compras ✅, 2) Cuentas por Cobrar ✅,
   3) Cuentas por Pagar (abonos desde caja/bancos, alertas, gastos fijos),
   4) Contabilidad (catálogo editable, asientos automáticos y manuales, libros,
   estados, ITBIS, 606/607/608, conciliación, cierres) y líneas de negocio

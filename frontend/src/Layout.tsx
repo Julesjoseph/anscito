@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   BookOpen,
   Calculator,
+  CreditCard,
   Briefcase,
   Building2,
   ClipboardList,
@@ -35,6 +36,7 @@ import Caja from './Caja'
 import Calculadora from './Calculadora'
 import Categorias from './Categorias'
 import Compras from './Compras'
+import CuentasCobrar from './CuentasCobrar'
 import Inventario from './Inventario'
 import Roles from './Roles'
 import Sanes from './Sanes'
@@ -81,6 +83,13 @@ const MODULOS: Modulo[] = [
     Icono: ShoppingCart,
     listo: true,
     permiso: 'ventas.ver',
+  },
+  {
+    id: 'cxc',
+    nombre: 'Cuentas por cobrar',
+    Icono: CreditCard,
+    listo: true,
+    permiso: 'cxc.ver',
   },
   {
     id: 'sanes',
@@ -146,6 +155,7 @@ const MODULOS: Modulo[] = [
       'reportes.caja_bancos',
       'reportes.inventario',
       'reportes.clientes',
+      'cxc.ver',
     ],
   },
   {
@@ -334,6 +344,12 @@ export default function Layout({
           />
         ) : pagina === 'sanes' ? (
           <Sanes
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'cxc' ? (
+          <CuentasCobrar
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

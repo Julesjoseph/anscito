@@ -7,6 +7,7 @@ import {
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE, SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
+import { registrarCredito } from '../cxc/estado';
 import { DatabaseService } from '../database/database.service';
 import {
   anularEcfDeVenta,
@@ -61,6 +62,12 @@ export type DatosVenta = {
   comprobanteFiscal?: unknown;
   // e-CF: '31' (Crédito Fiscal), '32' (Consumo) o vacío (según el cliente).
   tipoEcf?: unknown;
+  // Venta a crédito: el inicial que paga ahora (puede ser 0) y el plazo.
+  credito?: {
+    inicial?: unknown;
+    plazoDias?: unknown;
+    autorizarMotivo?: unknown;
+  };
   notas?: unknown;
 };
 
@@ -141,15 +148,18 @@ export class VentasService {
   // ---------- Datos para la pantalla de venta ----------
 
   async preparar(actorId: string) {
-    const [formas, maximo, descontar, factura] = await Promise.all([
-      this.db.query(
-        `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia, usa_caja, usa_cuenta
-         FROM formas_pago WHERE is_active = true ORDER BY orden, nombre`,
-      ),
-      this.config(this.db, 'ventas.descuento_maximo_pct'),
-      this.tienePermiso(actorId, 'ventas.descontar'),
-      facturacionActiva(this.db),
-    ]);
+    const [formas, maximo, descontar, factura, vendeCredito, autoriza] =
+      await Promise.all([
+        this.db.query(
+          `SELECT id, codigo, nombre, calcula_devuelta, requiere_referencia, usa_caja, usa_cuenta
+         FROM formas_pago WHERE is_active = true AND codigo <> 'credito' ORDER BY orden, nombre`,
+        ),
+        this.config(this.db, 'ventas.descuento_maximo_pct'),
+        this.tienePermiso(actorId, 'ventas.descontar'),
+        facturacionActiva(this.db),
+        this.tienePermiso(actorId, 'cxc.vender'),
+        this.tienePermiso(actorId, 'cxc.autorizar'),
+      ]);
     const cf = await this.db.query<{ id: string; nombre: string }>(
       `SELECT id, nombre FROM terceros
        WHERE rol = 'cliente' AND es_protegido AND is_active LIMIT 1`,
@@ -176,6 +186,7 @@ export class VentasService {
       puedeDescontar: descontar,
       consumidorFinal: cf.rows[0] ?? null,
       facturacion: { activa: factura.activa, umbral: factura.umbral },
+      credito: { puedeVender: vendeCredito, puedeAutorizar: autoriza },
     };
   }
 
@@ -450,7 +461,18 @@ export class VentasService {
     if (!UUID.test(clienteId))
       throw new BadRequestException('Seleccione el cliente');
     const formaId = texto(datos.pago?.formaPagoId).toLowerCase();
-    if (!UUID.test(formaId))
+    // A crédito: se cobra ahora solo el inicial (puede ser 0).
+    const aCredito = !!datos.credito;
+    const inicial = aCredito
+      ? texto(datos.credito?.inicial) === ''
+        ? '0.00'
+        : normalizarMonto(datos.credito?.inicial)
+      : null;
+    if (aCredito && inicial === null)
+      throw new BadRequestException(
+        'Inicial inválido: número no negativo con hasta 2 decimales',
+      );
+    if ((!aCredito || inicial !== '0.00') && !UUID.test(formaId))
       throw new BadRequestException('Seleccione la forma de pago');
     const comprobante = opcional(
       datos.comprobanteFiscal,
@@ -469,6 +491,20 @@ export class VentasService {
           'El cliente no existe o está desactivado',
         );
 
+      const { lineas, totales } = await this.calcular(c, actorId, datos, true);
+      if (totales.total === '0.00')
+        throw new BadRequestException('El total de la venta no puede ser 0');
+
+      // Lo que se cobra ahora y lo que queda a crédito.
+      const cobrado = aCredito ? (inicial as string) : totales.total;
+      const montoCredito = aCredito ? restar(totales.total, cobrado) : '0.00';
+      if (aCredito && !mayorOIgual(restar(montoCredito, '0.01'), '0.00'))
+        throw new BadRequestException(
+          'El inicial debe ser menor que el total: si paga todo, no es a crédito',
+        );
+      const cobraAhora = cobrado !== '0.00';
+
+      // Forma de pago de lo que se cobra ahora ("Crédito" no se elige aquí).
       const fp = await c.query<{
         nombre: string;
         calcula_devuelta: boolean;
@@ -477,30 +513,34 @@ export class VentasService {
         usa_cuenta: boolean;
       }>(
         `SELECT nombre, calcula_devuelta, requiere_referencia, usa_caja, usa_cuenta
-         FROM formas_pago WHERE id = $1 AND is_active`,
-        [formaId],
+         FROM formas_pago WHERE id = $1 AND is_active AND codigo <> 'credito'`,
+        [cobraAhora ? formaId : null],
       );
-      if (fp.rowCount === 0)
+      if (cobraAhora && fp.rowCount === 0)
         throw new BadRequestException(
           'La forma de pago no existe o está inactiva',
         );
-      const forma = fp.rows[0];
-
-      const { lineas, totales } = await this.calcular(c, actorId, datos, true);
-      if (totales.total === '0.00')
-        throw new BadRequestException('El total de la venta no puede ser 0');
+      const forma = cobraAhora
+        ? fp.rows[0]
+        : {
+            nombre: 'Crédito',
+            calcula_devuelta: false,
+            requiere_referencia: false,
+            usa_caja: false,
+            usa_cuenta: false,
+          };
 
       // Pago.
       let recibido: string | null = null;
       let devuelta: string | null = null;
       if (forma.calcula_devuelta) {
         recibido = normalizarMonto(datos.pago?.recibido);
-        if (recibido === null || !mayorOIgual(recibido, totales.total)) {
+        if (recibido === null || !mayorOIgual(recibido, cobrado)) {
           throw new BadRequestException(
-            `Escriba cuánto entregó el cliente (al menos RD$${totales.total})`,
+            `Escriba cuánto entregó el cliente (al menos RD$${cobrado})`,
           );
         }
-        devuelta = restar(recibido, totales.total);
+        devuelta = restar(recibido, cobrado);
       }
       const referencia = opcional(datos.pago?.referencia, 60, 'Referencia');
       if (forma.requiere_referencia && !referencia) {
@@ -649,19 +689,39 @@ export class VentasService {
         }
       }
 
-      await c.query(
-        `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto, recibido, devuelta, referencia, cuenta_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
+      if (cobraAhora)
+        await c.query(
+          `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto, recibido, devuelta, referencia, cuenta_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            ventaId,
+            formaId,
+            cobrado,
+            recibido,
+            devuelta,
+            referencia,
+            cuentaVenta?.id ?? null,
+          ],
+        );
+      // La parte a crédito: pago "Crédito" y su cuenta por cobrar.
+      let credito: { vencimiento: string; plazo: number } | null = null;
+      if (aCredito) {
+        await c.query(
+          `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto)
+           VALUES ($1, (SELECT id FROM formas_pago WHERE codigo = 'credito'), $2)`,
+          [ventaId, montoCredito],
+        );
+        credito = await registrarCredito(c, {
           ventaId,
-          formaId,
-          totales.total,
-          recibido,
-          devuelta,
-          referencia,
-          cuentaVenta?.id ?? null,
-        ],
-      );
+          ventaTexto: numeroVenta(numero),
+          clienteId,
+          monto: montoCredito,
+          plazoDias: datos.credito?.plazoDias,
+          autorizarMotivo: datos.credito?.autorizarMotivo,
+          actorId,
+          ip,
+        });
+      }
       if (cuentaVenta) {
         const zona = await this.config(c, 'empresa.zona_horaria');
         await c.query(
@@ -670,7 +730,7 @@ export class VentasService {
               venta_id, referencia, usuario_id)
            VALUES ($1, 'venta', 1, $2, 1, $2, (now() AT TIME ZONE $3)::date, true,
                    $4, $5, $6)`,
-          [cuentaVenta.id, totales.total, zona, ventaId, referencia, actorId],
+          [cuentaVenta.id, cobrado, zona, ventaId, referencia, actorId],
         );
       }
       if (sesionCaja) {
@@ -678,7 +738,7 @@ export class VentasService {
         await c.query(
           `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, usuario_id)
            VALUES ($1, 'venta', $2, $3, $4)`,
-          [sesionCaja.id, totales.total, ventaId, actorId],
+          [sesionCaja.id, cobrado, ventaId, actorId],
         );
       }
 
@@ -707,6 +767,13 @@ export class VentasService {
           cuenta: cuentaVenta?.nombre ?? null,
           comprobante_fiscal: comprobante,
           ecf: ecf ? `${ecf.tipo} por emitir` : null,
+          credito: credito
+            ? {
+                monto: montoCredito,
+                inicial: cobrado,
+                vence: credito.vencimiento,
+              }
+            : null,
         },
         motivo:
           totales.descuento === '0.00'
@@ -721,6 +788,9 @@ export class VentasService {
         total: totales.total,
         devuelta,
         ecf: ecf?.tipo ?? null,
+        credito: credito
+          ? { monto: montoCredito, vencimiento: credito.vencimiento }
+          : null,
       };
     });
   }
@@ -825,26 +895,32 @@ export class VentasService {
       [id],
     );
     if (v.rowCount === 0) throw new NotFoundException('Venta no encontrada');
-    const [lineas, pagos, verCostos, verDocumento, ecf] = await Promise.all([
-      this.db.query(
-        'SELECT * FROM venta_lineas WHERE venta_id = $1 ORDER BY id',
-        [id],
-      ),
-      this.db.query(
-        `SELECT vp.monto, vp.recibido, vp.devuelta, vp.referencia, fp.nombre AS forma_pago
+    const [lineas, pagos, verCostos, verDocumento, ecf, credito] =
+      await Promise.all([
+        this.db.query(
+          'SELECT * FROM venta_lineas WHERE venta_id = $1 ORDER BY id',
+          [id],
+        ),
+        this.db.query(
+          `SELECT vp.monto, vp.recibido, vp.devuelta, vp.referencia, fp.nombre AS forma_pago
          FROM venta_pagos vp JOIN formas_pago fp ON fp.id = vp.forma_pago_id
          WHERE vp.venta_id = $1 ORDER BY vp.id`,
-        [id],
-      ),
-      this.tienePermiso(actorId, 'inventario.ver_costos'),
-      this.tienePermiso(actorId, 'terceros.ver_documento'),
-      this.db.query(
-        `SELECT tipo, estado, encf, to_char(fecha_emision, 'YYYY-MM-DD') AS fecha_emision,
+          [id],
+        ),
+        this.tienePermiso(actorId, 'inventario.ver_costos'),
+        this.tienePermiso(actorId, 'terceros.ver_documento'),
+        this.db.query(
+          `SELECT tipo, estado, encf, to_char(fecha_emision, 'YYYY-MM-DD') AS fecha_emision,
                 codigo_seguridad
          FROM ecf WHERE venta_id = $1 AND estado <> 'cancelado' ORDER BY created_at`,
-        [id],
-      ),
-    ]);
+          [id],
+        ),
+        this.db.query(
+          `SELECT monto, plazo_dias, to_char(vencimiento, 'YYYY-MM-DD') AS vencimiento, estado
+         FROM cuentas_cobrar WHERE venta_id = $1`,
+          [id],
+        ),
+      ]);
     const venta = v.rows[0] as Record<string, unknown>;
     return {
       ...venta,
@@ -859,6 +935,7 @@ export class VentasService {
       }),
       pagos: pagos.rows,
       ecf: ecf.rows,
+      credito: credito.rows[0] ?? null,
     };
   }
 
@@ -1131,6 +1208,24 @@ export class VentasService {
             id,
             actorId,
           ],
+        );
+      }
+
+      // Venta a crédito: con abonos no se anula; sin abonos, su cuenta también.
+      const cxc = await c.query<{ id: string; abonos: number }>(
+        `SELECT k.id, (SELECT count(*)::int FROM cxc_aplicaciones a JOIN cxc_abonos b ON b.id = a.abono_id
+                       WHERE a.cuenta_id = k.id AND b.estado = 'activo') AS abonos
+         FROM cuentas_cobrar k WHERE k.venta_id = $1 AND k.estado = 'activa' FOR UPDATE OF k`,
+        [id],
+      );
+      if ((cxc.rowCount ?? 0) > 0) {
+        if (cxc.rows[0].abonos > 0)
+          throw new BadRequestException(
+            'Esta venta a crédito ya tiene abonos: anule primero los abonos en Cuentas por Cobrar',
+          );
+        await c.query(
+          `UPDATE cuentas_cobrar SET estado = 'anulada', anulada_en = now() WHERE id = $1`,
+          [cxc.rows[0].id],
         );
       }
 

@@ -9,6 +9,7 @@ import { ReportesModule } from './reportes/reportes.module';
 import { SanesModule } from './sanes/sanes.module';
 import { FacturacionModule } from './facturacion/facturacion.module';
 import { ComprasModule } from './compras/compras.module';
+import { CxcModule } from './cxc/cxc.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { DatabaseModule } from './database/database.module';
 import { EmpresaModule } from './empresa/empresa.module';
@@ -39,6 +40,7 @@ import { VentasModule } from './ventas/ventas.module';
     SanesModule,
     FacturacionModule,
     ComprasModule,
+    CxcModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

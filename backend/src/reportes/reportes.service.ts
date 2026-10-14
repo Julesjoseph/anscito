@@ -7,6 +7,8 @@ import {
 import { SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { DatabaseService } from '../database/database.service';
 import { SQL_SIGNO } from '../inventario/sql';
+import { estadoCliente, numeroAbono, tasasRecargo } from '../cxc/estado';
+import { centavos } from '../sanes/calendario';
 import { enmascarar } from '../terceros/documentos';
 import { aExcel, aPdf } from './exportar';
 import { calcularTotales } from './tipos';
@@ -20,7 +22,7 @@ import type { Columna, Fila, Reporte } from './tipos';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type Area =
-  'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes';
+  'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes' | 'cxc';
 
 export const REPORTES: Record<string, { area: Area; titulo: string }> = {
   'ventas-dia': { area: 'ventas', titulo: 'Ventas por día' },
@@ -44,7 +46,17 @@ export const REPORTES: Record<string, { area: Area; titulo: string }> = {
   },
   'clientes-servicio': { area: 'clientes', titulo: 'Clientes por servicio' },
   'clientes-general': { area: 'clientes', titulo: 'Clientes y sus servicios' },
+  'cxc-antiguedad': {
+    area: 'cxc',
+    titulo: 'Antigüedad de saldos (cuentas por cobrar)',
+  },
+  'cxc-estado-cuenta': { area: 'cxc', titulo: 'Estado de cuenta del cliente' },
 };
+
+// Permiso de cada área (Cuentas por Cobrar usa el suyo).
+function permisoArea(a: Area): string {
+  return a === 'cxc' ? 'cxc.ver' : `reportes.${a}`;
+}
 
 // Servicios del reporte "Clientes por servicio".
 export const SERVICIOS_CLIENTES: Record<string, string> = {
@@ -61,6 +73,7 @@ export type Filtros = {
   cuentaId?: string;
   estado?: string;
   servicio?: string;
+  clienteId?: string;
 };
 
 function texto(v: unknown): string {
@@ -93,6 +106,7 @@ const NOMBRE_TIPO_CUENTA: Record<string, string> = {
   san_cuota: 'Cuota de SOL CASH',
   san_mano: 'Mano de SOL CASH',
   compra: 'Pago de compra',
+  abono_credito: 'Abono de crédito',
 };
 
 // Ganancia de una línea de venta "vl" (misma regla que el Panel).
@@ -188,9 +202,16 @@ export class ReportesService {
   async opciones(usuarioId: string) {
     const p = await this.permisos(usuarioId);
     const areas = (
-      ['ventas', 'envios', 'caja_bancos', 'inventario', 'clientes'] as Area[]
-    ).filter((a) => p.has(`reportes.${a}`));
-    const [agentes, cuentas] = await Promise.all([
+      [
+        'ventas',
+        'envios',
+        'caja_bancos',
+        'inventario',
+        'clientes',
+        'cxc',
+      ] as Area[]
+    ).filter((a) => p.has(permisoArea(a)));
+    const [agentes, cuentas, clientesCxc] = await Promise.all([
       p.has('reportes.envios')
         ? this.db.query(
             `SELECT id, codigo, nombre, is_active FROM remesa_agentes ORDER BY is_active DESC, codigo`,
@@ -203,6 +224,13 @@ export class ReportesService {
              ORDER BY ct.is_active DESC, ct.tipo, lower(ct.nombre)`,
           )
         : null,
+      p.has('cxc.ver')
+        ? this.db.query(
+            `SELECT t.id, t.nombre FROM terceros t
+             WHERE EXISTS (SELECT 1 FROM cuentas_cobrar k WHERE k.cliente_id = t.id)
+             ORDER BY lower(t.nombre)`,
+          )
+        : null,
     ]);
     return {
       reportes: Object.entries(REPORTES)
@@ -210,6 +238,7 @@ export class ReportesService {
         .map(([codigo, r]) => ({ codigo, ...r })),
       agentes: agentes?.rows ?? [],
       cuentas: cuentas?.rows ?? [],
+      clientesCxc: clientesCxc?.rows ?? [],
       servicios: Object.entries(SERVICIOS_CLIENTES).map(([codigo, nombre]) => ({
         codigo,
         nombre,
@@ -225,7 +254,7 @@ export class ReportesService {
     const def = REPORTES[codigo];
     if (!def) throw new NotFoundException('Reporte no encontrado');
     const cx = await this.contexto(usuarioId, f);
-    if (!cx.permisos.has(`reportes.${def.area}`))
+    if (!cx.permisos.has(permisoArea(def.area)))
       throw new ForbiddenException('No tiene permiso para este reporte');
     switch (codigo) {
       case 'ventas-dia':
@@ -250,6 +279,10 @@ export class ReportesService {
         return this.clientesServicio(cx, texto(f.servicio));
       case 'clientes-general':
         return this.clientesGeneral(cx);
+      case 'cxc-antiguedad':
+        return this.cxcAntiguedad(cx);
+      case 'cxc-estado-cuenta':
+        return this.cxcEstadoCuenta(cx, texto(f.clienteId));
       default:
         return this.inventario(cx);
     }
@@ -742,9 +775,10 @@ export class ReportesService {
               CASE WHEN s.estado = 'abierta' THEN 'Abierta' ELSE 'Cerrada' END AS estado,
               s.fondo_inicial AS fondo, t.ventas, t.ingresos, t.desde_cuentas, t.san_cuotas, t.gastos, t.retiros,
               t.devoluciones, t.depositos, t.san_manos, (t.compras - t.compras_devueltas)::numeric(16,2) AS compras,
+              (t.abonos_credito - t.abonos_anulados)::numeric(16,2) AS abonos_credito,
               COALESCE(s.esperado, (s.fondo_inicial + t.ventas + t.ingresos + t.desde_cuentas
                 + t.san_cuotas - t.gastos - t.retiros - t.devoluciones - t.depositos
-                - t.san_manos - t.compras + t.compras_devueltas))::numeric(16,2) AS esperado,
+                - t.san_manos - t.compras + t.compras_devueltas + t.abonos_credito - t.abonos_anulados))::numeric(16,2) AS esperado,
               s.contado, s.diferencia, s.motivo_diferencia AS motivo
        FROM caja_sesiones s
        JOIN cajas c ON c.id = s.caja_id
@@ -760,7 +794,9 @@ export class ReportesService {
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'san_cuota'), 0)::numeric(16,2) AS san_cuotas,
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'san_mano'), 0)::numeric(16,2) AS san_manos,
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'compra'), 0)::numeric(16,2) AS compras,
-                COALESCE(sum(monto) FILTER (WHERE tipo = 'compra_reverso'), 0)::numeric(16,2) AS compras_devueltas
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'compra_reverso'), 0)::numeric(16,2) AS compras_devueltas,
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'abono_credito'), 0)::numeric(16,2) AS abonos_credito,
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'abono_anulado'), 0)::numeric(16,2) AS abonos_anulados
          FROM caja_movimientos m WHERE m.sesion_id = s.id
        ) t
        WHERE (s.abierta_en AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
@@ -813,6 +849,12 @@ export class ReportesService {
           total: true,
         },
         { clave: 'compras', titulo: 'Compras', tipo: 'dinero', total: true },
+        {
+          clave: 'abonos_credito',
+          titulo: 'Abonos de crédito',
+          tipo: 'dinero',
+          total: true,
+        },
         {
           clave: 'esperado',
           titulo: 'Debía haber',
@@ -1285,5 +1327,188 @@ export class ReportesService {
         ],
       },
     );
+  }
+
+  // ---------- Cuentas por cobrar ----------
+
+  // Lo que debe cada cliente al día "hasta", según los días de atraso.
+  private async cxcAntiguedad(cx: Contexto) {
+    const clientes = await this.db.query<{ id: string; nombre: string }>(
+      `SELECT DISTINCT t.id, t.nombre FROM terceros t JOIN cuentas_cobrar k ON k.cliente_id = t.id
+       WHERE k.estado = 'activa' AND k.fecha <= $1::date ORDER BY t.nombre`,
+      [cx.hasta],
+    );
+    const tasas = await tasasRecargo(this.db);
+    const filas: Fila[] = [];
+    for (const c of clientes.rows) {
+      const e = await estadoCliente(this.db, c.id, cx.hasta, tasas);
+      const b = { por_vencer: 0n, d30: 0n, d60: 0n, d90: 0n, mas90: 0n };
+      for (const k of e.cuentas) {
+        const m = centavos(k.total_pendiente);
+        if (m === 0n) continue;
+        if (!k.vencida) b.por_vencer += m;
+        else if (k.dias_atraso <= 30) b.d30 += m;
+        else if (k.dias_atraso <= 60) b.d60 += m;
+        else if (k.dias_atraso <= 90) b.d90 += m;
+        else b.mas90 += m;
+      }
+      const total = b.por_vencer + b.d30 + b.d60 + b.d90 + b.mas90;
+      if (total === 0n) continue;
+      const t2 = (x: bigint) =>
+        `${x / 100n}.${String(x % 100n).padStart(2, '0')}`;
+      filas.push({
+        cliente: c.nombre,
+        por_vencer: t2(b.por_vencer),
+        d30: t2(b.d30),
+        d60: t2(b.d60),
+        d90: t2(b.d90),
+        mas90: t2(b.mas90),
+        total: t2(total),
+      });
+    }
+    const columnas: Columna[] = [
+      { clave: 'cliente', titulo: 'Cliente', tipo: 'texto' },
+      {
+        clave: 'por_vencer',
+        titulo: 'Por vencer',
+        tipo: 'dinero',
+        total: true,
+      },
+      { clave: 'd30', titulo: '1 a 30 días', tipo: 'dinero', total: true },
+      { clave: 'd60', titulo: '31 a 60 días', tipo: 'dinero', total: true },
+      { clave: 'd90', titulo: '61 a 90 días', tipo: 'dinero', total: true },
+      { clave: 'mas90', titulo: 'Más de 90 días', tipo: 'dinero', total: true },
+      { clave: 'total', titulo: 'Total', tipo: 'dinero', total: true },
+    ];
+    return this.armar('cxc-antiguedad', cx, columnas, filas, {
+      periodo: `Al ${dma(cx.hasta)}`,
+      notas: [
+        'Días de atraso contados desde el vencimiento de cada factura. Incluye el recargo pendiente.',
+      ],
+    });
+  }
+
+  // Movimientos de un cliente con su saldo: ventas a crédito, recargos, abonos y perdones.
+  private async cxcEstadoCuenta(cx: Contexto, clienteId: string) {
+    if (!UUID.test(clienteId))
+      throw new BadRequestException('Seleccione el cliente');
+    const cli = await this.db.query<{ nombre: string }>(
+      `SELECT nombre FROM terceros WHERE id = $1 AND rol = 'cliente'`,
+      [clienteId],
+    );
+    if (cli.rowCount === 0)
+      throw new NotFoundException('Cliente no encontrado');
+    const e = await estadoCliente(this.db, clienteId, cx.hasta);
+    const [abonos, perdones] = await Promise.all([
+      this.db.query<{
+        numero: string;
+        fecha: string;
+        total: string;
+        forma: string;
+        detalle: string;
+      }>(
+        `SELECT b.numero, to_char(b.fecha, 'YYYY-MM-DD') AS fecha, b.total, b.forma,
+                string_agg('V-' || lpad(v.numero::text, 6, '0'), ', ' ORDER BY v.numero) AS detalle
+         FROM cxc_abonos b JOIN cxc_aplicaciones a ON a.abono_id = b.id
+         JOIN cuentas_cobrar k ON k.id = a.cuenta_id JOIN ventas v ON v.id = k.venta_id
+         WHERE b.cliente_id = $1 AND b.estado = 'activo' AND b.fecha <= $2::date
+         GROUP BY b.id ORDER BY b.fecha, b.numero`,
+        [clienteId, cx.hasta],
+      ),
+      this.db.query<{
+        fecha: string;
+        monto: string;
+        venta: string;
+        motivo: string;
+      }>(
+        `SELECT to_char((p.created_at AT TIME ZONE $3)::date, 'YYYY-MM-DD') AS fecha, p.monto, p.motivo,
+                'V-' || lpad(v.numero::text, 6, '0') AS venta
+         FROM cxc_perdones p JOIN cuentas_cobrar k ON k.id = p.cuenta_id JOIN ventas v ON v.id = k.venta_id
+         WHERE k.cliente_id = $1 AND k.estado = 'activa' AND (p.created_at AT TIME ZONE $3)::date <= $2::date`,
+        [clienteId, cx.hasta, cx.zona],
+      ),
+    ]);
+    type Mov = {
+      fecha: string;
+      orden: number;
+      documento: string;
+      detalle: string;
+      cargo: bigint;
+      abono: bigint;
+    };
+    const c2 = (v: string) => centavos(v);
+    const movs: Mov[] = [];
+    for (const k of e.cuentas) {
+      movs.push({
+        fecha: k.fecha,
+        orden: 0,
+        documento: k.venta,
+        detalle: `Venta a crédito · vence ${dma(k.vencimiento)}`,
+        cargo: c2(k.monto),
+        abono: 0n,
+      });
+      for (const r of k.recargos)
+        movs.push({
+          fecha: r.fecha,
+          orden: 1,
+          documento: k.venta,
+          detalle: `Recargo ${r.pct.replace(/\.?0+$/, '')}% sobre ${r.base}`,
+          cargo: c2(r.monto),
+          abono: 0n,
+        });
+    }
+    for (const b of abonos.rows)
+      movs.push({
+        fecha: b.fecha,
+        orden: 2,
+        documento: numeroAbono(b.numero),
+        detalle: `Abono (${b.forma}) a ${b.detalle}`,
+        cargo: 0n,
+        abono: c2(b.total),
+      });
+    for (const p of perdones.rows)
+      movs.push({
+        fecha: p.fecha,
+        orden: 3,
+        documento: p.venta,
+        detalle: `Recargo perdonado: ${p.motivo}`,
+        cargo: 0n,
+        abono: c2(p.monto),
+      });
+    movs.sort((a, b) =>
+      a.fecha === b.fecha ? a.orden - b.orden : a.fecha < b.fecha ? -1 : 1,
+    );
+    const t2 = (x: bigint) =>
+      `${x < 0n ? '-' : ''}${(x < 0n ? -x : x) / 100n}.${String((x < 0n ? -x : x) % 100n).padStart(2, '0')}`;
+    let saldo = 0n;
+    const filas: Fila[] = movs.map((m) => {
+      saldo += m.cargo - m.abono;
+      return {
+        fecha: m.fecha,
+        documento: m.documento,
+        detalle: m.detalle,
+        cargo: m.cargo ? t2(m.cargo) : null,
+        abono: m.abono ? t2(m.abono) : null,
+        saldo: t2(saldo),
+      };
+    });
+    const columnas: Columna[] = [
+      { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
+      { clave: 'documento', titulo: 'Documento', tipo: 'texto' },
+      { clave: 'detalle', titulo: 'Detalle', tipo: 'texto' },
+      { clave: 'cargo', titulo: 'Cargo', tipo: 'dinero', total: true },
+      { clave: 'abono', titulo: 'Abono', tipo: 'dinero', total: true },
+      { clave: 'saldo', titulo: 'Saldo', tipo: 'dinero' },
+    ];
+    return this.armar('cxc-estado-cuenta', cx, columnas, filas, {
+      periodo: `Al ${dma(cx.hasta)}`,
+      detalle: cli.rows[0].nombre,
+      notas: [
+        `Debe: ${e.totales.total} (capital ${e.totales.capital} + recargo ${e.totales.recargo}). Vencido: ${e.totales.vencido}.`,
+        e.credito
+          ? `Límite de crédito ${e.credito.limite} · disponible ${e.disponible} · plazo normal ${e.credito.plazo_dias} días.`
+          : 'Sin crédito asignado.',
+      ],
+    });
   }
 }

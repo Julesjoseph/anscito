@@ -35,6 +35,8 @@ export type DatosCuadre = {
       san_manos: string;
       compras: string;
       compras_devueltas: string;
+      abonos_credito: string;
+      abonos_anulados: string;
       cantidad_ventas: number;
     };
     movimientos: {
@@ -74,6 +76,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   san_mano: 'Mano de SOL CASH',
   compra: 'Pago de compra',
   compra_reverso: 'Compra anulada (devuelto)',
+  abono_credito: 'Abono de crédito',
+  abono_anulado: 'Abono anulado (devuelto)',
 };
 
 function fecha(iso: string, zona: string): string {
@@ -173,6 +177,10 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
     fila('- Pagos de compras', menos(s.totales.compras));
   if (s.totales.compras_devueltas !== '0.00')
     fila('+ Compras anuladas (devuelto)', dinero(s.totales.compras_devueltas));
+  if (s.totales.abonos_credito !== '0.00')
+    fila('+ Abonos de crédito', dinero(s.totales.abonos_credito));
+  if (s.totales.abonos_anulados !== '0.00')
+    fila('- Abonos anulados (devuelto)', menos(s.totales.abonos_anulados));
   doc.moveDown(0.2);
   fila('Debería haber', dinero(s.esperado), true, m.letra + 1);
 
@@ -225,7 +233,8 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
         x.tipo === 'ingreso' ||
         x.tipo === 'desde_cuenta' ||
         x.tipo === 'san_cuota' ||
-        x.tipo === 'compra_reverso'
+        x.tipo === 'compra_reverso' ||
+        x.tipo === 'abono_credito'
           ? ''
           : '-';
       fila(
@@ -322,6 +331,10 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
     el.push(fila('- Pagos de compras', menos(t.compras)));
   if (t.compras_devueltas !== '0.00')
     el.push(fila('+ Compras anuladas (devuelto)', dinero(t.compras_devueltas)));
+  if (t.abonos_credito !== '0.00')
+    el.push(fila('+ Abonos de crédito', dinero(t.abonos_credito)));
+  if (t.abonos_anulados !== '0.00')
+    el.push(fila('- Abonos anulados (devuelto)', menos(t.abonos_anulados)));
   el.push(fila('Debería haber', dinero(s.esperado), true));
   if (s.contado !== null && s.diferencia !== null) {
     const dif = s.diferencia;
@@ -368,7 +381,8 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
         x.tipo === 'ingreso' ||
         x.tipo === 'desde_cuenta' ||
         x.tipo === 'san_cuota' ||
-        x.tipo === 'compra_reverso'
+        x.tipo === 'compra_reverso' ||
+        x.tipo === 'abono_credito'
           ? ''
           : '-';
       el.push(
