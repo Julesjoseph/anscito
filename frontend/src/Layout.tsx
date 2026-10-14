@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   LogOut,
   Package,
+  PackagePlus,
   ShieldCheck,
   ShoppingCart,
   Smartphone,
@@ -33,6 +34,7 @@ import Bancos from './Bancos'
 import Caja from './Caja'
 import Calculadora from './Calculadora'
 import Categorias from './Categorias'
+import Compras from './Compras'
 import Inventario from './Inventario'
 import Roles from './Roles'
 import Sanes from './Sanes'
@@ -100,6 +102,13 @@ const MODULOS: Modulo[] = [
     Icono: Package,
     listo: true,
     permiso: 'inventario.ver',
+  },
+  {
+    id: 'compras',
+    nombre: 'Reg. Facturas de Compras y Gastos',
+    Icono: PackagePlus,
+    listo: true,
+    permiso: 'compras.ver',
   },
   {
     id: 'caja',
@@ -325,6 +334,12 @@ export default function Layout({
           />
         ) : pagina === 'sanes' ? (
           <Sanes
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'compras' ? (
+          <Compras
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

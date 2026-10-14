@@ -654,14 +654,14 @@ export class BancosService {
                 EXISTS (SELECT 1 FROM cuenta_movimientos r WHERE r.reverso_de = x.id) AS reversado,
                 (x.remesa_id IS NOT NULL OR x.remesa_entrega_id IS NOT NULL
                   OR x.remesa_pago_id IS NOT NULL OR x.san_recibo_id IS NOT NULL
-                  OR x.san_entrega_id IS NOT NULL) AS de_envios
+                  OR x.san_entrega_id IS NOT NULL OR x.compra_pago_id IS NOT NULL) AS de_envios
          FROM ${SQL_MOVS_CON_ESTADO} x WHERE x.id = $1`,
         [movimientoId],
       );
       const m = r.rows[0];
       if (m.de_envios)
         throw new BadRequestException(
-          'Este movimiento viene de otro módulo (SCITO TRANSFER o SOL CASH) y no se reversa desde Bancos',
+          'Este movimiento viene de otro módulo (SCITO TRANSFER, SOL CASH o Compras) y no se reversa desde Bancos',
         );
       if (m.tipo === 'reverso')
         throw new BadRequestException('Un reverso no se puede reversar');
@@ -815,7 +815,7 @@ export class BancosService {
       CASE WHEN rm.numero IS NOT NULL THEN 'E-' || lpad(rm.numero::text, 6, '0') END AS envio,
       (x.remesa_id IS NOT NULL OR x.remesa_entrega_id IS NOT NULL
         OR x.remesa_pago_id IS NOT NULL OR x.san_recibo_id IS NOT NULL
-        OR x.san_entrega_id IS NOT NULL) AS de_envios
+        OR x.san_entrega_id IS NOT NULL OR x.compra_pago_id IS NOT NULL) AS de_envios
     FROM ${SQL_MOVS_CON_ESTADO} x
     JOIN cuentas ct ON ct.id = x.cuenta_id
     JOIN monedas mo ON mo.codigo = ct.moneda

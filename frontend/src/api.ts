@@ -1175,6 +1175,8 @@ export type TipoMovimientoCaja =
   | 'desde_cuenta'
   | 'san_cuota'
   | 'san_mano'
+  | 'compra'
+  | 'compra_reverso'
 
 export type MovimientoCaja = {
   id: string
@@ -1201,6 +1203,8 @@ export type TotalesCaja = {
   desde_cuentas: string
   san_cuotas: string
   san_manos: string
+  compras: string
+  compras_devueltas: string
   cantidad_ventas: number
 }
 
@@ -2452,3 +2456,109 @@ export const ticketCuadre = (token: string, sesionId: string) =>
 
 export const ticketSan = (token: string, tipo: 'recibos' | 'entregas', id: string) =>
   llamar<TicketFilas>('GET', `/sanes/${tipo}/${id}/ticket`, token)
+
+// ---------- Compras (facturas de proveedor) ----------
+
+export type PrepararCompras = {
+  tiposGasto: { codigo: string; nombre: string }[]
+  cajas: { id: string; nombre: string; sesion_id: string | null }[]
+  cuentas: { id: string; nombre: string }[]
+  hoy: string
+}
+
+export type ProveedorCompra = {
+  id: string
+  nombre: string
+  nombre_comercial: string | null
+  numero_documento: string | null
+  dias_credito: number | null
+}
+
+export type ProductoCompra = {
+  id: string
+  codigo: string
+  nombre: string
+  costo: string
+  unidad: string
+  permite_decimales: boolean
+}
+
+export type DatosCompra = {
+  proveedorId: string
+  ncf: string
+  fechaComprobante: string
+  tipoGasto: string
+  condicion: 'contado' | 'credito'
+  vencimiento?: string
+  lineas: { productoId: string; cantidad: string; costoUnitario: string }[]
+  otrosBienes: string
+  servicios: string
+  itbis: string
+  itbisRetenido: string
+  isrRetenido: string
+  descripcion: string
+  notas: string
+  pago?: { forma: 'efectivo' | 'banco'; cajaId?: string; cuentaId?: string; referencia?: string }
+}
+
+export type FilaCompra = {
+  id: string
+  codigo: string
+  fecha: string
+  ncf: string | null
+  proveedor: string
+  tipo_gasto: string
+  condicion: 'contado' | 'credito'
+  vencimiento: string
+  itbis: string
+  total: string
+  a_pagar: string
+  pagado: string
+  saldo: string
+  estado: 'registrada' | 'anulada'
+}
+
+export type DetalleCompra = FilaCompra & {
+  proveedor_documento: string | null
+  tipo_gasto_nombre: string
+  sucursal: string
+  vence: string
+  monto_bienes: string
+  monto_servicios: string
+  itbis_retenido: string
+  isr_retenido: string
+  descripcion: string | null
+  notas: string | null
+  registrada_por: string
+  created_at: string
+  anulada_en: string | null
+  anulada_por_usuario: string | null
+  motivo_anulacion: string | null
+  lineas: { id: string; codigo: string; nombre: string; unidad: string; cantidad: string; costo_unitario: string; subtotal: string }[]
+  pagos: { id: string; monto: string; forma: 'efectivo' | 'banco'; fecha: string; referencia: string | null; usuario: string; origen: string | null }[]
+}
+
+export const prepararCompras = (token: string) => llamar<PrepararCompras>('GET', '/compras/preparar', token)
+
+export const buscarProveedoresCompra = (token: string, texto: string) =>
+  llamar<ProveedorCompra[]>('GET', `/compras/proveedores?${new URLSearchParams({ texto }).toString()}`, token)
+
+export const buscarProductosCompra = (token: string, texto: string) =>
+  llamar<ProductoCompra[]>('GET', `/compras/productos?${new URLSearchParams({ texto }).toString()}`, token)
+
+export const listarCompras = (
+  token: string,
+  f: { texto: string; desde: string; hasta: string; estado: string; pagina: number },
+) => {
+  const q = new URLSearchParams({ pagina: String(f.pagina) })
+  for (const k of ['texto', 'desde', 'hasta', 'estado'] as const) if (f[k].trim()) q.set(k, f[k].trim())
+  return llamar<{ filas: FilaCompra[]; total: number; pagina: number; porPagina: number }>('GET', `/compras?${q.toString()}`, token)
+}
+
+export const detalleCompra = (token: string, id: string) => llamar<DetalleCompra>('GET', `/compras/${id}`, token)
+
+export const registrarCompra = (token: string, datos: DatosCompra) =>
+  llamar<{ id: string; codigo: string; total: string; aPagar: string }>('POST', '/compras', token, datos)
+
+export const anularCompra = (token: string, id: string, datos: { motivo: string; cajaId?: string }) =>
+  llamar<{ ok: boolean }>('POST', `/compras/${id}/anular`, token, datos)

@@ -43,6 +43,8 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
 | 018 | SAN/SOL CASH: ficha del participante (`san_fichas`), referencias y fiador con confirmación (`san_garantes`), fotos del documento y contratos firmados (`san_archivos`), plantillas de contrato es/fr/ht con versiones y contratos congelados (`san_contratos`); tipo de documento CIN/NIU de Haití; 4 permisos |
 | 019 | Plantillas de contrato versión 2 con "SOL CASH" en lugar de "SAN" |
 | 020 | Permiso `reportes.clientes` |
+| 021 | Compras: `tipos_gasto` (606, códigos 01-11), `compras` (CP-000001, NCF B/E, bienes, servicios, ITBIS, retenciones, contado/crédito, vencimiento; solo se anula), `compra_lineas` (entran al inventario), `compra_pagos`; caja `compra`/`compra_reverso`, cuenta `compra`; permisos `compras.*` |
+| 022 | `caja_movimientos.tipo` de 12 a 20 letras (para `compra_reverso`) |
 
 ## Módulos terminados
 
@@ -260,6 +262,22 @@ técnicas permanentes están en `CLAUDE.md`; la especificación oficial es el
   mano) y el cuadre de caja usan lo mismo: el backend devuelve un "ticket de
   filas" (`backend/src/comun/ticket.ts`, rutas `.../ticket`) armado con los
   mismos datos del PDF, y la pantalla usa `BotonesImprimir.tsx`.
+- **Reg. Facturas de Compras y Gastos** (`/compras`, pantalla `Compras.tsx`;
+  por dentro "compras"): factura de proveedor con NCF, tipo de gasto del 606,
+  productos (entran al inventario y recalculan el costo promedio), otros
+  bienes, servicios, ITBIS y retenciones (validar con el contador). Contado:
+  sale de una caja abierta o de una cuenta en pesos. Crédito: queda pendiente
+  (vence con los días de crédito del proveedor) para Cuentas por Pagar.
+  Anular devuelve mercancía y dinero (no si ya se vendió la mercancía).
+  Proveedor y producto nuevos se pueden crear desde la misma factura.
+- **Plan en curso** (pedido del dueño): 1) Compras ✅, 2) Cuentas por Cobrar
+  (crédito con límite, abonos con recibo, bloqueo por vencidas, recargo 5%
+  por mes completo sin interés sobre interés, estado de cuenta y antigüedad),
+  3) Cuentas por Pagar (abonos desde caja/bancos, alertas, gastos fijos),
+  4) Contabilidad (catálogo editable, asientos automáticos y manuales, libros,
+  estados, ITBIS, 606/607/608, conciliación, cierres) y líneas de negocio
+  (usar las "unidades de negocio" que ya existen). Préstamos, Inversiones,
+  Nómina y MonCash/NatCash todavía no existen.
 - **Usuarios con varios roles**: casillas en Usuarios; los permisos son la
   suma; nadie cambia sus propios roles ni da permisos que no tiene.
 - **Nombres en pantalla**: "Servicios" se muestra como "SCITO SERVICE" y los

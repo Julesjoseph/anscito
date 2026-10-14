@@ -73,6 +73,7 @@ const NOMBRE_TIPO: Record<string, string> = {
   remesa: 'Envío a Haití',
   san_cuota: 'Cuota de SOL CASH',
   san_mano: 'Mano de SOL CASH entregada',
+  compra: 'Pago de compra',
 }
 
 const CAMBIADO_POR: [string, string][] = [

@@ -33,6 +33,8 @@ export type DatosCuadre = {
       desde_cuentas: string;
       san_cuotas: string;
       san_manos: string;
+      compras: string;
+      compras_devueltas: string;
       cantidad_ventas: number;
     };
     movimientos: {
@@ -70,6 +72,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   desde_cuenta: 'Traído de',
   san_cuota: 'Cuota de SOL CASH',
   san_mano: 'Mano de SOL CASH',
+  compra: 'Pago de compra',
+  compra_reverso: 'Compra anulada (devuelto)',
 };
 
 function fecha(iso: string, zona: string): string {
@@ -165,6 +169,10 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
     fila('- Depósitos a cuentas', menos(s.totales.depositos));
   if (s.totales.san_manos !== '0.00')
     fila('- Manos de SOL CASH entregadas', menos(s.totales.san_manos));
+  if (s.totales.compras !== '0.00')
+    fila('- Pagos de compras', menos(s.totales.compras));
+  if (s.totales.compras_devueltas !== '0.00')
+    fila('+ Compras anuladas (devuelto)', dinero(s.totales.compras_devueltas));
   doc.moveDown(0.2);
   fila('Debería haber', dinero(s.esperado), true, m.letra + 1);
 
@@ -216,7 +224,8 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
       const signo =
         x.tipo === 'ingreso' ||
         x.tipo === 'desde_cuenta' ||
-        x.tipo === 'san_cuota'
+        x.tipo === 'san_cuota' ||
+        x.tipo === 'compra_reverso'
           ? ''
           : '-';
       fila(
@@ -309,6 +318,10 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
     el.push(fila('- Depósitos a cuentas', menos(t.depositos)));
   if (t.san_manos !== '0.00')
     el.push(fila('- Manos de SOL CASH entregadas', menos(t.san_manos)));
+  if (t.compras !== '0.00')
+    el.push(fila('- Pagos de compras', menos(t.compras)));
+  if (t.compras_devueltas !== '0.00')
+    el.push(fila('+ Compras anuladas (devuelto)', dinero(t.compras_devueltas)));
   el.push(fila('Debería haber', dinero(s.esperado), true));
   if (s.contado !== null && s.diferencia !== null) {
     const dif = s.diferencia;
@@ -354,7 +367,8 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
       const signo =
         x.tipo === 'ingreso' ||
         x.tipo === 'desde_cuenta' ||
-        x.tipo === 'san_cuota'
+        x.tipo === 'san_cuota' ||
+        x.tipo === 'compra_reverso'
           ? ''
           : '-';
       el.push(

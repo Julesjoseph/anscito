@@ -60,6 +60,7 @@ const NOMBRES_MODULO: Record<string, string> = {
   reportes: 'Reportes',
   sanes: 'SOL CASH (SAN)',
   facturacion: 'Facturación electrónica',
+  compras: 'Reg. Facturas de Compras y Gastos',
 }
 
 function nombreModulo(modulo: string): string {

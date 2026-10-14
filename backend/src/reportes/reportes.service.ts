@@ -92,6 +92,7 @@ const NOMBRE_TIPO_CUENTA: Record<string, string> = {
   remesa: 'Envío a Haití',
   san_cuota: 'Cuota de SOL CASH',
   san_mano: 'Mano de SOL CASH',
+  compra: 'Pago de compra',
 };
 
 // Ganancia de una línea de venta "vl" (misma regla que el Panel).
@@ -740,10 +741,10 @@ export class ReportesService {
               to_char(s.cerrada_en AT TIME ZONE $1, 'YYYY-MM-DD HH24:MI') AS cerrada_en,
               CASE WHEN s.estado = 'abierta' THEN 'Abierta' ELSE 'Cerrada' END AS estado,
               s.fondo_inicial AS fondo, t.ventas, t.ingresos, t.desde_cuentas, t.san_cuotas, t.gastos, t.retiros,
-              t.devoluciones, t.depositos, t.san_manos,
+              t.devoluciones, t.depositos, t.san_manos, (t.compras - t.compras_devueltas)::numeric(16,2) AS compras,
               COALESCE(s.esperado, (s.fondo_inicial + t.ventas + t.ingresos + t.desde_cuentas
                 + t.san_cuotas - t.gastos - t.retiros - t.devoluciones - t.depositos
-                - t.san_manos))::numeric(16,2) AS esperado,
+                - t.san_manos - t.compras + t.compras_devueltas))::numeric(16,2) AS esperado,
               s.contado, s.diferencia, s.motivo_diferencia AS motivo
        FROM caja_sesiones s
        JOIN cajas c ON c.id = s.caja_id
@@ -757,7 +758,9 @@ export class ReportesService {
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'devolucion'), 0)::numeric(16,2) AS devoluciones,
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'deposito'), 0)::numeric(16,2) AS depositos,
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'san_cuota'), 0)::numeric(16,2) AS san_cuotas,
-                COALESCE(sum(monto) FILTER (WHERE tipo = 'san_mano'), 0)::numeric(16,2) AS san_manos
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'san_mano'), 0)::numeric(16,2) AS san_manos,
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'compra'), 0)::numeric(16,2) AS compras,
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'compra_reverso'), 0)::numeric(16,2) AS compras_devueltas
          FROM caja_movimientos m WHERE m.sesion_id = s.id
        ) t
        WHERE (s.abierta_en AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
@@ -809,6 +812,7 @@ export class ReportesService {
           tipo: 'dinero',
           total: true,
         },
+        { clave: 'compras', titulo: 'Compras', tipo: 'dinero', total: true },
         {
           clave: 'esperado',
           titulo: 'Debía haber',
