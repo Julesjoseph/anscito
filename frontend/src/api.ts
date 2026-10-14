@@ -634,6 +634,7 @@ export type TipoDocumento = {
 
 export type FilaTercero = {
   id: string
+  codigo: string | null // SCITO-1801xxxx (solo clientes)
   tipo_documento_id: string | null
   tipo_documento: string | null
   // Enmascarado (********678) sin el permiso terceros.ver_documento.
@@ -862,6 +863,7 @@ export type ArticuloVenta = {
 
 export type ClienteVenta = {
   id: string
+  codigo: string | null
   nombre: string
   nombre_comercial: string | null
   numero_documento: string | null
@@ -963,6 +965,7 @@ export type DetalleVenta = {
   estado: 'completada' | 'anulada'
   cliente: string
   cliente_documento: string | null
+  cliente_codigo?: string | null
   vendedor: string
   sucursal: string
   subtotal: string
@@ -2214,6 +2217,7 @@ export async function pdfSan(
 
 export type ClienteSan = {
   id: string
+  codigo?: string | null
   nombre: string
   numero_documento: string | null
   telefono: string | null
@@ -2375,6 +2379,7 @@ export type ContratoSan = {
 export type FichaSan = {
   cliente: {
     id: string
+    codigo: string | null
     nombre: string
     tipo_documento: string | null
     numero_documento: string | null
@@ -2384,7 +2389,7 @@ export type FichaSan = {
     correo: string | null
   }
   ficha: {
-    fecha_nacimiento: string
+    fecha_nacimiento: string | null
     ocupacion: string
     lugar_trabajo: string | null
     sector: string
@@ -2653,6 +2658,7 @@ export type ClienteCxc = ResumenCreditoVenta & {
 
 export type FilaClienteCxc = TotalesCxc & {
   id: string
+  codigo: string | null
   nombre: string
   numero_documento: string | null
   telefono: string | null
@@ -2683,7 +2689,7 @@ export const listarClientesCxc = (token: string, f: { texto: string; solo: strin
 }
 
 export const buscarClientesCxc = (token: string, texto: string) =>
-  llamar<{ id: string; nombre: string; numero_documento: string | null; telefono: string | null }[]>(
+  llamar<{ id: string; codigo: string | null; nombre: string; numero_documento: string | null; telefono: string | null }[]>(
     'GET',
     `/cxc/buscar-clientes?${new URLSearchParams({ texto }).toString()}`,
     token,

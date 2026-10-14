@@ -23,6 +23,7 @@ export type DatosRecibo = {
     fecha: string;
     estado: string;
     cliente: string;
+    cliente_codigo?: string | null;
     cliente_documento: string | null;
     vendedor: string;
     sucursal: string;
@@ -189,6 +190,7 @@ function dibujar(
   fila('Atendió:', v.vendedor);
   fila('Sucursal:', v.sucursal);
   fila('Cliente:', v.cliente);
+  if (v.cliente_codigo) fila('Código:', v.cliente_codigo);
   if (v.cliente_documento) fila('Documento:', v.cliente_documento);
 
   linea();

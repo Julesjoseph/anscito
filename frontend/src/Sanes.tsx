@@ -307,7 +307,7 @@ function BuscarCliente({
         <Search size={16} className="absolute top-3 left-3 text-gray-400" />
         <input
           className={`${CAMPO} w-full pl-9`}
-          placeholder="Nombre, cédula o teléfono"
+          placeholder="Nombre, código SCITO, cédula o teléfono"
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
           autoFocus
@@ -335,7 +335,7 @@ function BuscarCliente({
               >
                 <span className="font-medium">{c.nombre}</span>
                 <span className="text-xs text-gray-500">
-                  {[c.numero_documento ?? 'Sin documento', c.telefono].filter(Boolean).join(' · ')}
+                  {[c.codigo, c.numero_documento ?? 'Sin documento', c.telefono].filter(Boolean).join(' · ')}
                 </span>
               </button>
             </li>
@@ -1567,7 +1567,7 @@ function FormAsignar({
           <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
             <span>
               <span className="font-medium">{cliente.nombre}</span>
-              <span className="block text-xs text-gray-500">{cliente.numero_documento ?? 'Sin documento: agréguelo en Clientes'}</span>
+              <span className="block text-xs text-gray-500">{cliente.numero_documento ?? 'Sin documento'}</span>
             </span>
             <button type="button" className="text-xs text-gray-600 underline" onClick={() => setCliente(null)}>
               Cambiar

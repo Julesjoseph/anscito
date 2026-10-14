@@ -89,15 +89,17 @@ export class CxcService {
     const t = texto(f.texto);
     const r = await this.db.query<{
       id: string;
+      codigo: string | null;
       nombre: string;
       numero_documento: string | null;
       telefono: string | null;
     }>(
-      `SELECT t.id, t.nombre, t.numero_documento, t.telefono FROM terceros t
+      `SELECT t.id, t.codigo, t.nombre, t.numero_documento, t.telefono FROM terceros t
        WHERE t.rol = 'cliente'
          AND (EXISTS (SELECT 1 FROM clientes_credito cc WHERE cc.tercero_id = t.id)
               OR EXISTS (SELECT 1 FROM cuentas_cobrar k WHERE k.cliente_id = t.id AND k.estado = 'activa'))
-         AND ($1 = '' OR t.nombre ILIKE '%' || $1 || '%' OR t.numero_documento ILIKE '%' || $1 || '%')
+         AND ($1 = '' OR t.nombre ILIKE '%' || $1 || '%' OR t.numero_documento ILIKE '%' || $1 || '%'
+              OR t.codigo ILIKE '%' || $1 || '%')
        ORDER BY lower(t.nombre) LIMIT 300`,
       [t.slice(0, 60)],
     );
@@ -125,9 +127,10 @@ export class CxcService {
     const t = texto(textoBuscado);
     if (t.length < 2) return [];
     const r = await this.db.query(
-      `SELECT id, nombre, numero_documento, telefono FROM terceros
+      `SELECT id, codigo, nombre, numero_documento, telefono FROM terceros
        WHERE rol = 'cliente' AND is_active AND NOT es_protegido
-         AND (nombre ILIKE '%' || $1 || '%' OR numero_documento ILIKE '%' || $1 || '%' OR telefono ILIKE '%' || $1 || '%')
+         AND (nombre ILIKE '%' || $1 || '%' OR numero_documento ILIKE '%' || $1 || '%' OR telefono ILIKE '%' || $1 || '%'
+              OR codigo ILIKE '%' || $1 || '%')
        ORDER BY lower(nombre) LIMIT 20`,
       [t.slice(0, 60)],
     );
@@ -687,10 +690,11 @@ export class CxcService {
       estado: string;
       cliente_id: string;
       cliente: string;
+      cliente_codigo: string | null;
       usuario: string;
     }>(
       `SELECT b.numero, to_char(b.fecha, 'DD/MM/YYYY') AS fecha, b.created_at, b.total, b.forma, b.referencia,
-              b.estado, b.cliente_id, t.nombre AS cliente, u.username AS usuario
+              b.estado, b.cliente_id, t.nombre AS cliente, t.codigo AS cliente_codigo, u.username AS usuario
        FROM cxc_abonos b JOIN terceros t ON t.id = b.cliente_id JOIN usuarios u ON u.id = b.usuario_id
        WHERE b.id = $1`,
       [id],
@@ -724,6 +728,9 @@ export class CxcService {
       { tipo: 'fila', izq: 'Recibo:', der: codigo, negrita: true },
       { tipo: 'fila', izq: 'Fecha:', der: x.fecha },
       { tipo: 'fila', izq: 'Cliente:', der: x.cliente, negrita: true },
+      ...(x.cliente_codigo
+        ? [{ tipo: 'fila' as const, izq: 'Código:', der: x.cliente_codigo }]
+        : []),
       { tipo: 'linea' },
     ];
     for (const a of apl.rows) {

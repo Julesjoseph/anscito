@@ -230,15 +230,16 @@ export class VentasService {
     const patron = `%${buscar.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
     const r = await this.db.query<{
       id: string;
+      codigo: string | null;
       nombre: string;
       nombre_comercial: string | null;
       numero_documento: string | null;
       es_protegido: boolean;
     }>(
-      `SELECT id, nombre, nombre_comercial, numero_documento, es_protegido
+      `SELECT id, codigo, nombre, nombre_comercial, numero_documento, es_protegido
        FROM terceros
        WHERE rol = 'cliente' AND is_active
-         AND ($1 = '' OR nombre ILIKE $2 OR nombre_comercial ILIKE $2
+         AND ($1 = '' OR nombre ILIKE $2 OR nombre_comercial ILIKE $2 OR codigo ILIKE $2
               OR numero_documento LIKE $3)
        ORDER BY es_protegido DESC, lower(nombre)
        LIMIT 30`,
@@ -884,7 +885,7 @@ export class VentasService {
   async detalle(actorId: string, id: string) {
     if (!UUID.test(id)) throw new NotFoundException('Venta no encontrada');
     const v = await this.db.query(
-      `SELECT v.*, t.nombre AS cliente, t.numero_documento AS cliente_documento,
+      `SELECT v.*, t.nombre AS cliente, t.codigo AS cliente_codigo, t.numero_documento AS cliente_documento,
               u.username AS vendedor, s.nombre AS sucursal, ua.username AS anulada_por_usuario
        FROM ventas v
        JOIN terceros t ON t.id = v.cliente_id

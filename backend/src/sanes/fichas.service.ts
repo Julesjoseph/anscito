@@ -12,6 +12,7 @@ import {
   normalizarDocumento,
   telefonoValido,
 } from '../terceros/documentos';
+import { errorCodigoCliente } from '../terceros/codigo-cliente';
 import { cuotaDe, manoDe, porcentaje } from './calendario';
 import {
   IDIOMAS,
@@ -69,6 +70,9 @@ function fechaValida(v: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
 }
 
+// Línea para escribir a mano en el contrato lo que falta (ej.: el documento).
+const EN_BLANCO = '____________________';
+
 export function numeroContrato(n: number | string) {
   return `C-${String(n).padStart(6, '0')}`;
 }
@@ -97,7 +101,7 @@ async function leerDocumento(
 }
 
 type DatosFicha = {
-  fecha_nacimiento: string;
+  fecha_nacimiento: string | null;
   ocupacion: string;
   lugar_trabajo: string | null;
   sector: string;
@@ -111,8 +115,9 @@ type DatosFicha = {
 };
 
 function leerFicha(d: Record<string, unknown>): DatosFicha {
-  const nacimiento = texto(d.fechaNacimiento);
-  if (!fechaValida(nacimiento) || nacimiento < '1900-01-02')
+  // Opcional: si se escribe, tiene que ser una fecha válida.
+  const nacimiento = texto(d.fechaNacimiento) || null;
+  if (nacimiento && (!fechaValida(nacimiento) || nacimiento < '1900-01-02'))
     throw new BadRequestException('Fecha de nacimiento inválida');
   const idioma = (texto(d.idioma) || 'es') as Idioma;
   if (!IDIOMAS.includes(idioma))
@@ -218,7 +223,7 @@ export class FichasService {
     const [cli, ficha, garantes, archivos, contratos, falta] =
       await Promise.all([
         this.db.query(
-          `SELECT t.id, t.nombre, t.tipo_documento_id, td.nombre AS tipo_documento, t.numero_documento,
+          `SELECT t.id, t.codigo, t.nombre, t.tipo_documento_id, td.nombre AS tipo_documento, t.numero_documento,
                 t.telefono, t.whatsapp, t.direccion, t.correo
          FROM terceros t LEFT JOIN tipos_documento td ON td.id = t.tipo_documento_id WHERE t.id = $1`,
           [terceroId],
@@ -300,20 +305,24 @@ export class FichasService {
       throw new BadRequestException('Máximo dos referencias');
     try {
       return await this.db.transaccion(async (c) => {
-        const doc = await leerDocumento(
-          c,
-          datos.tipoDocumentoId,
-          datos.numeroDocumento,
-          'Documento',
-        );
-        const r = await c.query<{ id: string }>(
+        // Documento opcional: si no se escribe número, queda sin documento.
+        const doc =
+          texto(datos.numeroDocumento) === ''
+            ? null
+            : await leerDocumento(
+                c,
+                datos.tipoDocumentoId,
+                datos.numeroDocumento,
+                'Documento',
+              );
+        const r = await c.query<{ id: string; codigo: string }>(
           `INSERT INTO terceros (rol, tipo_documento_id, numero_documento, nombre, es_contribuyente,
                                  direccion, telefono, whatsapp, correo, puede_credito, notas, created_by)
            VALUES ('cliente', $1, $2, $3, false, $4, $5, $6, $7, false, 'Registrado desde SOL CASH', $8)
-           RETURNING id`,
+           RETURNING id, codigo`,
           [
-            doc.tipoId,
-            doc.numero,
+            doc?.tipoId ?? null,
+            doc?.numero ?? null,
             nombre,
             direccion,
             tel,
@@ -322,7 +331,7 @@ export class FichasService {
             actorId,
           ],
         );
-        const id = r.rows[0].id;
+        const { id, codigo } = r.rows[0];
         await this.insertarFicha(c, id, ficha, actorId);
         for (const ref of referencias)
           await this.insertarGarante(
@@ -347,15 +356,18 @@ export class FichasService {
           entidadId: id,
           nuevo: {
             nombre,
-            documento: `${doc.tipo} ${doc.numero}`,
+            codigo,
+            documento: doc ? `${doc.tipo} ${doc.numero}` : null,
             referencias: referencias.length,
             fiador: !!datos.fiador,
           },
           ip,
         });
-        return { id };
+        return { id, codigo };
       });
     } catch (e) {
+      const sinCodigo = errorCodigoCliente(e);
+      if (sinCodigo) throw sinCodigo;
       if ((e as { code?: string }).code === '23505')
         throw new ConflictException(
           'Ya existe un cliente con ese documento: búsquelo y complete su ficha',
@@ -784,8 +796,8 @@ export class FichasService {
           );
         const persona = await c.query<{
           nombre: string;
-          documento: string;
-          tipo: string;
+          documento: string | null;
+          tipo: string | null;
           direccion: string | null;
           sector: string;
           municipio: string;
@@ -793,7 +805,7 @@ export class FichasService {
         }>(
           `SELECT t.nombre, t.numero_documento AS documento, td.nombre AS tipo, t.direccion,
                   f.sector, f.municipio, f.provincia
-           FROM terceros t JOIN tipos_documento td ON td.id = t.tipo_documento_id
+           FROM terceros t LEFT JOIN tipos_documento td ON td.id = t.tipo_documento_id
            JOIN san_fichas f ON f.tercero_id = t.id WHERE t.id = $1`,
           [x.tercero_id],
         );
@@ -849,8 +861,8 @@ export class FichasService {
           empresa_rnc: em.rnc ?? '—',
           empresa_direccion: em.direccion ?? '—',
           participante: per.nombre,
-          documento_tipo: per.tipo,
-          documento: per.documento,
+          documento_tipo: per.tipo ?? EN_BLANCO,
+          documento: per.documento ?? EN_BLANCO,
           direccion: [per.direccion, per.sector, per.municipio, per.provincia]
             .filter(Boolean)
             .join(', '),

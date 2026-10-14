@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
+import { errorCodigoCliente } from './codigo-cliente';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { DatabaseService } from '../database/database.service';
 import {
@@ -256,7 +257,7 @@ export class TercerosService {
       params.push(`%${normalizarDocumento(buscar)}%`);
       params.push(`%${buscar.replace(/\D/g, '') || '§'}%`);
       condiciones.push(
-        `(t.nombre ILIKE $${n} OR t.nombre_comercial ILIKE $${n}
+        `(t.nombre ILIKE $${n} OR t.nombre_comercial ILIKE $${n} OR t.codigo ILIKE $${n}
           OR t.numero_documento LIKE $${n + 1}
           OR regexp_replace(coalesce(t.telefono, ''), '\\D', '', 'g') LIKE $${n + 2}
           OR regexp_replace(coalesce(t.whatsapp, ''), '\\D', '', 'g') LIKE $${n + 2})`,
@@ -289,7 +290,7 @@ export class TercerosService {
         total: number;
       }
     >(
-      `SELECT t.id, t.tipo_documento_id, td.nombre AS tipo_documento,
+      `SELECT t.id, t.codigo, t.tipo_documento_id, td.nombre AS tipo_documento,
               t.numero_documento, t.nombre, t.nombre_comercial,
               t.es_contribuyente, t.direccion, t.telefono, t.whatsapp, t.correo,
               t.notas, t.puede_credito, t.persona_contacto, t.dias_credito,
@@ -343,13 +344,13 @@ export class TercerosService {
     try {
       return await this.db.transaccion(async (c) => {
         await this.verificarDocumento(c, rol, d, null);
-        const r = await c.query<{ id: string }>(
+        const r = await c.query<{ id: string; codigo: string | null }>(
           `INSERT INTO terceros
              (rol, tipo_documento_id, numero_documento, nombre, nombre_comercial,
               es_contribuyente, direccion, telefono, whatsapp, correo, notas,
               puede_credito, persona_contacto, dias_credito, created_by)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-           RETURNING id`,
+           RETURNING id, codigo`,
           [
             rol,
             d.tipo_documento_id,
@@ -368,7 +369,7 @@ export class TercerosService {
             actorId,
           ],
         );
-        const id = r.rows[0].id;
+        const { id, codigo } = r.rows[0];
         await registrarAuditoria(c, {
           usuarioId: actorId,
           accion: `${rol}.crear`,
@@ -376,6 +377,7 @@ export class TercerosService {
           entidadId: id,
           nuevo: {
             rol,
+            codigo,
             ...this.paraAuditoria(d),
             datos_contacto_registrados: CAMPOS_PERSONALES.filter(
               (k) => d[k] !== null,
@@ -383,9 +385,11 @@ export class TercerosService {
           },
           ip,
         });
-        return { id };
+        return { id, codigo };
       });
     } catch (e) {
+      const sinCodigo = errorCodigoCliente(e);
+      if (sinCodigo) throw sinCodigo;
       if ((e as { code?: string }).code === '23505') {
         throw new ConflictException(
           `Ya existe un ${NOMBRE_ROL[rol]} con ese documento`,

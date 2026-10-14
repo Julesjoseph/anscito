@@ -837,7 +837,7 @@ function NuevaVenta({
                 type="search"
                 value={buscarCliente}
                 onChange={(e) => setBuscarCliente(e.target.value)}
-                placeholder="Nombre o documento del cliente"
+                placeholder="Nombre, código SCITO o documento del cliente"
                 className={`${CAMPO} w-full`}
                 autoFocus
               />
@@ -856,6 +856,7 @@ function NuevaVenta({
                       className="w-full px-3 py-2 text-left hover:bg-gray-50"
                     >
                       <span className="font-medium text-gray-900">{c.nombre}</span>
+                      {c.codigo && <span className="ml-2 font-mono text-xs text-[#C8102E]">{c.codigo}</span>}
                       {c.numero_documento && <span className="ml-2 font-mono text-xs text-gray-500">{c.numero_documento}</span>}
                     </button>
                   </li>
@@ -1200,6 +1201,7 @@ function VerDetalle({
           <div className="text-gray-500">{new Date(d.fecha).toLocaleString('es-DO')} · {d.sucursal} · {d.vendedor}</div>
           <div>
             Cliente: <span className="font-medium">{d.cliente}</span>
+            {d.cliente_codigo && <span className="ml-2 font-mono text-xs text-[#C8102E]">{d.cliente_codigo}</span>}
             {d.cliente_documento && <span className="ml-2 font-mono text-xs text-gray-500">{d.cliente_documento}</span>}
           </div>
         </div>

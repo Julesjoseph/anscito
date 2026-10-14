@@ -1,8 +1,8 @@
 import type { DatabaseService } from '../database/database.service';
 
 // Requisitos para entrar a un SAN (los usan el registro de números y los
-// contratos): documento, teléfono, ficha, foto del documento, fiador
-// confirmado y al menos una referencia confirmada.
+// contratos): teléfono, ficha, fiador confirmado y al menos una referencia
+// confirmada. El documento del participante y su foto son opcionales.
 
 type Consulta = Pick<DatabaseService, 'query'>;
 
@@ -14,16 +14,12 @@ export async function faltantesFicha(
   const r = await c.query<{
     ficha: boolean;
     telefono: boolean;
-    documento: boolean;
-    foto: boolean;
     fiador: boolean;
     fiador_ok: boolean;
     referencias_ok: number;
   }>(
     `SELECT EXISTS (SELECT 1 FROM san_fichas WHERE tercero_id = t.id) AS ficha,
             (t.telefono IS NOT NULL OR t.whatsapp IS NOT NULL) AS telefono,
-            (t.numero_documento IS NOT NULL) AS documento,
-            EXISTS (SELECT 1 FROM san_archivos WHERE tercero_id = t.id AND tipo = 'documento_frente' AND is_active) AS foto,
             EXISTS (SELECT 1 FROM san_garantes WHERE tercero_id = t.id AND tipo = 'fiador' AND is_active) AS fiador,
             EXISTS (SELECT 1 FROM san_garantes WHERE tercero_id = t.id AND tipo = 'fiador' AND is_active AND confirmado) AS fiador_ok,
             (SELECT count(*)::int FROM san_garantes WHERE tercero_id = t.id AND tipo = 'referencia' AND is_active AND confirmado) AS referencias_ok
@@ -33,10 +29,8 @@ export async function faltantesFicha(
   if (r.rowCount === 0) return ['el cliente no existe'];
   const f = r.rows[0];
   const falta: string[] = [];
-  if (!f.documento) falta.push('documento');
   if (!f.telefono) falta.push('teléfono o WhatsApp');
-  if (!f.ficha) falta.push('ficha (nacimiento, ocupación, dirección)');
-  if (!f.foto) falta.push('foto del documento');
+  if (!f.ficha) falta.push('ficha (ocupación y dirección)');
   if (!f.fiador) falta.push('fiador');
   else if (!f.fiador_ok) falta.push('confirmar el fiador');
   if (f.referencias_ok < 1) falta.push('al menos una referencia confirmada');

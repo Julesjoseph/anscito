@@ -145,7 +145,7 @@ function CamposFicha({ d, poner }: { d: DatosFichaSan; poner: (k: keyof DatosFic
       </Seccion>
       <Seccion titulo="Datos personales">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Campo etiqueta="Fecha de nacimiento">{campo('fechaNacimiento', { type: 'date' })}</Campo>
+          <Campo etiqueta="Fecha de nacimiento (opcional)">{campo('fechaNacimiento', { type: 'date' })}</Campo>
           <Campo etiqueta="Ocupación">{campo('ocupacion', { maxLength: 100 })}</Campo>
           <Campo etiqueta="Lugar de trabajo (opcional)">{campo('lugarTrabajo', { maxLength: 150 })}</Campo>
         </div>
@@ -291,7 +291,7 @@ export function FormPersona({
             <input className={CAMPO} value={nombre} maxLength={150} onChange={(e) => setNombre(e.target.value)} autoFocus />
           </Campo>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Campo etiqueta="Documento" ayuda="Cédula, pasaporte, CIN/NIU de Haití u otro">
+            <Campo etiqueta="Documento (opcional)" ayuda="Cédula, pasaporte, CIN/NIU de Haití u otro">
               <select className={CAMPO} value={tipoId} onChange={(e) => setTipoId(e.target.value)}>
                 {tipos
                   .filter((t) => t.codigo !== 'rnc')
@@ -302,7 +302,7 @@ export function FormPersona({
                   ))}
               </select>
             </Campo>
-            <Campo etiqueta="Número" ayuda={tipo?.ayuda}>
+            <Campo etiqueta="Número" ayuda={numero.trim() ? tipo?.ayuda : 'Déjelo vacío si no tiene documento'}>
               <input className={`${CAMPO} font-mono`} value={numero} onChange={(e) => setNumero(e.target.value)} />
             </Campo>
           </div>
@@ -341,7 +341,7 @@ export function FormPersona({
           <button type="button" className={BOTON_SECUNDARIO} onClick={onCerrar}>
             Cancelar
           </button>
-          <button type="submit" className={BOTON_PRINCIPAL} disabled={guardando || !nombre.trim() || !numero.trim()}>
+          <button type="submit" className={BOTON_PRINCIPAL} disabled={guardando || !nombre.trim()}>
             {guardando ? 'Guardando…' : 'Guardar persona'}
           </button>
         </div>
@@ -422,11 +422,12 @@ export function FichaVista({
 
         <Seccion titulo="Datos">
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
-            <Dato t="Documento" v={`${f.cliente.tipo_documento ?? '—'} ${f.cliente.numero_documento ?? ''}`} />
+            {f.cliente.codigo && <Dato t="Código" v={f.cliente.codigo} />}
+            <Dato t="Documento" v={f.cliente.numero_documento ? `${f.cliente.tipo_documento ?? ''} ${f.cliente.numero_documento}` : 'Sin documento'} />
             <Dato t="Teléfono / WhatsApp" v={[f.cliente.telefono, f.cliente.whatsapp].filter(Boolean).join(' · ') || '—'} />
             {f.ficha ? (
               <>
-                <Dato t="Nacimiento" v={f.ficha.fecha_nacimiento.split('-').reverse().join('/')} />
+                <Dato t="Nacimiento" v={f.ficha.fecha_nacimiento ? f.ficha.fecha_nacimiento.split('-').reverse().join('/') : '—'} />
                 <Dato t="Ocupación" v={[f.ficha.ocupacion, f.ficha.lugar_trabajo].filter(Boolean).join(' · ')} />
                 <Dato t="Dirección" v={[f.cliente.direccion, f.ficha.sector, f.ficha.municipio, f.ficha.provincia].filter(Boolean).join(', ')} />
                 <Dato t="Referencia" v={f.ficha.referencia_direccion} />

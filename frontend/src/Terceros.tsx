@@ -502,7 +502,7 @@ export default function Terceros({ rol, token, permisos, onSesionVencida }: Prop
             type="search"
             value={filtros.texto}
             onChange={(e) => cambiarFiltro({ texto: e.target.value })}
-            placeholder="Buscar por nombre, documento o teléfono"
+            placeholder={rol === 'clientes' ? 'Buscar por nombre, código SCITO, documento o teléfono' : 'Buscar por nombre, documento o teléfono'}
             className={`${CAMPO} w-full pl-9`}
           />
         </div>
@@ -572,6 +572,7 @@ export default function Terceros({ rol, token, permisos, onSesionVencida }: Prop
                       {f.nombre}
                       {f.es_protegido && <Lock size={12} className="text-gray-400" aria-label="Registro del sistema" />}
                     </div>
+                    {f.codigo && <div className="font-mono text-xs text-[#C8102E]">{f.codigo}</div>}
                     {f.nombre_comercial && (
                       <div className="text-xs text-gray-500">{f.nombre_comercial}</div>
                     )}

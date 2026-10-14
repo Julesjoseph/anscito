@@ -190,7 +190,7 @@ function Lista({ token, onAbrir, onSesionVencida }: { token: string; onAbrir: (i
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
           <Search size={16} className="absolute top-3 left-3 text-gray-400" />
-          <input className={`${CAMPO} w-full pl-9`} type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Cliente o documento" />
+          <input className={`${CAMPO} w-full pl-9`} type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Cliente, código o documento" />
         </div>
         <select className={CAMPO} value={solo} onChange={(e) => setSolo(e.target.value)} aria-label="Mostrar">
           <option value="deudores">Los que deben</option>
@@ -232,7 +232,7 @@ function Lista({ token, onAbrir, onSesionVencida }: { token: string; onAbrir: (i
                   <td className="px-3 py-2">
                     <div className="font-medium">{f.nombre}</div>
                     <div className="text-xs text-gray-500">
-                      {[f.numero_documento, f.telefono].filter(Boolean).join(' · ') || '—'}
+                      {[f.codigo, f.numero_documento, f.telefono].filter(Boolean).join(' · ') || '—'}
                       {!f.credito_activo && ' · sin crédito activo'}
                     </div>
                   </td>
@@ -870,7 +870,7 @@ function FormAnularAbono({
 
 function DarCredito({ token, onListo, onSesionVencida }: { token: string; onListo: (id: string) => void; onSesionVencida: () => void }) {
   const [texto, setTexto] = useState('')
-  const [lista, setLista] = useState<{ id: string; nombre: string; numero_documento: string | null; telefono: string | null }[]>([])
+  const [lista, setLista] = useState<{ id: string; codigo: string | null; nombre: string; numero_documento: string | null; telefono: string | null }[]>([])
   const [elegido, setElegido] = useState<{ id: string; nombre: string } | null>(null)
 
   useEffect(() => {
@@ -912,7 +912,7 @@ function DarCredito({ token, onListo, onSesionVencida }: { token: string; onList
         <>
           <div className="relative">
             <Search size={16} className="absolute top-3 left-3 text-gray-400" />
-            <input className={`${CAMPO} w-full pl-9`} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Buscar cliente por nombre, documento o teléfono" autoFocus />
+            <input className={`${CAMPO} w-full pl-9`} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Buscar cliente por nombre, código SCITO, documento o teléfono" autoFocus />
           </div>
           {lista.length > 0 && (
             <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
@@ -920,7 +920,7 @@ function DarCredito({ token, onListo, onSesionVencida }: { token: string; onList
                 <li key={c.id}>
                   <button type="button" className="flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-gray-50" onClick={() => setElegido(c)}>
                     <span className="font-medium">{c.nombre}</span>
-                    <span className="text-xs text-gray-500">{[c.numero_documento, c.telefono].filter(Boolean).join(' · ') || '—'}</span>
+                    <span className="text-xs text-gray-500">{[c.codigo, c.numero_documento, c.telefono].filter(Boolean).join(' · ') || '—'}</span>
                   </button>
                 </li>
               ))}

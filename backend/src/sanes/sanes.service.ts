@@ -470,10 +470,6 @@ export class SanesService {
           throw new BadRequestException(
             'El cliente no existe o está desactivado',
           );
-        if (!t.rows[0].numero_documento)
-          throw new BadRequestException(
-            'El participante no tiene documento (cédula o pasaporte). Agréguelo en Clientes.',
-          );
         // Ficha completa: datos, foto del documento, fiador y referencia confirmados.
         const falta = await faltantesFicha(c, terceroId);
         if (falta.length)
@@ -878,10 +874,10 @@ export class SanesService {
     const t = texto(textoBuscado);
     if (t.length < 2) return [];
     const r = await this.db.query(
-      `SELECT t.id, t.nombre, t.numero_documento, t.telefono FROM terceros t
+      `SELECT t.id, t.codigo, t.nombre, t.numero_documento, t.telefono FROM terceros t
        WHERE t.rol = 'cliente' AND t.is_active
          AND (t.nombre ILIKE '%' || $1 || '%' OR t.numero_documento ILIKE '%' || $1 || '%'
-              OR t.telefono ILIKE '%' || $1 || '%')
+              OR t.telefono ILIKE '%' || $1 || '%' OR t.codigo ILIKE '%' || $1 || '%')
          AND (NOT $2 OR EXISTS (SELECT 1 FROM san_participaciones p JOIN sanes s ON s.id = p.san_id
                                 WHERE p.tercero_id = t.id AND s.estado = 'activo'))
        ORDER BY lower(t.nombre) LIMIT 20`,
@@ -1364,10 +1360,12 @@ export class SanesService {
       san_numero: string;
       san_nombre: string;
       participante: string;
+      participante_codigo: string | null;
       usuario: string;
     }>(
       `SELECT r.numero, r.created_at, r.cuotas, r.mora, r.total, r.forma, r.referencia,
-              s.numero AS san_numero, s.nombre AS san_nombre, t.nombre AS participante, u.username AS usuario
+              s.numero AS san_numero, s.nombre AS san_nombre, t.nombre AS participante,
+              t.codigo AS participante_codigo, u.username AS usuario
        FROM san_recibos r JOIN sanes s ON s.id = r.san_id JOIN terceros t ON t.id = r.tercero_id
        JOIN usuarios u ON u.id = r.usuario_id WHERE r.id = $1`,
       [id],
@@ -1408,6 +1406,15 @@ export class SanesService {
         der: x.participante,
         negrita: true,
       },
+      ...(x.participante_codigo
+        ? [
+            {
+              tipo: 'fila' as const,
+              izq: 'Código:',
+              der: x.participante_codigo,
+            },
+          ]
+        : []),
       { tipo: 'linea' },
       ...lineas.rows.flatMap((l): FilaRecibo[] => [
         {

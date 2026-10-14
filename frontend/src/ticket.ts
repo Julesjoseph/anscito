@@ -134,6 +134,7 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
     ${fila('Atendió:', esc(v.vendedor))}
     ${fila('Sucursal:', esc(v.sucursal))}
     ${fila('Cliente:', esc(v.cliente))}
+    ${v.cliente_codigo ? fila('Código:', esc(v.cliente_codigo)) : ''}
     ${v.cliente_documento ? fila('Documento:', esc(v.cliente_documento)) : ''}
     <hr>
     ${lineas}
