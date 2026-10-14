@@ -6,6 +6,7 @@ import {
   SQL_SALDOS,
 } from '../bancos/sql';
 import { SQL_SIGNO_CAJA } from '../caja/sql';
+import { SQL_SIGNO_CAJA_USD } from '../comun/dolar';
 import { hoyLocal } from '../cxc/estado';
 import {
   avisosGastosFijos,
@@ -308,23 +309,32 @@ export class PanelService {
       usuario: string;
       abierta_en: string;
       esperado: string;
+      esperado_usd: string;
     }>(
       `SELECT c.nombre AS caja, u.username AS usuario, s.abierta_en,
               (s.fondo_inicial + COALESCE((SELECT sum(m.monto * ${SQL_SIGNO_CAJA})
                  FROM caja_movimientos m WHERE m.sesion_id = s.id), 0))::numeric(14,2)
-                AS esperado
+                AS esperado,
+              (s.fondo_inicial_usd + COALESCE((SELECT sum(m.monto * ${SQL_SIGNO_CAJA_USD})
+                 FROM caja_movimientos_usd m WHERE m.sesion_id = s.id), 0))::numeric(14,2)
+                AS esperado_usd
        FROM caja_sesiones s
        JOIN cajas c ON c.id = s.caja_id
        JOIN usuarios u ON u.id = s.abierta_por
        WHERE s.estado = 'abierta'
        ORDER BY lower(c.nombre)`,
     );
-    const total = await this.db.query<{ total: string }>(
-      `SELECT COALESCE(sum(x), 0)::numeric(16,2) AS total
-       FROM unnest($1::numeric[]) x`,
-      [r.rows.map((f) => f.esperado)],
+    const total = await this.db.query<{ total: string; total_usd: string }>(
+      `SELECT COALESCE((SELECT sum(x) FROM unnest($1::numeric[]) x), 0)::numeric(16,2) AS total,
+              COALESCE((SELECT sum(x) FROM unnest($2::numeric[]) x), 0)::numeric(16,2) AS total_usd`,
+      [r.rows.map((f) => f.esperado), r.rows.map((f) => f.esperado_usd)],
     );
-    return { abiertas: r.rows, total: total.rows[0].total };
+    return {
+      abiertas: r.rows,
+      total: total.rows[0].total,
+      // Dólares en las cajas abiertas (aparte de los pesos).
+      total_usd: total.rows[0].total_usd,
+    };
   }
 
   // Envíos a Haití del período. Lo que gana SCITO y lo que deben los agentes

@@ -22,7 +22,26 @@ export type DatosCuadre = {
     contado: string | null;
     diferencia: string | null;
     motivo_diferencia: string | null;
-    conteo: Record<string, number> | null;
+    conteo: (Record<string, number> & { usd?: Record<string, number> }) | null;
+    fondo_inicial_usd?: string;
+    esperado_usd?: string;
+    contado_usd?: string | null;
+    diferencia_usd?: string | null;
+    totales_usd?: {
+      ventas: string;
+      devoluciones: string;
+      ingresos: string;
+      retiros: string;
+      cantidad_ventas: number;
+    };
+    movimientos_usd?: {
+      tipo: string;
+      monto: string;
+      tasa: string;
+      venta: string | null;
+      motivo: string | null;
+      usuario: string;
+    }[];
     totales: {
       ventas: string;
       ingresos: string;
@@ -37,6 +56,8 @@ export type DatosCuadre = {
       compras_devueltas: string;
       abonos_credito: string;
       abonos_anulados: string;
+      cambios?: string;
+      cambios_devueltos?: string;
       cantidad_ventas: number;
     };
     movimientos: {
@@ -51,8 +72,91 @@ export type DatosCuadre = {
     }[];
   };
   denominaciones: string[];
+  denominacionesUsd?: string[];
   zonaHoraria: string;
 };
+
+// Dólares de la caja (aparte de los pesos): solo si se usaron.
+type FilaCuadre = {
+  izq: string;
+  der: string;
+  negrita?: boolean;
+  nota?: boolean;
+};
+
+function usd(v: string): string {
+  return `US${dinero(v).replace('RD', '')}`;
+}
+
+export function filasDolares(d: DatosCuadre): FilaCuadre[] {
+  const s = d.sesion;
+  const t = s.totales_usd;
+  const fondo = s.fondo_inicial_usd ?? '0.00';
+  const usados =
+    !!t &&
+    (fondo !== '0.00' ||
+      (s.movimientos_usd?.length ?? 0) > 0 ||
+      (s.contado_usd !== null &&
+        s.contado_usd !== undefined &&
+        s.contado_usd !== '0.00'));
+  if (!t || !usados) return [];
+  const menos = (v: string) => (v === '0.00' ? usd(v) : `-${usd(v)}`);
+  const f: FilaCuadre[] = [
+    { izq: 'DÓLARES (US$)', der: '', negrita: true },
+    { izq: 'Fondo inicial', der: usd(fondo) },
+    { izq: `+ Ventas en US$ (${t.cantidad_ventas})`, der: usd(t.ventas) },
+  ];
+  if (t.ingresos !== '0.00')
+    f.push({ izq: '+ Ingresos', der: usd(t.ingresos) });
+  if (t.retiros !== '0.00') f.push({ izq: '- Retiros', der: menos(t.retiros) });
+  if (t.devoluciones !== '0.00')
+    f.push({ izq: '- Devoluciones', der: menos(t.devoluciones) });
+  f.push({
+    izq: 'Debería haber',
+    der: usd(s.esperado_usd ?? '0.00'),
+    negrita: true,
+  });
+  if (
+    s.contado_usd !== null &&
+    s.contado_usd !== undefined &&
+    s.diferencia_usd
+  ) {
+    const dif = s.diferencia_usd;
+    f.push(
+      { izq: 'Contado', der: usd(s.contado_usd), negrita: true },
+      {
+        izq:
+          dif === '0.00'
+            ? 'Diferencia (cuadra)'
+            : dif.startsWith('-')
+              ? 'FALTANTE US$'
+              : 'SOBRANTE US$',
+        der: usd(dif.replace('-', '')),
+        negrita: true,
+      },
+    );
+    const conteo = s.conteo?.usd;
+    if (conteo && d.denominacionesUsd)
+      for (const den of d.denominacionesUsd) {
+        const n = conteo[den];
+        if (!n) continue;
+        f.push({
+          izq: `${n} x US$${den}`,
+          der: usd(`${(BigInt(den) * BigInt(n)).toString()}.00`),
+        });
+      }
+  }
+  for (const x of (s.movimientos_usd ?? []).filter((m) => m.tipo !== 'venta')) {
+    const signo = x.tipo === 'ingreso' ? '' : '-';
+    f.push({
+      izq: `${NOMBRE_TIPO[x.tipo] ?? x.tipo} US$${x.venta ? ` ${x.venta}` : ''} (tasa ${x.tasa})`,
+      der: `${signo}${usd(x.monto)}`,
+    });
+    if (x.motivo)
+      f.push({ izq: `${x.motivo} · ${x.usuario}`, der: '', nota: true });
+  }
+  return f;
+}
 
 const MM = 72 / 25.4;
 const MEDIDAS: Record<
@@ -78,6 +182,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   compra_reverso: 'Compra anulada (devuelto)',
   abono_credito: 'Abono de crédito',
   abono_anulado: 'Abono anulado (devuelto)',
+  cambio: 'Devuelta en RD$ (pago en US$)',
+  cambio_reverso: 'Devuelta en RD$ devuelta',
 };
 
 function fecha(iso: string, zona: string): string {
@@ -181,6 +287,13 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
     fila('+ Abonos de crédito', dinero(s.totales.abonos_credito));
   if (s.totales.abonos_anulados !== '0.00')
     fila('- Abonos anulados (devuelto)', menos(s.totales.abonos_anulados));
+  if (s.totales.cambios && s.totales.cambios !== '0.00')
+    fila('- Devuelta en RD$ de pagos en US$', menos(s.totales.cambios));
+  if (s.totales.cambios_devueltos && s.totales.cambios_devueltos !== '0.00')
+    fila(
+      '+ Devueltas en RD$ que volvieron',
+      dinero(s.totales.cambios_devueltos),
+    );
   doc.moveDown(0.2);
   fila('Debería haber', dinero(s.esperado), true, m.letra + 1);
 
@@ -220,6 +333,19 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
     }
   }
 
+  const dolares = filasDolares(d);
+  if (dolares.length > 0) {
+    linea();
+    for (const x of dolares) {
+      if (x.nota) {
+        doc
+          .font('Helvetica')
+          .fontSize(m.letra - 1)
+          .text(`  ${x.izq}`, xFilas, doc.y, { width: anchoFilas });
+      } else fila(x.izq, x.der, x.negrita);
+    }
+  }
+
   // Detalle de gastos, retiros, ingresos y devoluciones (las ventas se resumen).
   const otros = s.movimientos.filter((x) => x.tipo !== 'venta');
   if (otros.length > 0) {
@@ -234,7 +360,8 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
         x.tipo === 'desde_cuenta' ||
         x.tipo === 'san_cuota' ||
         x.tipo === 'compra_reverso' ||
-        x.tipo === 'abono_credito'
+        x.tipo === 'abono_credito' ||
+        x.tipo === 'cambio_reverso'
           ? ''
           : '-';
       fila(
@@ -335,6 +462,12 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
     el.push(fila('+ Abonos de crédito', dinero(t.abonos_credito)));
   if (t.abonos_anulados !== '0.00')
     el.push(fila('- Abonos anulados (devuelto)', menos(t.abonos_anulados)));
+  if (t.cambios && t.cambios !== '0.00')
+    el.push(fila('- Devuelta en RD$ de pagos en US$', menos(t.cambios)));
+  if (t.cambios_devueltos && t.cambios_devueltos !== '0.00')
+    el.push(
+      fila('+ Devueltas en RD$ que volvieron', dinero(t.cambios_devueltos)),
+    );
   el.push(fila('Debería haber', dinero(s.esperado), true));
   if (s.contado !== null && s.diferencia !== null) {
     const dif = s.diferencia;
@@ -370,6 +503,14 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
       }
     }
   }
+  const dolares = filasDolares(d);
+  if (dolares.length > 0) {
+    el.push({ tipo: 'linea' });
+    for (const x of dolares)
+      el.push(
+        x.nota ? { tipo: 'nota', texto: x.izq } : fila(x.izq, x.der, x.negrita),
+      );
+  }
   const otros = s.movimientos.filter((x) => x.tipo !== 'venta');
   if (otros.length > 0) {
     el.push(
@@ -382,7 +523,8 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
         x.tipo === 'desde_cuenta' ||
         x.tipo === 'san_cuota' ||
         x.tipo === 'compra_reverso' ||
-        x.tipo === 'abono_credito'
+        x.tipo === 'abono_credito' ||
+        x.tipo === 'cambio_reverso'
           ? ''
           : '-';
       el.push(

@@ -91,7 +91,7 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
     ? `<table><thead><tr><th>Descripción</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Desc.</th><th class="n">ITBIS</th><th class="n">Total</th></tr></thead><tbody>${v.lineas
         .map(
           (l) =>
-            `<tr><td>${esc(l.descripcion)}</td><td class="n">${esc(cantidad(l.cantidad))}</td><td class="n">${dinero(l.precio_unitario)}</td><td class="n">${
+            `<tr><td>${esc(l.descripcion)}${l.precio_usd ? `<br><span class="pequena">US$${esc(l.precio_usd)} x tasa ${esc(Number(l.tasa_dolar).toString())}</span>` : ''}</td><td class="n">${esc(cantidad(l.cantidad))}</td><td class="n">${dinero(l.precio_unitario)}</td><td class="n">${
               l.descuento === '0.00' ? '—' : `-${dinero(l.descuento)}`
             }</td><td class="n">${Number(l.tasa) === 0 ? 'Exento' : `${dinero(l.itbis)} (${esc(cantidad(l.tasa))}%)`}</td><td class="n">${dinero(l.total)}</td></tr>`,
         )
@@ -104,7 +104,8 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
               `${esc(cantidad(l.cantidad))} x ${dinero(l.precio_unitario)} ${Number(l.tasa) === 0 ? 'Exento' : `ITBIS ${esc(cantidad(l.tasa))}%`}`,
               dinero(l.total),
             ) +
-            (l.descuento !== '0.00' ? fila('&nbsp;&nbsp;Descuento', `-${dinero(l.descuento)}`) : ''),
+            (l.descuento !== '0.00' ? fila('&nbsp;&nbsp;Descuento', `-${dinero(l.descuento)}`) : '') +
+            (l.precio_usd ? fila(`&nbsp;&nbsp;US$${esc(l.precio_usd)} x tasa ${esc(Number(l.tasa_dolar).toString())}`, '') : ''),
         )
         .join('')
 
@@ -114,6 +115,14 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
         fila(esc(p.forma_pago), dinero(p.monto)) +
         (p.recibido ? fila('Recibido', dinero(p.recibido)) : '') +
         (p.devuelta ? fila('Devuelta', dinero(p.devuelta), 'negrita') : '') +
+        // Pago en dólares: lo cobrado en US$, la tasa y la devuelta.
+        (p.moneda === 'USD' && p.monto_usd && p.recibido_usd
+          ? fila(`En dólares (tasa ${esc(Number(p.tasa).toString())})`, `US$${esc(p.monto_usd)}`) +
+            fila('Recibido', `US$${esc(p.recibido_usd)}`) +
+            (p.devuelta_monto && p.devuelta_monto !== '0.00'
+              ? fila('Devuelta', p.devuelta_moneda === 'USD' ? `US$${esc(p.devuelta_monto)}` : dinero(p.devuelta_monto), 'negrita')
+              : '')
+          : '') +
         (p.referencia ? fila('Referencia', esc(p.referencia)) : ''),
     )
     .join('')

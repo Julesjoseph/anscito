@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { SesionVencida, resumenPanel } from './api'
 import type { PeriodoPanel, ResumenPanel } from './api'
+import { dolares } from './dolar'
 import { CajaError } from './componentes'
 import { cantidad, dinero, mensajeDe } from './formato'
 
@@ -306,7 +307,14 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
           {caja && (
             <Tarjeta
               titulo="Efectivo en caja"
-              valor={dinero(caja.total)}
+              valor={
+                <>
+                  {dinero(caja.total)}
+                  {caja.total_usd && caja.total_usd !== '0.00' && (
+                    <span className="block text-base text-gray-700">+ {dolares(caja.total_usd)}</span>
+                  )}
+                </>
+              }
               icono={<Wallet size={16} />}
               detalle={
                 caja.abiertas.length === 0

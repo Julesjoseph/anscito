@@ -33,6 +33,7 @@ import {
   CajaError,
   Ventana,
 } from './componentes'
+import { dolares } from './dolar'
 import { dinero, mensajeDe, porcentaje } from './formato'
 import Impuestos from './Impuestos'
 import { montoValido, vistaPrevia } from './itbis'
@@ -91,6 +92,9 @@ function FormServicio({
     fila?.unidad_medida_id ?? '',
   )
   const [precio, setPrecio] = useState(fila?.precio ?? '')
+  // Moneda del precio (y del costo): en US$ se convierte a RD$ al vender.
+  const [moneda, setMoneda] = useState<'DOP' | 'USD'>(fila?.moneda ?? 'DOP')
+  const plata = (v: string | null | undefined) => (moneda === 'USD' ? dolares(v) : dinero(v))
   const [costo, setCosto] = useState(fila?.costo ?? '')
   const [gananciaTipo, setGananciaTipo] = useState<'costo' | 'comision'>(
     fila?.ganancia_tipo ?? 'costo',
@@ -154,6 +158,7 @@ function FormServicio({
       categoriaId,
       unidadMedidaId,
       precio: precio.trim(),
+      moneda,
       costo: gananciaTipo === 'costo' ? costo.trim() : '',
       impuestoId,
       precioIncluyeItbis: incluye,
@@ -274,15 +279,31 @@ function FormServicio({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm text-gray-600">
-          Precio (RD$)
-          <input
-            type="text"
-            inputMode="decimal"
-            value={precio}
-            onChange={(e) => setPrecio(e.target.value)}
-            placeholder="0.00"
-            className={CAMPO}
-          />
+          Precio
+          <div className="flex gap-2">
+            <select
+              value={moneda}
+              onChange={(e) => setMoneda(e.target.value as 'DOP' | 'USD')}
+              className={`${CAMPO} w-24`}
+              aria-label="Moneda del precio"
+            >
+              <option value="DOP">RD$</option>
+              <option value="USD">US$</option>
+            </select>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={precio}
+              onChange={(e) => setPrecio(e.target.value)}
+              placeholder="0.00"
+              className={`${CAMPO} min-w-0 flex-1`}
+            />
+          </div>
+          {moneda === 'USD' && (
+            <span className="text-xs text-gray-500">
+              En dólares: al vender se convierte a RD$ con la tasa del día (el costo también va en US$).
+            </span>
+          )}
           {precio.trim() !== '' && !montoValido(precio) && (
             <span className="text-xs text-red-600">
               Use solo números y punto, con hasta 2 decimales (ej: 150.50)
@@ -394,17 +415,17 @@ function FormServicio({
             <dl className="grid grid-cols-3 gap-2">
               <div>
                 <dt className="text-xs text-gray-500">Base</dt>
-                <dd className="font-medium">{dinero(mostrar.base)}</dd>
+                <dd className="font-medium">{plata(mostrar.base)}</dd>
               </div>
               <div>
                 <dt className="text-xs text-gray-500">
                   ITBIS ({porcentaje(impuesto.tasa)})
                 </dt>
-                <dd className="font-medium">{dinero(mostrar.itbis)}</dd>
+                <dd className="font-medium">{plata(mostrar.itbis)}</dd>
               </div>
               <div>
                 <dt className="text-xs text-gray-500">Total</dt>
-                <dd className="font-medium">{dinero(mostrar.total)}</dd>
+                <dd className="font-medium">{plata(mostrar.total)}</dd>
               </div>
             </dl>
           ) : (
@@ -715,7 +736,7 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
-                    {dinero(f.precio)}
+                    {f.moneda === 'USD' ? dolares(f.precio) : dinero(f.precio)}
                     <div className="text-xs text-gray-500">
                       por {f.unidad_medida.toLowerCase()}
                     </div>
@@ -723,7 +744,7 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
                       {f.ganancia_tipo === 'comision'
                         ? `Comisión ${f.comision_pct?.replace(/\.?0+$/, '')}%`
                         : f.costo
-                          ? `Costo ${dinero(f.costo)}`
+                          ? `Costo ${f.moneda === 'USD' ? dolares(f.costo) : dinero(f.costo)}`
                           : 'Sin costo registrado'}
                     </div>
                   </td>

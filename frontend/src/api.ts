@@ -147,6 +147,7 @@ export type FilaServicio = {
   unidad_medida_id: string
   unidad_medida: string
   precio: string
+  moneda: 'DOP' | 'USD' // del precio y del costo
   costo: string | null
   impuesto_id: string
   impuesto: string
@@ -183,6 +184,7 @@ export type DatosServicio = {
   categoriaId: string
   unidadMedidaId: string
   precio: string
+  moneda: 'DOP' | 'USD'
   costo: string
   impuestoId: string
   precioIncluyeItbis: boolean
@@ -845,7 +847,11 @@ export type PrepararVenta = {
   // Facturación electrónica: si ya empezó, cada venta deja su e-CF por emitir.
   facturacion: { activa: boolean; umbral: string }
   credito: { puedeVender: boolean; puedeAutorizar: boolean }
+  // Tasa del dólar vigente (RD$ por 1 US$), o null si no hay.
+  tasaDolar: TasaDolar | null
 }
+
+export type TasaDolar = { id: string; tasa: string; vigente_desde: string }
 
 export type ArticuloVenta = {
   tipo: 'producto' | 'servicio'
@@ -854,7 +860,8 @@ export type ArticuloVenta = {
   nombre: string
   unidad: string
   permite_decimales: boolean
-  precio: string
+  precio: string // en la moneda del artículo
+  moneda: 'DOP' | 'USD'
   precio_incluye_itbis: boolean
   impuesto: string
   tasa: string
@@ -886,8 +893,10 @@ export type TotalesVenta = {
 }
 
 export type PrevisualizacionVenta = {
-  lineas: (Desglose & { codigo: string; bruto: string; descuento: string; cantidad: string })[]
+  lineas: (Desglose & { codigo: string; bruto: string; descuento: string; cantidad: string; precio_usd: string | null })[]
   totales: TotalesVenta
+  // Para cobrar en dólares: tasa vigente y total en US$ (subido al centavo).
+  dolar: { tasa: string; totalUsd: string } | null
 }
 
 export type DatosVenta = {
@@ -900,6 +909,10 @@ export type DatosVenta = {
     referencia?: string
     cajaId?: string
     cuentaId?: string
+    // Pago en dólares (solo efectivo).
+    moneda?: 'DOP' | 'USD'
+    recibidoUsd?: string
+    devueltaMoneda?: 'DOP' | 'USD'
   }
   comprobanteFiscal: string
   // '31' Crédito Fiscal, '32' Consumo o '' (según el cliente).
@@ -956,6 +969,8 @@ export type LineaDetalle = {
   itbis: string
   total: string
   costo_unitario?: string | null
+  precio_usd?: string | null
+  tasa_dolar?: string | null
 }
 
 export type DetalleVenta = {
@@ -988,6 +1003,12 @@ export type DetalleVenta = {
     devuelta: string | null
     referencia: string | null
     forma_pago: string
+    moneda?: 'DOP' | 'USD'
+    tasa?: string | null
+    monto_usd?: string | null
+    recibido_usd?: string | null
+    devuelta_moneda?: 'DOP' | 'USD' | null
+    devuelta_monto?: string | null
   }[]
 }
 
@@ -1002,6 +1023,25 @@ export type EcfDeVenta = {
 // Datos para imprimir el comprobante directo (se arma en ticket.ts).
 export const obtenerTicket = (token: string, id: string) =>
   llamar<DatosTicket>('GET', `/ventas/${id}/ticket`, token)
+
+export type CobroDolares = {
+  tasa: string
+  montoUsd: string
+  recibidoUsd: string
+  devueltaMoneda: 'DOP' | 'USD'
+  devueltaMonto: string
+  entraUsd: string
+  saleDop: string
+}
+
+export const tasasDolar = (token: string) =>
+  llamar<{
+    vigente: TasaDolar | null
+    historial: { tasa: string; vigente_desde: string; motivo: string | null; usuario: string }[]
+  }>('GET', '/ventas/tasa-dolar', token)
+
+export const registrarTasaDolar = (token: string, datos: { tasa: string; motivo: string }) =>
+  llamar<{ id: string; tasa: string }>('POST', '/ventas/tasa-dolar', token, datos)
 
 export const prepararVenta = (token: string) =>
   llamar<PrepararVenta>('GET', '/ventas/preparar', token)
@@ -1031,6 +1071,7 @@ export const registrarVenta = (token: string, datos: DatosVenta) =>
     devuelta: string | null
     ecf: string | null
     credito: { monto: string; vencimiento: string } | null
+    dolares: CobroDolares | null
   }>(
     'POST',
     '/ventas',
@@ -1119,8 +1160,9 @@ export type ResumenPanel = {
     no_llegaron: number
   }
   caja?: {
-    abiertas: { caja: string; usuario: string; abierta_en: string; esperado: string }[]
+    abiertas: { caja: string; usuario: string; abierta_en: string; esperado: string; esperado_usd: string }[]
     total: string
+    total_usd: string
   }
   servicios?: {
     cantidad: string
@@ -1178,11 +1220,14 @@ export type FilaCaja = {
   fondo_inicial: string | null
   abierta_por: string | null
   esperado: string | null
+  esperado_usd: string | null
 }
 
 export type PrepararCaja = {
   categoriasGasto: { id: string; codigo: string; nombre: string }[]
   denominaciones: string[]
+  denominacionesUsd: string[]
+  tasaDolar: TasaDolar | null
   cuentas: { id: string; nombre: string; moneda: string; simbolo: string }[]
 }
 
@@ -1200,6 +1245,8 @@ export type TipoMovimientoCaja =
   | 'compra_reverso'
   | 'abono_credito'
   | 'abono_anulado'
+  | 'cambio'
+  | 'cambio_reverso'
 
 export type MovimientoCaja = {
   id: string
@@ -1230,7 +1277,22 @@ export type TotalesCaja = {
   compras_devueltas: string
   abonos_credito: string
   abonos_anulados: string
+  cambios: string // devuelta en RD$ de pagos en US$
+  cambios_devueltos: string
   cantidad_ventas: number
+}
+
+export type MovimientoCajaUsd = {
+  id: string
+  tipo: 'venta' | 'devolucion' | 'ingreso' | 'retiro'
+  monto: string
+  tasa: string
+  monto_dop: string
+  fecha: string
+  motivo: string | null
+  usuario: string
+  venta: string | null
+  venta_id: string | null
 }
 
 export type SesionCaja = {
@@ -1248,11 +1310,18 @@ export type SesionCaja = {
   esperado: string
   contado: string | null
   diferencia: string | null
-  conteo: Record<string, number> | null
+  conteo: (Record<string, number> & { usd?: Record<string, number> }) | null
   motivo_diferencia: string | null
   notas: string | null
   totales: TotalesCaja
   movimientos: MovimientoCaja[]
+  // Dólares (aparte de los pesos).
+  fondo_inicial_usd: string
+  esperado_usd: string
+  contado_usd: string | null
+  diferencia_usd: string | null
+  totales_usd: { ventas: string; devoluciones: string; ingresos: string; retiros: string; cantidad_ventas: number }
+  movimientos_usd: MovimientoCajaUsd[]
 }
 
 export type FilaSesionCaja = {
@@ -1269,6 +1338,10 @@ export type FilaSesionCaja = {
   contado: string | null
   diferencia: string | null
   motivo_diferencia: string | null
+  fondo_inicial_usd: string
+  esperado_usd: string | null
+  contado_usd: string | null
+  diferencia_usd: string | null
 }
 
 export type PaginaSesionesCaja = {
@@ -1312,8 +1385,14 @@ export const estadoCaja = (
 export const abrirCaja = (
   token: string,
   id: string,
-  datos: { fondoInicial: string; notas: string },
+  datos: { fondoInicial: string; fondoInicialUsd?: string; notas: string },
 ) => llamar<{ id: string; sesion: string }>('POST', `/caja/cajas/${id}/abrir`, token, datos)
+
+export const movimientoCajaUsd = (
+  token: string,
+  sesionId: string,
+  datos: { tipo: 'ingreso' | 'retiro'; monto: string; motivo: string },
+) => llamar<{ esperadoUsd: string }>('POST', `/caja/sesiones/${sesionId}/movimientos-usd`, token, datos)
 
 export const movimientoCaja = (
   token: string,
@@ -1331,9 +1410,16 @@ export const movimientoCaja = (
 export const cerrarCaja = (
   token: string,
   sesionId: string,
-  datos: { conteo: Record<string, number>; motivo: string; notas: string },
+  datos: { conteo: Record<string, number>; conteoUsd?: Record<string, number>; motivo: string; notas: string },
 ) =>
-  llamar<{ esperado: string; contado: string; diferencia: string }>(
+  llamar<{
+    esperado: string
+    contado: string
+    diferencia: string
+    esperadoUsd: string
+    contadoUsd: string
+    diferenciaUsd: string
+  }>(
     'POST',
     `/caja/sesiones/${sesionId}/cerrar`,
     token,

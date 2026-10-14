@@ -45,6 +45,22 @@ export class VentasController {
     return this.ventas.preparar(req.usuario.id);
   }
 
+  // Tasa del dólar: la ven quienes venden; la cambia el administrador.
+  @Get('tasa-dolar')
+  @RequierePermiso('ventas.ver')
+  tasasDolar() {
+    return this.ventas.tasasDolar();
+  }
+
+  @Post('tasa-dolar')
+  @RequierePermiso('ventas.tasa_dolar')
+  registrarTasaDolar(
+    @Req() req: Peticion,
+    @Body() body: { tasa?: unknown; motivo?: unknown },
+  ) {
+    return this.ventas.registrarTasaDolar(req.usuario.id, req.ip, body ?? {});
+  }
+
   @Get('catalogo')
   @RequierePermiso('ventas.crear')
   catalogo(@Query('texto') texto?: string) {

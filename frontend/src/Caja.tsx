@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  DollarSign,
   Eye,
   Lock,
   Monitor,
@@ -25,6 +26,7 @@ import {
   listarCajas,
   listarSesionesCaja,
   movimientoCaja,
+  movimientoCajaUsd,
   obtenerCuadre,
   ticketCuadre,
   prepararCaja,
@@ -48,6 +50,7 @@ import {
   CajaError,
   Ventana,
 } from './componentes'
+import { dolares, verTasa } from './dolar'
 import { dinero, mensajeDe } from './formato'
 
 type Props = {
@@ -72,6 +75,15 @@ const NOMBRE_TIPO: Record<string, string> = {
   compra_reverso: 'Compra anulada (devuelto)',
   abono_credito: 'Abono de crédito',
   abono_anulado: 'Abono anulado (devuelto)',
+  cambio: 'Devuelta en RD$ (pago en US$)',
+  cambio_reverso: 'Devuelta en RD$ devuelta (venta anulada)',
+}
+
+const NOMBRE_TIPO_USD: Record<string, string> = {
+  venta: 'Venta cobrada en US$',
+  devolucion: 'Devolución en US$ (venta anulada)',
+  ingreso: 'Ingreso de US$',
+  retiro: 'Retiro de US$',
 }
 
 // ---------- Dinero con enteros (solo para el conteo en pantalla) ----------
@@ -135,6 +147,7 @@ function FormAbrir({
   onSesionVencida: () => void
 }) {
   const [fondo, setFondo] = useState('')
+  const [fondoUsd, setFondoUsd] = useState('')
   const [notas, setNotas] = useState('')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -144,7 +157,7 @@ function FormAbrir({
     setGuardando(true)
     setError('')
     try {
-      await abrirCaja(token, caja.id, { fondoInicial: fondo.trim(), notas })
+      await abrirCaja(token, caja.id, { fondoInicial: fondo.trim(), fondoInicialUsd: fondoUsd.trim(), notas })
       onListo()
     } catch (err) {
       if (err instanceof SesionVencida) onSesionVencida()
@@ -170,12 +183,113 @@ function FormAbrir({
         <span className="text-xs text-gray-500">El cambio con que empieza la caja (puede ser 0).</span>
       </label>
       <label className="flex flex-col gap-1 text-sm text-gray-600">
+        Fondo inicial en dólares (US$, opcional)
+        <input
+          type="text"
+          inputMode="decimal"
+          value={fondoUsd}
+          onChange={(e) => setFondoUsd(e.target.value)}
+          placeholder="0.00"
+          className={CAMPO}
+        />
+        <span className="text-xs text-gray-500">Los dólares se cuentan aparte de los pesos.</span>
+      </label>
+      <label className="flex flex-col gap-1 text-sm text-gray-600">
         Notas (opcional)
         <textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={2} className={AREA} />
       </label>
       {error && <CajaError>{error}</CajaError>}
-      <button type="submit" disabled={guardando || !MONTO.test(fondo.trim())} className={BOTON_PRINCIPAL}>
+      <button
+        type="submit"
+        disabled={guardando || !MONTO.test(fondo.trim()) || (fondoUsd.trim() !== '' && !MONTO.test(fondoUsd.trim()))}
+        className={BOTON_PRINCIPAL}
+      >
         <Unlock size={16} /> {guardando ? 'Abriendo…' : `Abrir ${caja.nombre}`}
+      </button>
+    </form>
+  )
+}
+
+// ---------- Dólares: ingreso o retiro ----------
+
+function FormDolares({
+  token,
+  sesionId,
+  esperadoUsd,
+  prep,
+  onListo,
+  onSesionVencida,
+}: {
+  token: string
+  sesionId: string
+  esperadoUsd: string
+  prep: PrepararCaja
+  onListo: () => void
+  onSesionVencida: () => void
+}) {
+  const [tipo, setTipo] = useState<'ingreso' | 'retiro'>('retiro')
+  const [monto, setMonto] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const valido = MONTO.test(monto.trim()) && centavos(monto.trim()) > 0n
+  const pasa = valido && tipo === 'retiro' && centavos(monto.trim()) > centavos(esperadoUsd)
+
+  async function enviar(e: FormEvent) {
+    e.preventDefault()
+    setGuardando(true)
+    setError('')
+    try {
+      await movimientoCajaUsd(token, sesionId, { tipo, monto: monto.trim(), motivo: motivo.trim() })
+      onListo()
+    } catch (err) {
+      if (err instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <form onSubmit={enviar} className="flex flex-col gap-3 text-sm">
+      <p className="text-gray-600">
+        En la caja hay ahora <strong>{dolares(esperadoUsd)}</strong>. Tasa del día: {prep.tasaDolar ? `RD$${verTasa(prep.tasaDolar.tasa)}` : 'sin registrar'} (queda guardada con el movimiento).
+      </p>
+      <div className="flex gap-2">
+        {(
+          [
+            ['retiro', 'Sacar dólares'],
+            ['ingreso', 'Meter dólares'],
+          ] as const
+        ).map(([t, nombre]) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTipo(t)}
+            className={`flex-1 rounded-lg border px-3 py-2 ${tipo === t ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]' : 'border-gray-300 hover:bg-gray-50'}`}
+          >
+            {nombre}
+          </button>
+        ))}
+      </div>
+      <label className="flex flex-col gap-1 text-gray-600">
+        Monto (US$)
+        <input type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} autoFocus />
+        {pasa && <span className="text-xs text-red-600">Es más de lo que hay ({dolares(esperadoUsd)}).</span>}
+      </label>
+      <label className="flex flex-col gap-1 text-gray-600">
+        Motivo
+        <input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={500} placeholder={tipo === 'retiro' ? 'Ej.: Depósito US$ en Banreservas dólares' : 'Ej.: Dólares para dar cambio'} className={CAMPO} />
+      </label>
+      {tipo === 'retiro' && (
+        <p className="text-xs text-gray-500">
+          Si los lleva al banco, escriba a qué cuenta: es dinero del negocio que cambia de lugar, no un gasto.
+        </p>
+      )}
+      {!prep.tasaDolar && <CajaError>No hay tasa del dólar: el administrador la pone en Facturación.</CajaError>}
+      {error && <CajaError>{error}</CajaError>}
+      <button type="submit" disabled={guardando || !valido || pasa || motivo.trim().length < 5 || !prep.tasaDolar} className={BOTON_PRINCIPAL}>
+        <DollarSign size={16} /> {guardando ? 'Guardando…' : tipo === 'retiro' ? 'Registrar retiro de US$' : 'Registrar ingreso de US$'}
       </button>
     </form>
   )
@@ -453,6 +567,7 @@ function FormCerrar({
   onSesionVencida: () => void
 }) {
   const [conteo, setConteo] = useState<Record<string, string>>({})
+  const [conteoUsd, setConteoUsd] = useState<Record<string, string>>({})
   const [motivo, setMotivo] = useState('')
   const [notas, setNotas] = useState('')
   const [error, setError] = useState('')
@@ -472,14 +587,30 @@ function FormCerrar({
   })
   const contado = Object.entries(cantidades).reduce((s, [d, n]) => s + BigInt(d) * 100n * BigInt(n), 0n)
   const diferencia = contado - centavos(sesion.esperado)
-  const pideMotivo = diferencia !== 0n
+  // Dólares: se cuentan aparte (si no se usaron, todo en 0).
+  const cantidadesUsd = useMemo(() => {
+    const r: Record<string, number> = {}
+    for (const d of prep.denominacionesUsd) {
+      const t = (conteoUsd[d] ?? '').trim()
+      if (/^\d{1,6}$/.test(t) && Number(t) > 0) r[d] = Number(t)
+    }
+    return r
+  }, [conteoUsd, prep.denominacionesUsd])
+  const invalidoUsd = prep.denominacionesUsd.some((d) => {
+    const t = (conteoUsd[d] ?? '').trim()
+    return t !== '' && !/^\d{1,6}$/.test(t)
+  })
+  const contadoUsd = Object.entries(cantidadesUsd).reduce((s, [d, n]) => s + BigInt(d) * 100n * BigInt(n), 0n)
+  const diferenciaUsd = contadoUsd - centavos(sesion.esperado_usd)
+  const hayDolares = sesion.esperado_usd !== '0.00' || sesion.movimientos_usd.length > 0 || sesion.fondo_inicial_usd !== '0.00'
+  const pideMotivo = diferencia !== 0n || diferenciaUsd !== 0n
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
     setGuardando(true)
     setError('')
     try {
-      await cerrarCaja(token, sesion.id, { conteo: cantidades, motivo, notas })
+      await cerrarCaja(token, sesion.id, { conteo: cantidades, conteoUsd: cantidadesUsd, motivo, notas })
       onListo()
     } catch (err) {
       if (err instanceof SesionVencida) onSesionVencida()
@@ -524,6 +655,40 @@ function FormCerrar({
           <dd>{dinero(texto2(diferencia < 0n ? -diferencia : diferencia))}</dd>
         </div>
       </dl>
+      {hayDolares && (
+        <>
+          <div className="font-medium">Dólares (US$)</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {prep.denominacionesUsd.map((d) => {
+              const n = cantidadesUsd[d] ?? 0
+              return (
+                <label key={d} className="flex flex-col gap-1 rounded-lg border border-gray-200 p-2">
+                  <span className="font-medium">US${d}</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={conteoUsd[d] ?? ''}
+                    onChange={(e) => setConteoUsd({ ...conteoUsd, [d]: e.target.value })}
+                    placeholder="0"
+                    aria-label={`Cantidad de US$${d}`}
+                    className={`${CAMPO} h-9`}
+                  />
+                  <span className="text-xs text-gray-500">{n > 0 ? dolares(texto2(BigInt(d) * 100n * BigInt(n))) : '—'}</span>
+                </label>
+              )
+            })}
+          </div>
+          {invalidoUsd && <span className="text-xs text-red-600">Escriba solo números enteros en las cantidades.</span>}
+          <dl className="flex flex-col gap-1 border-y border-gray-100 py-3">
+            <div className="flex justify-between"><dt className="text-gray-500">Debería haber</dt><dd className="font-medium">{dolares(sesion.esperado_usd)}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">Contado</dt><dd className="font-medium">{dolares(texto2(contadoUsd))}</dd></div>
+            <div className={`flex justify-between text-base font-medium ${diferenciaUsd === 0n ? 'text-green-700' : 'text-red-700'}`}>
+              <dt>{diferenciaUsd === 0n ? 'Cuadra' : diferenciaUsd < 0n ? 'Falta' : 'Sobra'}</dt>
+              <dd>{dolares(texto2(diferenciaUsd < 0n ? -diferenciaUsd : diferenciaUsd))}</dd>
+            </div>
+          </dl>
+        </>
+      )}
       {pideMotivo && (
         <label className="flex flex-col gap-1 text-gray-600">
           Motivo de la diferencia (obligatorio)
@@ -535,7 +700,7 @@ function FormCerrar({
         <textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={2} className={AREA} />
       </label>
       {error && <CajaError>{error}</CajaError>}
-      <button type="submit" disabled={guardando || invalido || (pideMotivo && motivo.trim().length < 5)} className={BOTON_PRINCIPAL}>
+      <button type="submit" disabled={guardando || invalido || invalidoUsd || (pideMotivo && motivo.trim().length < 5)} className={BOTON_PRINCIPAL}>
         <Lock size={16} /> {guardando ? 'Cerrando…' : 'Cerrar la caja'}
       </button>
     </form>
@@ -561,7 +726,7 @@ function VerSesion({
 }) {
   const [s, setS] = useState<SesionCaja | null>(null)
   const [error, setError] = useState('')
-  const [accion, setAccion] = useState<'movimiento' | 'cerrar' | 'depositar' | 'traer' | null>(null)
+  const [accion, setAccion] = useState<'movimiento' | 'cerrar' | 'depositar' | 'traer' | 'dolares' | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -593,7 +758,9 @@ function VerSesion({
         <button type="button" onClick={() => setAccion(null)} className="inline-flex items-center gap-1 self-start text-sm text-gray-500 hover:text-gray-800">
           <ChevronLeft size={16} /> Volver a la sesión
         </button>
-        {accion === 'movimiento' ? (
+        {accion === 'dolares' ? (
+          <FormDolares token={token} sesionId={s.id} esperadoUsd={s.esperado_usd} prep={prep} onListo={listo} onSesionVencida={onSesionVencida} />
+        ) : accion === 'movimiento' ? (
           <FormMovimiento token={token} sesionId={s.id} esperado={s.esperado} prep={prep} onListo={listo} onSesionVencida={onSesionVencida} />
         ) : accion === 'depositar' || accion === 'traer' ? (
           <FormCuenta token={token} cajaId={s.caja_id} sentido={accion} esperado={s.esperado} prep={prep} onListo={listo} onSesionVencida={onSesionVencida} />
@@ -636,6 +803,8 @@ function VerSesion({
         {t.compras_devueltas !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Compras anuladas (devuelto)</dt><dd>{dinero(t.compras_devueltas)}</dd></div>}
         {t.abonos_credito !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Abonos de crédito</dt><dd>{dinero(t.abonos_credito)}</dd></div>}
         {t.abonos_anulados !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Abonos anulados (devuelto)</dt><dd>{dinero(t.abonos_anulados)}</dd></div>}
+        {t.cambios !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Devuelta en RD$ de pagos en US$</dt><dd>{dinero(t.cambios)}</dd></div>}
+        {t.cambios_devueltos !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Devueltas en RD$ que volvieron</dt><dd>{dinero(t.cambios_devueltos)}</dd></div>}
       </dl>
       <div className="flex flex-col gap-1 rounded-lg bg-gray-50 p-3">
         <div className="flex justify-between text-base font-medium"><span>Debería haber</span><span>{dinero(s.esperado)}</span></div>
@@ -652,6 +821,27 @@ function VerSesion({
         {s.notas && <div className="text-gray-500">Notas: {s.notas}</div>}
       </div>
 
+      {(s.fondo_inicial_usd !== '0.00' || s.movimientos_usd.length > 0 || s.esperado_usd !== '0.00') && (
+        <div className="flex flex-col gap-1 rounded-lg border border-gray-200 p-3">
+          <div className="font-medium">Dólares (US$)</div>
+          <div className="flex justify-between"><span className="text-gray-500">Fondo inicial</span><span>{dolares(s.fondo_inicial_usd)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">+ Ventas en US$ ({s.totales_usd.cantidad_ventas})</span><span>{dolares(s.totales_usd.ventas)}</span></div>
+          {s.totales_usd.ingresos !== '0.00' && <div className="flex justify-between"><span className="text-gray-500">+ Ingresos</span><span>{dolares(s.totales_usd.ingresos)}</span></div>}
+          {s.totales_usd.retiros !== '0.00' && <div className="flex justify-between"><span className="text-gray-500">− Retiros</span><span>{dolares(s.totales_usd.retiros)}</span></div>}
+          {s.totales_usd.devoluciones !== '0.00' && <div className="flex justify-between"><span className="text-gray-500">− Devoluciones</span><span>{dolares(s.totales_usd.devoluciones)}</span></div>}
+          <div className="flex justify-between text-base font-medium"><span>Debería haber</span><span>{dolares(s.esperado_usd)}</span></div>
+          {s.contado_usd !== null && s.diferencia_usd !== null && (
+            <>
+              <div className="flex justify-between"><span>Contado</span><span>{dolares(s.contado_usd)}</span></div>
+              <div className={`flex justify-between font-medium ${s.diferencia_usd === '0.00' ? 'text-green-700' : 'text-red-700'}`}>
+                <span>{s.diferencia_usd === '0.00' ? 'Cuadró' : s.diferencia_usd.startsWith('-') ? 'Faltante' : 'Sobrante'}</span>
+                <span>{dolares(s.diferencia_usd.replace('-', ''))}</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         {abierta && permisos.includes('caja.movimientos') && (
           <button type="button" onClick={() => setAccion('movimiento')} disabled={!prep} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
@@ -666,6 +856,11 @@ function VerSesion({
         {abierta && permisos.includes('caja.movimientos') && (
           <button type="button" onClick={() => setAccion('traer')} disabled={!prep} className={BOTON_SECUNDARIO}>
             Traer de una cuenta
+          </button>
+        )}
+        {abierta && permisos.includes('caja.movimientos') && (
+          <button type="button" onClick={() => setAccion('dolares')} disabled={!prep} className={`${BOTON_SECUNDARIO} inline-flex items-center gap-2`}>
+            <DollarSign size={16} /> Dólares: meter o sacar
           </button>
         )}
         {abierta && permisos.includes('caja.cerrar') && (
@@ -694,7 +889,7 @@ function VerSesion({
               </thead>
               <tbody>
                 {s.movimientos.map((m) => {
-                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota' || m.tipo === 'compra_reverso' || m.tipo === 'abono_credito'
+                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota' || m.tipo === 'compra_reverso' || m.tipo === 'abono_credito' || m.tipo === 'cambio_reverso'
                   return (
                     <tr key={m.id} className="border-t border-gray-100 align-top">
                       <td className="py-1.5 pr-2 whitespace-nowrap text-gray-500">{new Date(m.fecha).toLocaleTimeString('es-DO', { hour: 'numeric', minute: '2-digit' })}</td>
@@ -714,6 +909,44 @@ function VerSesion({
           </div>
         )}
       </section>
+
+      {s.movimientos_usd.length > 0 && (
+        <section>
+          <h3 className="mb-2 font-medium">Movimientos en dólares</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="text-xs text-gray-500">
+                <tr>
+                  <th className="py-1 pr-2 font-medium">Hora</th>
+                  <th className="py-1 pr-2 font-medium">Tipo</th>
+                  <th className="py-1 pr-2 font-medium">Detalle</th>
+                  <th className="py-1 pr-2 text-right font-medium">US$</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.movimientos_usd.map((m) => {
+                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso'
+                  return (
+                    <tr key={m.id} className="border-t border-gray-100 align-top">
+                      <td className="py-1.5 pr-2 whitespace-nowrap text-gray-500">{new Date(m.fecha).toLocaleTimeString('es-DO', { hour: 'numeric', minute: '2-digit' })}</td>
+                      <td className="py-1.5 pr-2">{NOMBRE_TIPO_USD[m.tipo] ?? m.tipo}</td>
+                      <td className="py-1.5 pr-2 text-gray-600">
+                        {[m.venta, m.motivo].filter(Boolean).join(' · ')}
+                        <span className="block text-xs text-gray-400">
+                          tasa {verTasa(m.tasa)} = {dinero(m.monto_dop)} · {m.usuario}
+                        </span>
+                      </td>
+                      <td className={`py-1.5 pr-2 text-right whitespace-nowrap font-medium ${suma ? 'text-green-700' : 'text-red-700'}`}>
+                        {suma ? '+' : '−'}{dolares(m.monto)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -943,6 +1176,7 @@ function Cajas({
               {abierta ? (
                 <div className="text-sm">
                   <div className="text-2xl font-medium">{dinero(c.esperado)}</div>
+                  {c.esperado_usd && c.esperado_usd !== '0.00' && <div className="text-lg font-medium text-gray-700">+ {dolares(c.esperado_usd)}</div>}
                   <div className="text-xs text-gray-500">
                     Debería haber · {c.sesion_texto} · abierta por {c.abierta_por} el {fecha(c.abierta_en)} con {dinero(c.fondo_inicial)}
                   </div>
@@ -1102,6 +1336,11 @@ function Historial({
                   <td className="px-3 py-2 text-right">{f.contado ? dinero(f.contado) : '—'}</td>
                   <td className={`px-3 py-2 text-right font-medium ${dif === null ? '' : dif === '0.00' ? 'text-green-700' : 'text-red-700'}`} title={f.motivo_diferencia ?? undefined}>
                     {dif === null ? '—' : dif === '0.00' ? 'Cuadró' : `${dif.startsWith('-') ? 'Faltan' : 'Sobran'} ${dinero(dif.replace('-', ''))}`}
+                    {f.diferencia_usd && f.diferencia_usd !== '0.00' && (
+                      <span className="block text-xs">
+                        {f.diferencia_usd.startsWith('-') ? 'Faltan' : 'Sobran'} {dolares(f.diferencia_usd.replace('-', ''))}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button type="button" onClick={() => setAbierta(f.id)} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100" aria-label={`Ver ${f.sesion_texto}`} title="Ver">

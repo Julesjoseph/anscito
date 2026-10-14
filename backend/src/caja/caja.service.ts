@@ -7,6 +7,13 @@ import {
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { DatabaseService } from '../database/database.service';
+import {
+  aPesos,
+  SQL_ESPERADO_USD,
+  SQL_SIGNO_CAJA_USD,
+  SQL_TOTALES_USD,
+  tasaVigente,
+} from '../comun/dolar';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import type { Formato } from '../ventas/recibo-pdf';
 import { generarCuadre, ticketCuadre } from './cuadre-pdf';
@@ -76,7 +83,11 @@ export class CajaService {
               CASE WHEN ses.id IS NOT NULL THEN (
                 ses.fondo_inicial + COALESCE((SELECT sum(m.monto * ${SQL_SIGNO_CAJA})
                   FROM caja_movimientos m WHERE m.sesion_id = ses.id), 0)
-              )::numeric(14,2) END AS esperado
+              )::numeric(14,2) END AS esperado,
+              CASE WHEN ses.id IS NOT NULL THEN (
+                ses.fondo_inicial_usd + COALESCE((SELECT sum(m.monto * ${SQL_SIGNO_CAJA_USD})
+                  FROM caja_movimientos_usd m WHERE m.sesion_id = ses.id), 0)
+              )::numeric(14,2) END AS esperado_usd
        FROM cajas c
        JOIN sucursales s ON s.id = c.sucursal_id
        LEFT JOIN caja_sesiones ses ON ses.caja_id = c.id AND ses.estado = 'abierta'
@@ -90,12 +101,14 @@ export class CajaService {
   }
 
   async preparar() {
-    const [cats, denom, cuentas] = await Promise.all([
+    const [cats, denom, denomUsd, tasa, cuentas] = await Promise.all([
       this.db.query(
         `SELECT id, codigo, nombre FROM categorias_gasto
          WHERE is_active ORDER BY orden, nombre`,
       ),
       this.config('caja.denominaciones'),
+      this.config('caja.denominaciones_usd'),
+      tasaVigente(this.db),
       // Para depositar o traer efectivo (solo nombre y moneda, sin saldos).
       this.db.query(
         `SELECT ct.id, ct.nombre, ct.moneda, mo.simbolo
@@ -106,6 +119,8 @@ export class CajaService {
     return {
       categoriasGasto: cats.rows,
       denominaciones: denom.split(',').map((d) => d.trim()),
+      denominacionesUsd: denomUsd.split(',').map((d) => d.trim()),
+      tasaDolar: tasa,
       cuentas: cuentas.rows,
     };
   }
@@ -264,13 +279,27 @@ export class CajaService {
     actorId: string,
     cajaId: string,
     ip: string | undefined,
-    datos: { fondoInicial?: unknown; notas?: unknown },
+    datos: {
+      fondoInicial?: unknown;
+      fondoInicialUsd?: unknown;
+      notas?: unknown;
+    },
   ) {
     if (!UUID.test(cajaId)) throw new NotFoundException('Caja no encontrada');
     const fondo = normalizarMonto(datos.fondoInicial);
     if (fondo === null) {
       throw new BadRequestException(
         'Fondo inicial inválido: un monto de 0 en adelante (el cambio con que empieza la caja)',
+      );
+    }
+    // Dólares con que empieza la caja (si no se escribe, 0).
+    const fondoUsd =
+      texto(datos.fondoInicialUsd) === ''
+        ? '0.00'
+        : normalizarMonto(datos.fondoInicialUsd);
+    if (fondoUsd === null) {
+      throw new BadRequestException(
+        'Fondo inicial en US$ inválido: un monto de 0 en adelante',
       );
     }
     const notas = opcional(datos.notas, 500, 'Notas');
@@ -299,9 +328,9 @@ export class CajaService {
           `UPDATE contadores SET valor = valor + 1 WHERE clave = 'caja_sesiones' RETURNING valor`,
         );
         const r = await c.query<{ id: string }>(
-          `INSERT INTO caja_sesiones (numero, caja_id, fondo_inicial, abierta_por, notas)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [n.rows[0].valor, cajaId, fondo, actorId, notas],
+          `INSERT INTO caja_sesiones (numero, caja_id, fondo_inicial, fondo_inicial_usd, abierta_por, notas)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [n.rows[0].valor, cajaId, fondo, fondoUsd, actorId, notas],
         );
         const id = r.rows[0].id;
         await registrarAuditoria(c, {
@@ -313,6 +342,7 @@ export class CajaService {
             caja: caja.rows[0].nombre,
             sesion: numeroSesion(n.rows[0].valor),
             fondo_inicial: fondo,
+            fondo_inicial_usd: fondoUsd,
           },
           ip,
         });
@@ -432,40 +462,132 @@ export class CajaService {
     });
   }
 
-  async cerrar(
+  // Dólares que se meten o se sacan de la caja (con la tasa del momento y
+  // su valor en RD$). Llevarlos a una cuenta en US$ como transferencia
+  // queda pendiente: por ahora es un retiro con un motivo claro.
+  async movimientoUsd(
     actorId: string,
     sesionId: string,
     ip: string | undefined,
-    datos: { conteo?: unknown; motivo?: unknown; notas?: unknown },
+    datos: { tipo?: unknown; monto?: unknown; motivo?: unknown },
   ) {
-    const denominaciones = (await this.config('caja.denominaciones'))
-      .split(',')
-      .map((d) => d.trim());
-    const conteo = datos.conteo;
-    if (
-      typeof conteo !== 'object' ||
-      conteo === null ||
-      Array.isArray(conteo)
-    ) {
+    const tipo = texto(datos.tipo);
+    if (tipo !== 'ingreso' && tipo !== 'retiro')
+      throw new BadRequestException(
+        'Tipo inválido: ingreso o retiro de dólares',
+      );
+    const monto = normalizarMonto(datos.monto);
+    if (monto === null || monto === '0.00')
+      throw new BadRequestException(
+        'Monto en US$ inválido: mayor que 0, con hasta 2 decimales',
+      );
+    const motivo = texto(datos.motivo);
+    if (motivo.length < 5 || motivo.length > 500)
+      throw new BadRequestException(
+        'Escriba el motivo (entre 5 y 500 caracteres). Ej.: Depósito US$ en el banco',
+      );
+    return this.db.transaccion(async (c) => {
+      const s = await this.sesionAbierta(c, sesionId);
+      const tasa = await tasaVigente(c, true);
+      if (!tasa)
+        throw new BadRequestException(
+          'No hay tasa del dólar: pídale al administrador que la registre',
+        );
+      if (tipo === 'retiro') {
+        const hay = (
+          await c.query<{ esperado_usd: string }>(SQL_ESPERADO_USD, [sesionId])
+        ).rows[0].esperado_usd;
+        if (!(await mayorOIgual(c, hay, monto)))
+          throw new BadRequestException(
+            `No hay suficientes dólares en ${s.caja}: hay US$${hay}`,
+          );
+      }
+      await c.query(
+        `INSERT INTO caja_movimientos_usd (sesion_id, tipo, monto, tasa, monto_dop, motivo, usuario_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          sesionId,
+          tipo,
+          monto,
+          tasa.tasa,
+          aPesos(monto, tasa.tasa),
+          motivo,
+          actorId,
+        ],
+      );
+      const e = (
+        await c.query<{ esperado_usd: string }>(SQL_ESPERADO_USD, [sesionId])
+      ).rows[0].esperado_usd;
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: `caja.${tipo}_usd`,
+        entidad: 'caja_sesiones',
+        entidadId: sesionId,
+        nuevo: {
+          caja: s.caja,
+          sesion: numeroSesion(s.numero),
+          tipo,
+          monto_usd: monto,
+          tasa: tasa.tasa,
+          monto_dop: aPesos(monto, tasa.tasa),
+        },
+        motivo,
+        ip,
+      });
+      return { esperadoUsd: e };
+    });
+  }
+
+  // Conteo de billetes: { "100": 3, … } → cantidades limpias (sin flotantes).
+  private leerConteo(
+    conteo: unknown,
+    denominaciones: string[],
+    simbolo: string,
+  ): Record<string, number> {
+    if (typeof conteo !== 'object' || conteo === null || Array.isArray(conteo))
       throw new BadRequestException('Envíe el conteo de billetes y monedas');
-    }
     const limpio: Record<string, number> = {};
     for (const [denom, cant] of Object.entries(
       conteo as Record<string, unknown>,
     )) {
-      if (!denominaciones.includes(denom)) {
+      if (!denominaciones.includes(denom))
         throw new BadRequestException(
-          `Billete o moneda desconocido: RD$${denom}`,
+          `Billete o moneda desconocido: ${simbolo}${denom}`,
         );
-      }
       const t = texto(cant) || '0';
-      if (!/^\d{1,6}$/.test(t)) {
+      if (!/^\d{1,6}$/.test(t))
         throw new BadRequestException(
-          `Cantidad inválida de RD$${denom}: un número entero`,
+          `Cantidad inválida de ${simbolo}${denom}: un número entero`,
         );
-      }
       if (Number(t) > 0) limpio[denom] = Number(t);
     }
+    return limpio;
+  }
+
+  async cerrar(
+    actorId: string,
+    sesionId: string,
+    ip: string | undefined,
+    datos: {
+      conteo?: unknown;
+      conteoUsd?: unknown;
+      motivo?: unknown;
+      notas?: unknown;
+    },
+  ) {
+    const denominaciones = (await this.config('caja.denominaciones'))
+      .split(',')
+      .map((d) => d.trim());
+    const limpio = this.leerConteo(datos.conteo, denominaciones, 'RD$');
+    // Los dólares se cuentan aparte (si no se envían, se cuentan en 0).
+    const denominacionesUsd = (await this.config('caja.denominaciones_usd'))
+      .split(',')
+      .map((d) => d.trim());
+    const limpioUsd = this.leerConteo(
+      datos.conteoUsd ?? {},
+      denominacionesUsd,
+      'US$',
+    );
     const motivo = texto(datos.motivo);
     const notas = opcional(datos.notas, 500, 'Notas');
 
@@ -485,16 +607,42 @@ export class CajaService {
         [contado.rows[0].contado, esperado],
       );
       const diferencia = dif.rows[0].diferencia;
-      if (diferencia !== '0.00' && (motivo.length < 5 || motivo.length > 500)) {
+      const contadoUsd = (
+        await c.query<{ contado: string }>(
+          `SELECT COALESCE(sum(key::numeric * value::int), 0)::numeric(14,2) AS contado
+           FROM jsonb_each_text($1::jsonb)`,
+          [JSON.stringify(limpioUsd)],
+        )
+      ).rows[0].contado;
+      const esperadoUsd = (
+        await c.query<{ esperado_usd: string }>(SQL_ESPERADO_USD, [sesionId])
+      ).rows[0].esperado_usd;
+      const diferenciaUsd = (
+        await c.query<{ diferencia: string }>(
+          'SELECT ($1::numeric - $2::numeric)::numeric(14,2) AS diferencia',
+          [contadoUsd, esperadoUsd],
+        )
+      ).rows[0].diferencia;
+      const hayDiferencia = diferencia !== '0.00' || diferenciaUsd !== '0.00';
+      if (hayDiferencia && (motivo.length < 5 || motivo.length > 500)) {
+        const partes = [
+          diferencia !== '0.00'
+            ? `${diferencia.startsWith('-') ? 'falta' : 'sobra'} RD$${diferencia.replace('-', '')}`
+            : '',
+          diferenciaUsd !== '0.00'
+            ? `${diferenciaUsd.startsWith('-') ? 'falta' : 'sobra'} US$${diferenciaUsd.replace('-', '')}`
+            : '',
+        ].filter(Boolean);
         throw new BadRequestException(
-          `${diferencia.startsWith('-') ? 'Falta' : 'Sobra'} dinero (RD$${diferencia.replace('-', '')}). Escriba el motivo de la diferencia (mínimo 5 caracteres).`,
+          `No cuadra: ${partes.join(' y ')}. Escriba el motivo de la diferencia (mínimo 5 caracteres).`,
         );
       }
       await c.query(
         `UPDATE caja_sesiones
          SET estado = 'cerrada', cerrada_por = $2, cerrada_en = now(),
              esperado = $3, contado = $4, diferencia = $5, conteo = $6::jsonb,
-             motivo_diferencia = $7, notas = COALESCE($8, notas)
+             motivo_diferencia = $7, notas = COALESCE($8, notas),
+             esperado_usd = $9, contado_usd = $10, diferencia_usd = $11
          WHERE id = $1`,
         [
           sesionId,
@@ -502,9 +650,17 @@ export class CajaService {
           esperado,
           contado.rows[0].contado,
           diferencia,
-          JSON.stringify(limpio),
-          diferencia === '0.00' ? null : motivo,
+          // El conteo guarda los dos: pesos y, aparte, dólares.
+          JSON.stringify(
+            Object.keys(limpioUsd).length
+              ? { ...limpio, usd: limpioUsd }
+              : limpio,
+          ),
+          hayDiferencia ? motivo : null,
           notas,
+          esperadoUsd,
+          contadoUsd,
+          diferenciaUsd,
         ],
       );
       const totales = (await c.query(SQL_TOTALES_SESION, [sesionId])).rows[0];
@@ -521,11 +677,21 @@ export class CajaService {
           esperado,
           contado: contado.rows[0].contado,
           diferencia,
+          esperado_usd: esperadoUsd,
+          contado_usd: contadoUsd,
+          diferencia_usd: diferenciaUsd,
         },
-        motivo: diferencia === '0.00' ? undefined : motivo,
+        motivo: hayDiferencia ? motivo : undefined,
         ip,
       });
-      return { esperado, contado: contado.rows[0].contado, diferencia };
+      return {
+        esperado,
+        contado: contado.rows[0].contado,
+        diferencia,
+        esperadoUsd,
+        contadoUsd,
+        diferenciaUsd,
+      };
     });
   }
 
@@ -547,9 +713,10 @@ export class CajaService {
     );
     if (s.rowCount === 0)
       throw new NotFoundException('Sesión de caja no encontrada');
-    const [movs, totales, esperado] = await Promise.all([
-      this.db.query(
-        `SELECT m.id, m.tipo, m.monto, m.created_at AS fecha, m.comprobante, m.motivo,
+    const [movs, totales, esperado, movsUsd, totalesUsd, esperadoUsd] =
+      await Promise.all([
+        this.db.query(
+          `SELECT m.id, m.tipo, m.monto, m.created_at AS fecha, m.comprobante, m.motivo,
                 cg.nombre AS categoria, u.username AS usuario,
                 CASE WHEN v.numero IS NOT NULL
                      THEN 'V-' || lpad(v.numero::text, 6, '0') END AS venta,
@@ -565,11 +732,26 @@ export class CajaService {
          LEFT JOIN cuentas co ON co.id = t.origen_cuenta_id
          WHERE m.sesion_id = $1
          ORDER BY m.created_at, m.id`,
-        [id],
-      ),
-      this.db.query(SQL_TOTALES_SESION, [id]),
-      this.db.query<{ esperado: string }>(SQL_ESPERADO, [id]),
-    ]);
+          [id],
+        ),
+        this.db.query(SQL_TOTALES_SESION, [id]),
+        this.db.query<{ esperado: string }>(SQL_ESPERADO, [id]),
+        this.db.query(
+          `SELECT m.id, m.tipo, m.monto, m.tasa, m.monto_dop, m.created_at AS fecha, m.motivo,
+                u.username AS usuario,
+                CASE WHEN v.numero IS NOT NULL
+                     THEN 'V-' || lpad(v.numero::text, 6, '0') END AS venta,
+                m.venta_id
+         FROM caja_movimientos_usd m
+         JOIN usuarios u ON u.id = m.usuario_id
+         LEFT JOIN ventas v ON v.id = m.venta_id
+         WHERE m.sesion_id = $1
+         ORDER BY m.created_at, m.id`,
+          [id],
+        ),
+        this.db.query(SQL_TOTALES_USD, [id]),
+        this.db.query<{ esperado_usd: string }>(SQL_ESPERADO_USD, [id]),
+      ]);
     const sesion = s.rows[0] as Record<string, unknown>;
     return {
       ...sesion,
@@ -578,6 +760,10 @@ export class CajaService {
       esperado: sesion.esperado ?? esperado.rows[0].esperado,
       totales: totales.rows[0],
       movimientos: movs.rows,
+      // Dólares (aparte de los pesos).
+      esperado_usd: sesion.esperado_usd ?? esperadoUsd.rows[0].esperado_usd,
+      totales_usd: totalesUsd.rows[0],
+      movimientos_usd: movsUsd.rows,
     };
   }
 
@@ -627,6 +813,7 @@ export class CajaService {
     const r = await this.db.query(
       `SELECT s.id, s.numero, s.estado, s.abierta_en, s.cerrada_en, s.fondo_inicial,
               s.esperado, s.contado, s.diferencia, s.motivo_diferencia,
+              s.fondo_inicial_usd, s.esperado_usd, s.contado_usd, s.diferencia_usd,
               c.nombre AS caja, ua.username AS abierta_por, uc.username AS cerrada_por,
               count(*) OVER ()::int AS total_filas
        FROM caja_sesiones s
@@ -664,6 +851,9 @@ export class CajaService {
       empresa: e.rows[0],
       sesion,
       denominaciones: (await this.config('caja.denominaciones')).split(','),
+      denominacionesUsd: (await this.config('caja.denominaciones_usd')).split(
+        ',',
+      ),
       zonaHoraria: await this.config('empresa.zona_horaria'),
     };
   }

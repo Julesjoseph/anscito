@@ -26,6 +26,15 @@ import {
   sumar,
 } from './calculo-venta';
 import type { LineaCalculada } from './calculo-venta';
+import {
+  aDolaresArriba,
+  aPesos,
+  cobroEnDolares,
+  normalizarTasa,
+  SQL_ESPERADO_USD,
+  tasaVigente,
+} from '../comun/dolar';
+import type { CobroUsd } from '../comun/dolar';
 import { generarRecibo } from './recibo-pdf';
 import type { DatosRecibo, Formato } from './recibo-pdf';
 
@@ -58,6 +67,11 @@ export type DatosVenta = {
     referencia?: unknown;
     cajaId?: unknown;
     cuentaId?: unknown;
+    // Pago en dólares (solo efectivo): lo que entregó en US$ y en qué moneda
+    // se le da la devuelta.
+    moneda?: unknown;
+    recibidoUsd?: unknown;
+    devueltaMoneda?: unknown;
   };
   comprobanteFiscal?: unknown;
   // e-CF: '31' (Crédito Fiscal), '32' (Consumo) o vacío (según el cliente).
@@ -94,6 +108,10 @@ type Articulo = {
   costo: string | null;
   comision_pct: string | null;
   is_active: boolean;
+  moneda: 'DOP' | 'USD';
+  // Servicio con precio en US$: precio y costo de arriba ya en RD$.
+  precio_usd?: string | null;
+  tasa_dolar?: string | null;
 };
 
 type LineaLista = LineaCalculada & {
@@ -185,9 +203,57 @@ export class VentasService {
       descuentoMaximoPct: maximo,
       puedeDescontar: descontar,
       consumidorFinal: cf.rows[0] ?? null,
+      tasaDolar: await tasaVigente(this.db),
       facturacion: { activa: factura.activa, umbral: factura.umbral },
       credito: { puedeVender: vendeCredito, puedeAutorizar: autoriza },
     };
+  }
+
+  // ---------- Tasa del dólar ----------
+
+  // Tasa vigente e historial (las últimas 30).
+  async tasasDolar() {
+    const [vigente, historial] = await Promise.all([
+      tasaVigente(this.db),
+      this.db.query(
+        `SELECT t.tasa::text AS tasa, t.vigente_desde, t.motivo, u.username AS usuario
+         FROM tasas_dolar t JOIN usuarios u ON u.id = t.created_by
+         ORDER BY t.vigente_desde DESC, t.created_at DESC LIMIT 30`,
+      ),
+    ]);
+    return { vigente, historial: historial.rows };
+  }
+
+  // Tasa nueva: rige desde ahora. Las anteriores quedan en el historial.
+  async registrarTasaDolar(
+    actorId: string,
+    ip: string | undefined,
+    datos: { tasa?: unknown; motivo?: unknown },
+  ) {
+    const tasa = normalizarTasa(datos.tasa);
+    if (tasa === null || Number(tasa) >= 1000)
+      throw new BadRequestException(
+        'Tasa inválida: RD$ por 1 US$, mayor que 0 y con hasta 4 decimales (ej.: 60.50)',
+      );
+    const motivo = opcional(datos.motivo, 300, 'Motivo');
+    return this.db.transaccion(async (c) => {
+      const antes = await tasaVigente(c, true);
+      const r = await c.query<{ id: string }>(
+        `INSERT INTO tasas_dolar (tasa, motivo, created_by, vigente_desde) VALUES ($1, $2, $3, clock_timestamp()) RETURNING id`,
+        [tasa, motivo, actorId],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'venta.tasa_dolar',
+        entidad: 'tasas_dolar',
+        entidadId: r.rows[0].id,
+        anterior: antes ? { tasa: antes.tasa } : undefined,
+        nuevo: { tasa },
+        motivo: motivo ?? undefined,
+        ip,
+      });
+      return { id: r.rows[0].id, tasa };
+    });
   }
 
   // Productos y servicios que se pueden vender (activos, con precio y tasa).
@@ -199,7 +265,7 @@ export class VentasService {
          SELECT 'producto' AS tipo, p.id, p.codigo, p.nombre, um.nombre AS unidad,
                 um.permite_decimales, p.precio_venta AS precio,
                 p.precio_incluye_itbis, i.nombre AS impuesto,
-                ${SQL_TASA_VIGENTE} AS tasa,
+                ${SQL_TASA_VIGENTE} AS tasa, 'DOP' AS moneda,
                 (SELECT COALESCE(sum(m.cantidad * ${SQL_SIGNO}), 0)
                  FROM movimientos_inventario m WHERE m.producto_id = p.id)::numeric(14,3)
                   AS existencia
@@ -210,7 +276,7 @@ export class VentasService {
            AND ($1 = '' OR p.codigo ILIKE $2 OR p.nombre ILIKE $2)
          UNION ALL
          SELECT 'servicio', s.id, s.codigo, s.nombre, um.nombre, true, s.precio,
-                s.precio_incluye_itbis, i.nombre, ${SQL_TASA_VIGENTE}, NULL
+                s.precio_incluye_itbis, i.nombre, ${SQL_TASA_VIGENTE}, s.moneda, NULL
          FROM servicios s
          JOIN unidades_medida um ON um.id = s.unidad_medida_id
          JOIN impuestos i ON i.id = s.impuesto_id
@@ -293,6 +359,7 @@ export class VentasService {
     actorId: string,
     datos: DatosVenta,
     bloquear: boolean,
+    tasaDolar: string | null,
   ) {
     const entrada = this.leerLineas(datos);
     const ids = (t: string) =>
@@ -307,7 +374,7 @@ export class VentasService {
                 um.permite_decimales, p.precio_venta AS precio,
                 p.precio_incluye_itbis, p.impuesto_id, i.nombre AS impuesto,
                 ${SQL_TASA_VIGENTE} AS tasa, p.costo,
-                NULL::numeric AS comision_pct, p.is_active
+                NULL::numeric AS comision_pct, p.is_active, 'DOP' AS moneda
          FROM productos p
          JOIN unidades_medida um ON um.id = p.unidad_id
          JOIN impuestos i ON i.id = p.impuesto_id
@@ -327,14 +394,29 @@ export class VentasService {
                 s.costo,
                 CASE WHEN s.ganancia_tipo = 'comision' THEN s.comision_pct END
                   AS comision_pct,
-                s.is_active
+                s.is_active, s.moneda
          FROM servicios s
          JOIN unidades_medida um ON um.id = s.unidad_medida_id
          JOIN impuestos i ON i.id = s.impuesto_id
          WHERE s.id = ANY($1::uuid[])`,
         [servIds],
       );
-      r.rows.forEach((a) => articulos.set(`servicio:${a.id}`, a));
+      for (const a of r.rows) {
+        // Precio en US$: se convierte a RD$ con la tasa del día (y el costo).
+        if (a.moneda === 'USD' && a.precio !== null) {
+          if (!tasaDolar)
+            throw new BadRequestException(
+              `${a.codigo} tiene precio en US$ y no hay tasa del dólar: pídale al administrador que la registre`,
+            );
+          articulos.set(`servicio:${a.id}`, {
+            ...a,
+            precio_usd: a.precio,
+            tasa_dolar: tasaDolar,
+            precio: aPesos(a.precio, tasaDolar),
+            costo: a.costo === null ? null : aPesos(a.costo, tasaDolar),
+          });
+        } else articulos.set(`servicio:${a.id}`, a);
+      }
     }
 
     const maximo = await this.config(c, 'ventas.descuento_maximo_pct');
@@ -440,18 +522,25 @@ export class VentasService {
 
   // Vista previa: el servidor calcula sin guardar nada.
   async previsualizar(actorId: string, datos: DatosVenta) {
+    const tasa = (await tasaVigente(this.db))?.tasa ?? null;
     const { lineas, totales } = await this.calcular(
       this.db,
       actorId,
       datos,
       false,
+      tasa,
     );
     return {
       lineas: lineas.map(({ articulo, ...l }) => ({
         codigo: articulo.codigo,
+        precio_usd: articulo.precio_usd ?? null,
         ...l,
       })),
       totales,
+      // Para cobrar en dólares: tasa y total en US$ (subido al centavo).
+      dolar: tasa
+        ? { tasa, totalUsd: aDolaresArriba(totales.total, tasa) }
+        : null,
     };
   }
 
@@ -492,7 +581,15 @@ export class VentasService {
           'El cliente no existe o está desactivado',
         );
 
-      const { lineas, totales } = await this.calcular(c, actorId, datos, true);
+      // Tasa del dólar: se lee una sola vez y se usa en las líneas y en el pago.
+      const tasaDolar = (await tasaVigente(c, true))?.tasa ?? null;
+      const { lineas, totales } = await this.calcular(
+        c,
+        actorId,
+        datos,
+        true,
+        tasaDolar,
+      );
       if (totales.total === '0.00')
         throw new BadRequestException('El total de la venta no puede ser 0');
 
@@ -531,10 +628,41 @@ export class VentasService {
             usa_cuenta: false,
           };
 
+      // Pago en dólares: solo efectivo; la devuelta en la moneda que escoja el cajero.
+      const monedaPago = texto(datos.pago?.moneda) || 'DOP';
+      if (monedaPago !== 'DOP' && monedaPago !== 'USD')
+        throw new BadRequestException('Moneda del pago: RD$ (DOP) o US$ (USD)');
+      let cobroUsd: CobroUsd | null = null;
+      if (cobraAhora && monedaPago === 'USD') {
+        if (!forma.usa_caja)
+          throw new BadRequestException(
+            'En dólares solo se cobra en efectivo (los US$ entran a la caja)',
+          );
+        if (!tasaDolar)
+          throw new BadRequestException(
+            'No hay tasa del dólar: pídale al administrador que la registre',
+          );
+        const devueltaMoneda = texto(datos.pago?.devueltaMoneda) || 'DOP';
+        if (devueltaMoneda !== 'DOP' && devueltaMoneda !== 'USD')
+          throw new BadRequestException(
+            'Devuelta: en pesos (DOP) o en dólares (USD)',
+          );
+        const recibidoUsd = normalizarMonto(datos.pago?.recibidoUsd);
+        const debeUsd = aDolaresArriba(cobrado, tasaDolar);
+        cobroUsd =
+          recibidoUsd === null
+            ? null
+            : cobroEnDolares(cobrado, tasaDolar, recibidoUsd, devueltaMoneda);
+        if (!cobroUsd)
+          throw new BadRequestException(
+            `Escriba cuántos dólares entregó el cliente (al menos US$${debeUsd} a ${normalizarTasa(tasaDolar)})`,
+          );
+      }
+
       // Pago.
       let recibido: string | null = null;
       let devuelta: string | null = null;
-      if (forma.calcula_devuelta) {
+      if (forma.calcula_devuelta && !cobroUsd) {
         recibido = normalizarMonto(datos.pago?.recibido);
         if (recibido === null || !mayorOIgual(recibido, cobrado)) {
           throw new BadRequestException(
@@ -575,6 +703,15 @@ export class VentasService {
           );
         }
         sesionCaja = s.rows[0];
+        if (cobroUsd && cobroUsd.saleDop !== '0.00') {
+          const hay = (
+            await c.query<{ esperado: string }>(SQL_ESPERADO, [sesionCaja.id])
+          ).rows[0].esperado;
+          if (!mayorOIgual(hay, cobroUsd.saleDop))
+            throw new BadRequestException(
+              `No hay suficientes pesos en ${sesionCaja.caja} para la devuelta de RD$${cobroUsd.saleDop} (hay RD$${hay}): dé la devuelta en dólares`,
+            );
+        }
       }
 
       // La transferencia llega a la cuenta que diga el cajero; queda
@@ -645,9 +782,9 @@ export class VentasService {
              (venta_id, tipo, producto_id, servicio_id, codigo, descripcion, unidad,
               cantidad, precio_unitario, precio_incluye_itbis, impuesto_id, impuesto,
               tasa, bruto, descuento, base, itbis, total, costo_unitario,
-              comision_pct)
+              comision_pct, precio_usd, tasa_dolar)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                   $16, $17, $18, $19, $20)`,
+                   $16, $17, $18, $19, $20, $21, $22)`,
           [
             ventaId,
             a.tipo,
@@ -669,6 +806,8 @@ export class VentasService {
             l.total,
             a.costo,
             a.comision_pct,
+            a.precio_usd ?? null,
+            a.tasa_dolar ?? null,
           ],
         );
         if (a.tipo === 'producto') {
@@ -692,8 +831,9 @@ export class VentasService {
 
       if (cobraAhora)
         await c.query(
-          `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto, recibido, devuelta, referencia, cuenta_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          `INSERT INTO venta_pagos (venta_id, forma_pago_id, monto, recibido, devuelta, referencia, cuenta_id,
+                                    moneda, tasa, monto_usd, recibido_usd, devuelta_moneda, devuelta_monto)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             ventaId,
             formaId,
@@ -702,6 +842,12 @@ export class VentasService {
             devuelta,
             referencia,
             cuentaVenta?.id ?? null,
+            cobroUsd ? 'USD' : 'DOP',
+            cobroUsd ? tasaDolar : null,
+            cobroUsd?.montoUsd ?? null,
+            cobroUsd?.recibidoUsd ?? null,
+            cobroUsd?.devueltaMoneda ?? null,
+            cobroUsd?.devueltaMonto ?? null,
           ],
         );
       // La parte a crédito: pago "Crédito" y su cuenta por cobrar.
@@ -734,7 +880,28 @@ export class VentasService {
           [cuentaVenta.id, cobrado, zona, ventaId, referencia, actorId],
         );
       }
-      if (sesionCaja) {
+      if (sesionCaja && cobroUsd && tasaDolar) {
+        // Entran los dólares (menos la devuelta si fue en US$) y, si la
+        // devuelta fue en pesos, salen esos pesos.
+        await c.query(
+          `INSERT INTO caja_movimientos_usd (sesion_id, tipo, monto, tasa, monto_dop, venta_id, usuario_id)
+           VALUES ($1, 'venta', $2, $3, $4, $5, $6)`,
+          [
+            sesionCaja.id,
+            cobroUsd.entraUsd,
+            tasaDolar,
+            aPesos(cobroUsd.entraUsd, tasaDolar),
+            ventaId,
+            actorId,
+          ],
+        );
+        if (cobroUsd.saleDop !== '0.00')
+          await c.query(
+            `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, usuario_id)
+             VALUES ($1, 'cambio', $2, $3, $4)`,
+            [sesionCaja.id, cobroUsd.saleDop, ventaId, actorId],
+          );
+      } else if (sesionCaja) {
         // Entra a la caja lo cobrado (la devuelta ya salió de lo recibido).
         await c.query(
           `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, usuario_id)
@@ -762,6 +929,7 @@ export class VentasService {
           lineas: lineas.length,
           ...totales,
           forma_pago: forma.nombre,
+          pago_dolares: cobroUsd ? { tasa: tasaDolar, ...cobroUsd } : null,
           caja: sesionCaja
             ? `${sesionCaja.caja} (${numeroSesion(sesionCaja.numero)})`
             : null,
@@ -788,6 +956,7 @@ export class VentasService {
         numero: numeroVenta(numero),
         total: totales.total,
         devuelta,
+        dolares: cobroUsd ? { tasa: tasaDolar, ...cobroUsd } : null,
         ecf: ecf?.tipo ?? null,
         credito: credito
           ? { monto: montoCredito, vencimiento: credito.vencimiento }
@@ -903,7 +1072,8 @@ export class VentasService {
           [id],
         ),
         this.db.query(
-          `SELECT vp.monto, vp.recibido, vp.devuelta, vp.referencia, fp.nombre AS forma_pago
+          `SELECT vp.monto, vp.recibido, vp.devuelta, vp.referencia, fp.nombre AS forma_pago,
+                vp.moneda, vp.tasa, vp.monto_usd, vp.recibido_usd, vp.devuelta_moneda, vp.devuelta_monto
          FROM venta_pagos vp JOIN formas_pago fp ON fp.id = vp.forma_pago_id
          WHERE vp.venta_id = $1 ORDER BY vp.id`,
           [id],
@@ -1092,15 +1262,26 @@ export class VentasService {
 
       // El efectivo cobrado se le devuelve al cliente desde la caja abierta
       // de esta computadora.
-      const ef = await c.query<{ monto: string }>(
-        `SELECT COALESCE(sum(vp.monto), 0)::numeric(14,2) AS monto
+      const ef = await c.query<{
+        monto: string;
+        usd: string;
+        cambio: string;
+        tasa: string | null;
+      }>(
+        `SELECT COALESCE(sum(vp.monto) FILTER (WHERE vp.moneda = 'DOP'), 0)::numeric(14,2) AS monto,
+                COALESCE(sum(CASE WHEN vp.devuelta_moneda = 'USD' THEN vp.monto_usd ELSE vp.recibido_usd END)
+                  FILTER (WHERE vp.moneda = 'USD'), 0)::numeric(14,2) AS usd,
+                COALESCE(sum(vp.devuelta_monto) FILTER (WHERE vp.moneda = 'USD' AND vp.devuelta_moneda = 'DOP'), 0)::numeric(14,2) AS cambio,
+                max(vp.tasa::text) FILTER (WHERE vp.moneda = 'USD') AS tasa
          FROM venta_pagos vp JOIN formas_pago fp ON fp.id = vp.forma_pago_id
          WHERE vp.venta_id = $1 AND fp.usa_caja`,
         [id],
       );
       const efectivo = ef.rows[0].monto;
+      const usd = ef.rows[0].usd;
+      const cambio = ef.rows[0].cambio;
       let cajaDevolucion: string | null = null;
-      if (efectivo !== '0.00') {
+      if (efectivo !== '0.00' || usd !== '0.00') {
         const cajaId = texto(cajaIdTexto).toLowerCase();
         if (!UUID.test(cajaId)) {
           throw new BadRequestException(
@@ -1119,23 +1300,58 @@ export class VentasService {
             'La caja de esta computadora no está abierta: ábrala para devolver el efectivo',
           );
         }
-        const hay = (
-          await c.query<{ esperado: string }>(SQL_ESPERADO, [s.rows[0].id])
-        ).rows[0].esperado;
-        const ok = await c.query<{ ok: boolean }>(
-          'SELECT $1::numeric >= $2::numeric AS ok',
-          [hay, efectivo],
-        );
-        if (!ok.rows[0].ok) {
-          throw new BadRequestException(
-            `No hay suficiente efectivo en ${s.rows[0].caja} para devolver RD$${efectivo} (hay RD$${hay})`,
+        // La devuelta en pesos que se dio en un pago en US$ vuelve a la caja.
+        if (cambio !== '0.00')
+          await c.query(
+            `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, motivo, usuario_id)
+             VALUES ($1, 'cambio_reverso', $2, $3, $4, $5)`,
+            [s.rows[0].id, cambio, id, textoMotivo, actorId],
+          );
+        if (efectivo !== '0.00') {
+          const hay = (
+            await c.query<{ esperado: string }>(SQL_ESPERADO, [s.rows[0].id])
+          ).rows[0].esperado;
+          const ok = await c.query<{ ok: boolean }>(
+            'SELECT $1::numeric >= $2::numeric AS ok',
+            [hay, efectivo],
+          );
+          if (!ok.rows[0].ok) {
+            throw new BadRequestException(
+              `No hay suficiente efectivo en ${s.rows[0].caja} para devolver RD$${efectivo} (hay RD$${hay})`,
+            );
+          }
+          await c.query(
+            `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, motivo, usuario_id)
+             VALUES ($1, 'devolucion', $2, $3, $4, $5)`,
+            [s.rows[0].id, efectivo, id, textoMotivo, actorId],
           );
         }
-        await c.query(
-          `INSERT INTO caja_movimientos (sesion_id, tipo, monto, venta_id, motivo, usuario_id)
-           VALUES ($1, 'devolucion', $2, $3, $4, $5)`,
-          [s.rows[0].id, efectivo, id, textoMotivo, actorId],
-        );
+        // Los dólares cobrados vuelven en dólares (con la tasa de esa venta).
+        if (usd !== '0.00' && ef.rows[0].tasa) {
+          const tasaVenta = normalizarTasa(ef.rows[0].tasa) as string;
+          const hayUsd = (
+            await c.query<{ esperado_usd: string }>(SQL_ESPERADO_USD, [
+              s.rows[0].id,
+            ])
+          ).rows[0].esperado_usd;
+          if (!mayorOIgual(hayUsd, usd))
+            throw new BadRequestException(
+              `No hay suficientes dólares en ${s.rows[0].caja} para devolver US$${usd} (hay US$${hayUsd})`,
+            );
+          await c.query(
+            `INSERT INTO caja_movimientos_usd (sesion_id, tipo, monto, tasa, monto_dop, venta_id, motivo, usuario_id)
+             VALUES ($1, 'devolucion', $2, $3, $4, $5, $6, $7)`,
+            [
+              s.rows[0].id,
+              usd,
+              tasaVenta,
+              aPesos(usd, tasaVenta),
+              id,
+              textoMotivo,
+              actorId,
+            ],
+          );
+        }
         cajaDevolucion = `${s.rows[0].caja} (${numeroSesion(s.rows[0].numero)})`;
       }
 

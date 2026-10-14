@@ -27,6 +27,7 @@ export type DatosServicio = {
   categoriaId?: unknown;
   unidadMedidaId?: unknown;
   precio?: unknown;
+  moneda?: unknown;
   costo?: unknown;
   impuestoId?: unknown;
   precioIncluyeItbis?: unknown;
@@ -49,6 +50,7 @@ type Limpio = {
   categoria_id: string | null;
   unidad_medida_id: string;
   precio: string;
+  moneda: 'DOP' | 'USD'; // del precio y del costo
   costo: string | null;
   impuesto_id: string;
   precio_incluye_itbis: boolean;
@@ -118,6 +120,13 @@ export class ServiciosService {
       );
     }
 
+    // Moneda del precio (y del costo): RD$ o US$. En US$ se convierte a RD$
+    // con la tasa del día al vender.
+    const moneda = texto(datos.moneda) || 'DOP';
+    if (moneda !== 'DOP' && moneda !== 'USD') {
+      throw new BadRequestException('Moneda del precio: RD$ (DOP) o US$ (USD)');
+    }
+
     let costo: string | null = null;
     if (texto(datos.costo) !== '') {
       costo = normalizarMonto(datos.costo);
@@ -166,6 +175,7 @@ export class ServiciosService {
       categoria_id: categoriaId || null,
       unidad_medida_id: unidadMedidaId,
       precio,
+      moneda,
       costo,
       impuesto_id: impuestoId,
       precio_incluye_itbis: datos.precioIncluyeItbis,
@@ -213,7 +223,7 @@ export class ServiciosService {
               s.unidad_negocio_id, un.nombre AS unidad_negocio,
               s.categoria_id, cat.nombre AS categoria,
               s.unidad_medida_id, um.nombre AS unidad_medida,
-              s.precio, s.costo, s.impuesto_id, i.nombre AS impuesto,
+              s.precio, s.moneda, s.costo, s.impuesto_id, i.nombre AS impuesto,
               s.ganancia_tipo, s.comision_pct,
               ${SQL_TASA_VIGENTE} AS tasa,
               s.precio_incluye_itbis, s.is_active
@@ -353,8 +363,8 @@ export class ServiciosService {
           `INSERT INTO servicios
              (codigo, nombre, descripcion, unidad_negocio_id, unidad_medida_id,
               precio, costo, impuesto_id, precio_incluye_itbis, created_by,
-              categoria_id, ganancia_tipo, comision_pct)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              categoria_id, ganancia_tipo, comision_pct, moneda)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            RETURNING id`,
           [
             d.codigo,
@@ -370,6 +380,7 @@ export class ServiciosService {
             d.categoria_id,
             d.ganancia_tipo,
             d.comision_pct,
+            d.moneda,
           ],
         );
         const id = r.rows[0].id;
@@ -405,7 +416,7 @@ export class ServiciosService {
         const r = await c.query<Limpio>(
           `SELECT codigo, nombre, descripcion, unidad_negocio_id,
                   categoria_id, unidad_medida_id, precio, costo, impuesto_id,
-                  precio_incluye_itbis, ganancia_tipo, comision_pct
+                  precio_incluye_itbis, ganancia_tipo, comision_pct, moneda
            FROM servicios WHERE id = $1 FOR UPDATE`,
           [id],
         );
@@ -421,7 +432,7 @@ export class ServiciosService {
                unidad_negocio_id = $5, unidad_medida_id = $6,
                precio = $7, costo = $8, impuesto_id = $9,
                precio_incluye_itbis = $10, categoria_id = $11,
-               ganancia_tipo = $12, comision_pct = $13, updated_at = now()
+               ganancia_tipo = $12, comision_pct = $13, moneda = $14, updated_at = now()
            WHERE id = $1`,
           [
             id,
@@ -437,13 +448,14 @@ export class ServiciosService {
             d.categoria_id,
             d.ganancia_tipo,
             d.comision_pct,
+            d.moneda,
           ],
         );
 
         // Cada tipo de cambio queda como un registro de auditoría distinto,
         // para que los cambios de precio, costo e impuesto se vean claros.
         const grupos: { accion: string; campos: (keyof Limpio)[] }[] = [
-          { accion: 'servicio.cambiar_precio', campos: ['precio'] },
+          { accion: 'servicio.cambiar_precio', campos: ['precio', 'moneda'] },
           { accion: 'servicio.cambiar_costo', campos: ['costo'] },
           {
             accion: 'servicio.cambiar_ganancia',

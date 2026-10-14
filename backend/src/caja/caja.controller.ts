@@ -82,7 +82,12 @@ export class CajaController {
   abrir(
     @Req() req: Peticion,
     @Param('id') id: string,
-    @Body() body: { fondoInicial?: unknown; notas?: unknown },
+    @Body()
+    body: {
+      fondoInicial?: unknown;
+      fondoInicialUsd?: unknown;
+      notas?: unknown;
+    },
   ) {
     return this.caja.abrir(req.usuario.id, id, req.ip, body ?? {});
   }
@@ -120,6 +125,17 @@ export class CajaController {
     },
   ) {
     return this.caja.movimiento(req.usuario.id, id, req.ip, body ?? {});
+  }
+
+  // Dólares que se meten o se sacan de la caja (ingreso o retiro).
+  @Post('sesiones/:id/movimientos-usd')
+  @RequierePermiso('caja.movimientos')
+  movimientoUsd(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body() body: { tipo?: unknown; monto?: unknown; motivo?: unknown },
+  ) {
+    return this.caja.movimientoUsd(req.usuario.id, id, req.ip, body ?? {});
   }
 
   // Llevar efectivo de la caja (abierta) a una cuenta: depósito o recarga.
@@ -181,7 +197,13 @@ export class CajaController {
   cerrar(
     @Req() req: Peticion,
     @Param('id') id: string,
-    @Body() body: { conteo?: unknown; motivo?: unknown; notas?: unknown },
+    @Body()
+    body: {
+      conteo?: unknown;
+      conteoUsd?: unknown;
+      motivo?: unknown;
+      notas?: unknown;
+    },
   ) {
     return this.caja.cerrar(req.usuario.id, id, req.ip, body ?? {});
   }

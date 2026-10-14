@@ -805,10 +805,18 @@ export class ReportesService {
               s.fondo_inicial AS fondo, t.ventas, t.ingresos, t.desde_cuentas, t.san_cuotas, t.gastos, t.retiros,
               t.devoluciones, t.depositos, t.san_manos, (t.compras - t.compras_devueltas)::numeric(16,2) AS compras,
               (t.abonos_credito - t.abonos_anulados)::numeric(16,2) AS abonos_credito,
+              (t.cambios - t.cambios_devueltos)::numeric(16,2) AS cambios,
               COALESCE(s.esperado, (s.fondo_inicial + t.ventas + t.ingresos + t.desde_cuentas
                 + t.san_cuotas - t.gastos - t.retiros - t.devoluciones - t.depositos
-                - t.san_manos - t.compras + t.compras_devueltas + t.abonos_credito - t.abonos_anulados))::numeric(16,2) AS esperado,
-              s.contado, s.diferencia, s.motivo_diferencia AS motivo
+                - t.san_manos - t.compras + t.compras_devueltas + t.abonos_credito - t.abonos_anulados
+                - t.cambios + t.cambios_devueltos))::numeric(16,2) AS esperado,
+              s.contado, s.diferencia, s.motivo_diferencia AS motivo,
+              -- Dólares (aparte): lo que debía haber y la diferencia al cerrar.
+              'US$' || to_char(COALESCE(s.esperado_usd, (s.fondo_inicial_usd + COALESCE((
+                SELECT sum(mu.monto * CASE WHEN mu.tipo IN ('venta', 'ingreso') THEN 1 ELSE -1 END)
+                FROM caja_movimientos_usd mu WHERE mu.sesion_id = s.id), 0))), 'FM999,999,990.00') AS esperado_usd,
+              CASE WHEN s.diferencia_usd IS NOT NULL
+                   THEN 'US$' || to_char(s.diferencia_usd, 'FM999,999,990.00') END AS diferencia_usd
        FROM caja_sesiones s
        JOIN cajas c ON c.id = s.caja_id
        JOIN usuarios ua ON ua.id = s.abierta_por
@@ -825,7 +833,9 @@ export class ReportesService {
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'compra'), 0)::numeric(16,2) AS compras,
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'compra_reverso'), 0)::numeric(16,2) AS compras_devueltas,
                 COALESCE(sum(monto) FILTER (WHERE tipo = 'abono_credito'), 0)::numeric(16,2) AS abonos_credito,
-                COALESCE(sum(monto) FILTER (WHERE tipo = 'abono_anulado'), 0)::numeric(16,2) AS abonos_anulados
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'abono_anulado'), 0)::numeric(16,2) AS abonos_anulados,
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'cambio'), 0)::numeric(16,2) AS cambios,
+                COALESCE(sum(monto) FILTER (WHERE tipo = 'cambio_reverso'), 0)::numeric(16,2) AS cambios_devueltos
          FROM caja_movimientos m WHERE m.sesion_id = s.id
        ) t
        WHERE (s.abierta_en AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
@@ -885,6 +895,12 @@ export class ReportesService {
           total: true,
         },
         {
+          clave: 'cambios',
+          titulo: 'Devuelta RD$ de pagos en US$',
+          tipo: 'dinero',
+          total: true,
+        },
+        {
           clave: 'esperado',
           titulo: 'Debía haber',
           tipo: 'dinero',
@@ -897,6 +913,8 @@ export class ReportesService {
           tipo: 'dinero',
           total: true,
         },
+        { clave: 'esperado_usd', titulo: 'Debía haber US$', tipo: 'texto' },
+        { clave: 'diferencia_usd', titulo: 'Diferencia US$', tipo: 'texto' },
         { clave: 'motivo', titulo: 'Motivo de la diferencia', tipo: 'texto' },
       ],
       r.rows,

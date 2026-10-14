@@ -44,6 +44,8 @@ export type DatosRecibo = {
       tasa: string;
       itbis: string;
       total: string;
+      precio_usd?: string | null;
+      tasa_dolar?: string | null;
     }[];
     pagos: {
       forma_pago: string;
@@ -51,6 +53,12 @@ export type DatosRecibo = {
       recibido: string | null;
       devuelta: string | null;
       referencia: string | null;
+      moneda?: string;
+      tasa?: string | null;
+      monto_usd?: string | null;
+      recibido_usd?: string | null;
+      devuelta_moneda?: string | null;
+      devuelta_monto?: string | null;
     }[];
   };
   zonaHoraria: string;
@@ -256,6 +264,8 @@ function dibujar(
       );
       if (l.descuento !== '0.00')
         fila('  Descuento', `-${dinero(l.descuento)}`);
+      if (l.precio_usd)
+        fila(`  Precio US$${l.precio_usd} x tasa ${Number(l.tasa_dolar)}`, '');
     }
   }
 
@@ -276,6 +286,19 @@ function dibujar(
     total(p.forma_pago, dinero(p.monto));
     if (p.recibido) total('Recibido', dinero(p.recibido));
     if (p.devuelta) total('Devuelta', dinero(p.devuelta), true);
+    // Pago en dólares: lo cobrado en US$, la tasa y la devuelta.
+    if (p.moneda === 'USD' && p.monto_usd && p.recibido_usd) {
+      total(`En dólares (tasa ${Number(p.tasa)})`, `US$${p.monto_usd}`);
+      total('Recibido', `US$${p.recibido_usd}`);
+      if (p.devuelta_monto && p.devuelta_monto !== '0.00')
+        total(
+          'Devuelta',
+          p.devuelta_moneda === 'USD'
+            ? `US$${p.devuelta_monto}`
+            : dinero(p.devuelta_monto),
+          true,
+        );
+    }
     if (p.referencia) total('Referencia', p.referencia);
   }
 

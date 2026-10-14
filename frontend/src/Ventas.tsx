@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Ban,
   CheckCircle2,
+  DollarSign,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -31,13 +32,16 @@ import {
   obtenerRecibo,
   prepararVenta,
   previsualizarVenta,
+  registrarTasaDolar,
   registrarVenta,
   resumenCreditoVenta,
+  tasasDolar,
   tiposDocumento,
 } from './api'
 import type {
   ArticuloVenta,
   ClienteVenta,
+  CobroDolares,
   DatosVenta,
   DetalleVenta,
   FiltrosVentas,
@@ -49,6 +53,7 @@ import type {
   TipoDocumento,
 } from './api'
 import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
+import { dolares, dolaresArriba, pesosDe, verTasa } from './dolar'
 import { ANCHOS_TICKET, htmlTicket, imprimirHtml } from './ticket'
 import type { AnchoTicket } from './ticket'
 import {
@@ -354,8 +359,14 @@ function NuevaVenta({
     devuelta: string | null
     ecf: string | null
     credito: { monto: string; vencimiento: string } | null
+    dolares: CobroDolares | null
   } | null>(null)
   const [tipoEcf, setTipoEcf] = useState('')
+  // Pago en dólares (efectivo): lo que entrega y en qué moneda va la devuelta.
+  const [monedaPago, setMonedaPago] = useState<'DOP' | 'USD'>('DOP')
+  const [recibidoUsd, setRecibidoUsd] = useState('')
+  const [devueltaMoneda, setDevueltaMoneda] = useState<'DOP' | 'USD'>('DOP')
+  const [cambiarTasa, setCambiarTasa] = useState(false)
   const [nuevoCliente, setNuevoCliente] = useState(false)
   // Venta a crédito: inicial (puede ser 0), plazo y el resumen del cliente.
   const [aCredito, setACredito] = useState(false)
@@ -449,6 +460,11 @@ function NuevaVenta({
   }, [token, buscarCliente, eligiendoCliente, manejar])
 
   const maximo = prep?.descuentoMaximoPct ?? '0'
+  const tasa = prep?.tasaDolar?.tasa ?? null
+  const precioPesos = useCallback(
+    (a: ArticuloVenta) => (a.moneda === 'USD' && tasa ? texto2(pesosDe(centavos(a.precio), tasa)) : a.precio),
+    [tasa],
+  )
   const forma = prep?.formasPago.find((f) => f.id === formaId)
   const miCaja = prep?.cajas.find((c) => c.id === cajaId)
   // El efectivo solo se cobra con la caja de esta computadora abierta.
@@ -473,7 +489,7 @@ function NuevaVenta({
     () =>
       lineas.map((l) => {
         const valida = CANT.test(l.cantidad.trim()) && milesimas(l.cantidad) > 0n
-        const desc = valida ? montoDescuento(bruto(l.art.precio, l.cantidad), l.pct) : 0n
+        const desc = valida ? montoDescuento(bruto(precioPesos(l.art), l.cantidad), l.pct) : 0n
         return {
           tipo: l.art.tipo,
           id: l.art.id,
@@ -481,7 +497,7 @@ function NuevaVenta({
           descuento: texto2(desc),
         }
       }),
-    [lineas],
+    [lineas, precioPesos],
   )
   const hayDescuento = entrada.some((l) => l.descuento !== '0.00')
   const clave = JSON.stringify(entrada)
@@ -525,6 +541,16 @@ function NuevaVenta({
     totales && pideForma && forma?.calcula_devuelta && MONTO.test(recibido.trim())
       ? centavos(recibido) - cobroAhora
       : null
+  // Dólares: solo en efectivo y con tasa del día.
+  const pagoUsd = pideForma && forma?.usa_caja === true && tasa !== null && monedaPago === 'USD'
+  const debeUsd = pagoUsd && tasa ? dolaresArriba(cobroAhora, tasa) : 0n
+  const restoUsd = pagoUsd && MONTO.test(recibidoUsd.trim()) ? centavos(recibidoUsd) - debeUsd : null
+  const devueltaUsdTexto =
+    restoUsd === null || restoUsd < 0n || !tasa
+      ? null
+      : devueltaMoneda === 'USD'
+        ? dolares(texto2(restoUsd))
+        : dinero(texto2(pesosDe(restoUsd, tasa)))
   const esConsumidorFinal = cliente?.id === prep?.consumidorFinal?.id
   const credActivo = resumen?.credito?.is_active ?? false
   const vencidas = resumen?.totales.cuentas_vencidas ?? 0
@@ -585,6 +611,9 @@ function NuevaVenta({
   function limpiar() {
     setLineas([])
     setRecibido('')
+    setRecibidoUsd('')
+    setMonedaPago('DOP')
+    setDevueltaMoneda('DOP')
     setReferencia('')
     setComprobante('')
     setTipoEcf('')
@@ -610,7 +639,10 @@ function NuevaVenta({
         motivoDescuento,
         pago: {
           formaPagoId: pideForma && forma ? forma.id : '',
-          recibido: pideForma && forma?.calcula_devuelta ? recibido.trim() : undefined,
+          recibido: pideForma && forma?.calcula_devuelta && !pagoUsd ? recibido.trim() : undefined,
+          moneda: pagoUsd ? 'USD' : undefined,
+          recibidoUsd: pagoUsd ? recibidoUsd.trim() : undefined,
+          devueltaMoneda: pagoUsd ? devueltaMoneda : undefined,
           referencia: referencia.trim() || undefined,
           cajaId: pideForma && forma?.usa_caja && miCaja ? miCaja.id : undefined,
           cuentaId: pideForma && forma?.usa_cuenta && cuentaVenta ? cuentaVenta.id : undefined,
@@ -639,7 +671,9 @@ function NuevaVenta({
       (forma !== undefined &&
         cajaLista &&
         cuentaLista &&
-        (!forma.calcula_devuelta || (devuelta !== null && devuelta >= 0n)) &&
+        (pagoUsd
+          ? restoUsd !== null && restoUsd >= 0n
+          : !forma.calcula_devuelta || (devuelta !== null && devuelta >= 0n)) &&
         (!forma.requiere_referencia || referencia.trim() !== ''))) &&
     (!hayDescuento || motivoDescuento.trim().length >= 5)
 
@@ -686,7 +720,7 @@ function NuevaVenta({
                         <span className="ml-2 text-xs text-gray-400">{a.tipo === 'servicio' ? 'Servicio' : `Stock: ${verCantidad(a.existencia)}`}</span>
                       </span>
                       <span className="whitespace-nowrap font-medium">
-                        {dinero(a.precio)}
+                        {a.moneda === 'USD' ? `${dolares(a.precio)}${tasa ? ` · ${dinero(precioPesos(a))}` : ''}` : dinero(a.precio)}
                         <span className="ml-1 text-xs font-normal text-gray-500">
                           {Number(a.tasa) === 0 ? 'exento' : a.precio_incluye_itbis ? 'ITBIS incl.' : `+ ITBIS ${porcentaje(a.tasa)}`}
                         </span>
@@ -755,7 +789,14 @@ function NuevaVenta({
                           </button>
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right">{dinero(l.art.precio)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        {dinero(precioPesos(l.art))}
+                        {l.art.moneda === 'USD' && (
+                          <div className="text-xs text-gray-500">
+                            {dolares(l.art.precio)} × {verTasa(tasa)}
+                          </div>
+                        )}
+                      </td>
                       {prep.puedeDescontar && (
                         <td className="px-3 py-2">
                           <input
@@ -796,6 +837,17 @@ function NuevaVenta({
             </div>
             <div>Total cobrado: {dinero(hecha.total)}</div>
             {hecha.devuelta !== null && <div className="text-lg font-medium">Devuelta: {dinero(hecha.devuelta)}</div>}
+            {hecha.dolares && (
+              <div>
+                Pagó {dolares(hecha.dolares.recibidoUsd)} por {dolares(hecha.dolares.montoUsd)} (tasa {verTasa(hecha.dolares.tasa)})
+                {hecha.dolares.devueltaMonto !== '0.00' && (
+                  <div className="text-lg font-medium">
+                    Devuelta:{' '}
+                    {hecha.dolares.devueltaMoneda === 'USD' ? dolares(hecha.dolares.devueltaMonto) : dinero(hecha.dolares.devueltaMonto)}
+                  </div>
+                )}
+              </div>
+            )}
             {hecha.credito && (
               <div className="font-medium">
                 A crédito: {dinero(hecha.credito.monto)} · vence el {hecha.credito.vencimiento.split('-').reverse().join('/')}
@@ -812,6 +864,18 @@ function NuevaVenta({
             </button>
           </div>
         )}
+
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+          <span className="flex items-center gap-1 text-gray-600">
+            <DollarSign size={14} /> Tasa del dólar:{' '}
+            <strong className="text-gray-900">{tasa ? `RD$${verTasa(tasa)}` : 'sin registrar'}</strong>
+          </span>
+          {permisos.includes('ventas.tasa_dolar') && (
+            <button type="button" onClick={() => setCambiarTasa(true)} className="text-xs text-[#C8102E] hover:underline">
+              Cambiar
+            </button>
+          )}
+        </div>
 
         <div className="flex flex-col gap-1 text-sm text-gray-600">
           Cliente
@@ -1011,7 +1075,60 @@ function NuevaVenta({
               </div>
             </div>
           ))}
-        {forma?.calcula_devuelta && (
+        {forma?.usa_caja && tasa && (
+          <div className="flex flex-col gap-1 text-sm text-gray-600">
+            Paga en
+            <div className="flex gap-2">
+              {(
+                [
+                  ['DOP', 'Pesos (RD$)'],
+                  ['USD', 'Dólares (US$)'],
+                ] as const
+              ).map(([m, nombre]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMonedaPago(m)}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm ${monedaPago === m ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]' : 'border-gray-300 hover:bg-gray-50'}`}
+                >
+                  {nombre}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {pagoUsd && (
+          <div className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 text-sm text-gray-600">
+            <div className="text-base text-gray-900">
+              Cobrar <strong>{dolares(texto2(debeUsd))}</strong>
+              <span className="text-xs text-gray-500"> ({dinero(texto2(cobroAhora))} a {verTasa(tasa)})</span>
+            </div>
+            <label className="flex flex-col gap-1">
+              Recibido del cliente (US$)
+              <input type="text" inputMode="decimal" value={recibidoUsd} onChange={(e) => setRecibidoUsd(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
+            </label>
+            {restoUsd !== null && restoUsd < 0n && <span className="font-medium text-red-600">Faltan {dolares(texto2(-restoUsd))}</span>}
+            {restoUsd !== null && restoUsd > 0n && (
+              <>
+                <div className="flex gap-4">
+                  {(
+                    [
+                      ['DOP', 'Devuelta en pesos'],
+                      ['USD', 'Devuelta en dólares'],
+                    ] as const
+                  ).map(([m, nombre]) => (
+                    <label key={m} className="flex items-center gap-2">
+                      <input type="radio" checked={devueltaMoneda === m} onChange={() => setDevueltaMoneda(m)} />
+                      {nombre}
+                    </label>
+                  ))}
+                </div>
+                <span className="text-base font-medium text-green-700">Devuelta: {devueltaUsdTexto}</span>
+              </>
+            )}
+          </div>
+        )}
+        {forma?.calcula_devuelta && !pagoUsd && (
           <label className="flex flex-col gap-1 text-sm text-gray-600">
             Recibido del cliente (RD$)
             <input type="text" inputMode="decimal" value={recibido} onChange={(e) => setRecibido(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
@@ -1100,6 +1217,18 @@ function NuevaVenta({
         </p>
       </div>
     </form>
+    {cambiarTasa && (
+      <TasaDolarVentana
+        token={token}
+        onSesionVencida={onSesionVencida}
+        onCerrar={() => setCambiarTasa(false)}
+        onCambio={() => {
+          prepararVenta(token)
+            .then((p) => setPrep((antes) => (antes ? { ...antes, tasaDolar: p.tasaDolar } : p)))
+            .catch(manejar)
+        }}
+      />
+    )}
     {nuevoCliente && (
       <Ventana titulo="Nuevo cliente" onCerrar={() => setNuevoCliente(false)}>
         <FormClienteNuevo
@@ -1118,6 +1247,96 @@ function NuevaVenta({
       </Ventana>
     )}
     </>
+  )
+}
+
+// ---------- Tasa del dólar ----------
+
+function TasaDolarVentana({
+  token,
+  onSesionVencida,
+  onCerrar,
+  onCambio,
+}: {
+  token: string
+  onSesionVencida: () => void
+  onCerrar: () => void
+  onCambio: () => void
+}) {
+  const [datos, setDatos] = useState<Awaited<ReturnType<typeof tasasDolar>> | null>(null)
+  const [tasa, setTasa] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const cargar = useCallback(async () => {
+    try {
+      setDatos(await tasasDolar(token))
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    }
+  }, [token, onSesionVencida])
+
+  useEffect(() => {
+    void cargar()
+  }, [cargar])
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setGuardando(true)
+    try {
+      await registrarTasaDolar(token, { tasa: tasa.trim(), motivo: motivo.trim() })
+      setTasa('')
+      setMotivo('')
+      await cargar()
+      onCambio()
+    } catch (err) {
+      if (err instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Ventana titulo="Tasa del dólar" onCerrar={onCerrar}>
+      <form onSubmit={(e) => void guardar(e)} className="flex flex-col gap-3 text-sm">
+        <p className="text-gray-600">
+          Vigente: <strong>{datos?.vigente ? `RD$${verTasa(datos.vigente.tasa)} por 1 US$` : 'sin registrar'}</strong>. La tasa nueva rige
+          desde ahora para las ventas siguientes; las ventas ya hechas guardan la suya.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-gray-600">
+            Nueva tasa (RD$ por 1 US$)
+            <input className={CAMPO} value={tasa} inputMode="decimal" onChange={(e) => setTasa(e.target.value)} placeholder="60.50" autoFocus />
+          </label>
+          <label className="flex flex-col gap-1 text-gray-600">
+            Motivo (opcional)
+            <input className={CAMPO} value={motivo} maxLength={300} onChange={(e) => setMotivo(e.target.value)} placeholder="Tasa del día" />
+          </label>
+        </div>
+        {error && <CajaError>{error}</CajaError>}
+        <button type="submit" className={`${BOTON_PRINCIPAL} self-start`} disabled={guardando || !/^\d{1,3}(\.\d{1,4})?$/.test(tasa.trim())}>
+          {guardando ? 'Guardando…' : 'Guardar tasa'}
+        </button>
+        {datos && datos.historial.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <div className="font-medium">Historial</div>
+            {datos.historial.map((h) => (
+              <div key={h.vigente_desde} className="flex justify-between gap-2 border-t border-gray-100 py-1 text-gray-600">
+                <span>
+                  {new Date(h.vigente_desde).toLocaleString('es-DO')} · {h.usuario}
+                  {h.motivo ? ` · ${h.motivo}` : ''}
+                </span>
+                <strong className="text-gray-900">RD${verTasa(h.tasa)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+      </form>
+    </Ventana>
   )
 }
 
@@ -1249,6 +1468,14 @@ function VerDetalle({
             <div key={i}>
               <span className="font-medium">{p.forma_pago}</span> {dinero(p.monto)}
               {p.recibido && <div className="text-gray-500">Recibido {dinero(p.recibido)} · Devuelta {dinero(p.devuelta)}</div>}
+              {p.moneda === 'USD' && (
+                <div className="text-gray-500">
+                  En dólares: {dolares(p.monto_usd)} a {verTasa(p.tasa)} · recibido {dolares(p.recibido_usd)}
+                  {p.devuelta_monto && p.devuelta_monto !== '0.00'
+                    ? ` · devuelta ${p.devuelta_moneda === 'USD' ? dolares(p.devuelta_monto) : dinero(p.devuelta_monto)}`
+                    : ''}
+                </div>
+              )}
               {p.referencia && <div className="text-gray-500">Referencia: {p.referencia}</div>}
             </div>
           ))}
