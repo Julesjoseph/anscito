@@ -46,6 +46,11 @@ function monto(v: unknown, que: string): string {
   return m;
 }
 
+// Un pago de una factura cuenta si es de contado (sin pago_id) o si su pago
+// en Cuentas por Pagar no está anulado.
+export const SQL_PAGO_VIGENTE = `(cp.pago_id IS NULL OR EXISTS (
+  SELECT 1 FROM cxp_pagos pp WHERE pp.id = cp.pago_id AND pp.estado = 'activo'))`;
+
 export function numeroCompra(n: number | string) {
   return `CP-${String(n).padStart(6, '0')}`;
 }
@@ -179,8 +184,8 @@ export class ComprasService {
     const pagina = Math.max(1, Number(texto(f.pagina)) || 1);
     const donde = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
     const desde = `FROM compras c JOIN terceros pr ON pr.id = c.proveedor_id
-      CROSS JOIN LATERAL (SELECT COALESCE(sum(monto), 0)::numeric(14,2) AS pagado
-                          FROM compra_pagos WHERE compra_id = c.id) x ${donde}`;
+      CROSS JOIN LATERAL (SELECT COALESCE(sum(cp.monto), 0)::numeric(14,2) AS pagado
+                          FROM compra_pagos cp WHERE cp.compra_id = c.id AND ${SQL_PAGO_VIGENTE}) x ${donde}`;
     const [filas, total] = await Promise.all([
       this.db.query<{ numero: string }>(
         `SELECT c.id, c.numero, to_char(c.fecha_comprobante, 'YYYY-MM-DD') AS fecha, c.ncf,
@@ -232,7 +237,10 @@ export class ComprasService {
       this.db.query(
         `SELECT cp.id, cp.monto, cp.forma, to_char(cp.fecha, 'YYYY-MM-DD') AS fecha, cp.referencia,
                 cp.created_at, u.username AS usuario,
-                COALESCE(cj.nombre, ct.nombre) AS origen
+                COALESCE(cj.nombre, ct.nombre) AS origen,
+                CASE WHEN cp.pago_id IS NULL THEN NULL
+                     ELSE 'PP-' || lpad((SELECT numero FROM cxp_pagos WHERE id = cp.pago_id)::text, 6, '0') END AS comprobante,
+                ${SQL_PAGO_VIGENTE} AS vigente
          FROM compra_pagos cp JOIN usuarios u ON u.id = cp.usuario_id
          LEFT JOIN caja_movimientos cm ON cm.compra_pago_id = cp.id AND cm.tipo = 'compra'
          LEFT JOIN caja_sesiones cs ON cs.id = cm.sesion_id
@@ -247,10 +255,10 @@ export class ComprasService {
       numero: string;
       a_pagar: string;
     };
-    const pagado = (pagos.rows as { monto: string }[]).reduce(
-      (a, p) => a + centavos(p.monto),
-      0n,
-    );
+    // Solo cuentan las partes vigentes (las de un pago anulado se muestran, pero no suman).
+    const pagado = (pagos.rows as { monto: string; vigente: boolean }[])
+      .filter((p) => p.vigente)
+      .reduce((a, p) => a + centavos(p.monto), 0n);
     return {
       ...x,
       codigo: numeroCompra(x.numero),
@@ -380,6 +388,13 @@ export class ComprasService {
         'El ITBIS retenido no puede ser mayor que el ITBIS de la factura',
       );
     const descripcion = opcional(datos.descripcion, 300, 'Descripción');
+    const gastoFijoId = texto(datos.gastoFijoId).toLowerCase() || null;
+    if (gastoFijoId && !UUID.test(gastoFijoId))
+      throw new BadRequestException('Gasto fijo inválido');
+    // Mes al que corresponde la factura del gasto fijo (por defecto, el de su fecha).
+    const mesTexto = texto(datos.gastoFijoMes);
+    if (mesTexto && !/^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(mesTexto))
+      throw new BadRequestException('Mes del gasto fijo inválido');
     const notas = opcional(datos.notas, 1000, 'Notas');
     const pago = (datos.pago ?? {}) as Record<string, unknown>;
     const referencia = opcional(pago.referencia, 60, 'Referencia del pago');
@@ -408,6 +423,16 @@ export class ComprasService {
         );
         if (tg.rowCount === 0)
           throw new BadRequestException('Tipo de gasto inválido');
+        if (gastoFijoId) {
+          const gf = await c.query(
+            'SELECT 1 FROM gastos_fijos WHERE id = $1 AND proveedor_id = $2',
+            [gastoFijoId, proveedorId],
+          );
+          if (gf.rowCount === 0)
+            throw new BadRequestException(
+              'El gasto fijo no existe o es de otro proveedor',
+            );
+        }
 
         // Vencimiento: el escrito; en crédito, si no se escribe, los días del proveedor.
         let vence = texto(datos.vencimiento);
@@ -504,8 +529,9 @@ export class ComprasService {
         const r = await c.query<{ id: string }>(
           `INSERT INTO compras (numero, proveedor_id, sucursal_id, ncf, fecha_comprobante, tipo_gasto,
                                 condicion, vencimiento, monto_bienes, monto_servicios, itbis,
-                                itbis_retenido, isr_retenido, total, a_pagar, descripcion, notas, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                                itbis_retenido, isr_retenido, total, a_pagar, descripcion, notas, created_by,
+                                gasto_fijo_id, gasto_fijo_mes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
            RETURNING id`,
           [
             n,
@@ -526,6 +552,8 @@ export class ComprasService {
             descripcion,
             notas,
             actorId,
+            gastoFijoId,
+            gastoFijoId ? `${(mesTexto || fecha).slice(0, 7)}-01` : null,
           ],
         );
         const compraId = r.rows[0].id;
@@ -645,7 +673,15 @@ export class ComprasService {
         };
       });
     } catch (e) {
-      if ((e as { code?: string }).code === '23505')
+      const err = e as { code?: string; constraint?: string };
+      if (
+        err.code === '23505' &&
+        err.constraint === 'compras_gasto_fijo_mes_unico'
+      )
+        throw new ConflictException(
+          'Ya hay una factura registrada de este gasto fijo para ese mes',
+        );
+      if (err.code === '23505')
         throw new ConflictException(
           'Esa factura (mismo NCF del mismo proveedor) ya está registrada',
         );
@@ -685,6 +721,16 @@ export class ComprasService {
         throw new BadRequestException('La compra ya está anulada');
       const codigo = numeroCompra(x.numero);
       const hoy = await this.hoy(c);
+
+      const enCxp = await c.query<{ numero: string }>(
+        `SELECT DISTINCT pp.numero FROM compra_pagos cp JOIN cxp_pagos pp ON pp.id = cp.pago_id
+         WHERE cp.compra_id = $1 AND pp.estado = 'activo' ORDER BY pp.numero`,
+        [id],
+      );
+      if ((enCxp.rowCount ?? 0) > 0)
+        throw new BadRequestException(
+          `Esta factura tiene pagos en Cuentas por Pagar (${enCxp.rows.map((x) => `PP-${String(x.numero).padStart(6, '0')}`).join(', ')}): anúlelos primero`,
+        );
 
       // La mercancía sale del inventario (devolución al proveedor).
       const lineas = await c.query<{
@@ -741,7 +787,7 @@ export class ComprasService {
         `SELECT cp.id, cp.monto, cp.forma, km.id::text AS cuenta_mov, km.cuenta_id
          FROM compra_pagos cp
          LEFT JOIN cuenta_movimientos km ON km.compra_pago_id = cp.id AND km.tipo = 'compra'
-         WHERE cp.compra_id = $1 ORDER BY cp.created_at`,
+         WHERE cp.compra_id = $1 AND cp.pago_id IS NULL ORDER BY cp.created_at`,
         [id],
       );
       const devuelto: string[] = [];

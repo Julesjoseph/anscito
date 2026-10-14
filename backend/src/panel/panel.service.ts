@@ -6,6 +6,13 @@ import {
   SQL_SALDOS,
 } from '../bancos/sql';
 import { SQL_SIGNO_CAJA } from '../caja/sql';
+import { hoyLocal } from '../cxc/estado';
+import {
+  avisosGastosFijos,
+  diasAlerta,
+  facturasPendientes,
+} from '../cxp/estado';
+import { centavos, texto2 } from '../sanes/calendario';
 import {
   SQL_TOTALES_PRODUCTO,
   STOCK_MINIMO_POR_DEFECTO,
@@ -110,7 +117,28 @@ export class PanelService {
         permisos.has('inventario.ver_costos'),
       );
     }
+    if (permisos.has('cxp.ver')) {
+      resultado.cxp = await this.cxp();
+    }
     return resultado;
+  }
+
+  // Cuentas por Pagar: facturas vencidas o por vencer y gastos fijos que tocan.
+  private async cxp() {
+    const hoy = await hoyLocal(this.db);
+    const dias = await diasAlerta(this.db);
+    const facturas = await facturasPendientes(this.db, hoy, dias);
+    const suma = (xs: typeof facturas) =>
+      texto2(xs.reduce((a, f) => a + centavos(f.saldo), 0n));
+    const vencidas = facturas.filter((f) => f.vencida);
+    const porVencer = facturas.filter((f) => f.por_vencer);
+    return {
+      dias,
+      deuda: suma(facturas),
+      vencidas: { cantidad: vencidas.length, monto: suma(vencidas) },
+      porVencer: { cantidad: porVencer.length, monto: suma(porVencer) },
+      gastosFijos: await avisosGastosFijos(this.db, hoy, dias),
+    };
   }
 
   private async ventas(inicio: string, fin: string, anterior: string) {

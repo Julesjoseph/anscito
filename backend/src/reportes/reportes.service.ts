@@ -8,6 +8,7 @@ import { SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { DatabaseService } from '../database/database.service';
 import { SQL_SIGNO } from '../inventario/sql';
 import { estadoCliente, numeroAbono, tasasRecargo } from '../cxc/estado';
+import { facturasPendientes, numeroPago } from '../cxp/estado';
 import { centavos } from '../sanes/calendario';
 import { enmascarar } from '../terceros/documentos';
 import { aExcel, aPdf } from './exportar';
@@ -22,7 +23,13 @@ import type { Columna, Fila, Reporte } from './tipos';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type Area =
-  'ventas' | 'envios' | 'caja_bancos' | 'inventario' | 'clientes' | 'cxc';
+  | 'ventas'
+  | 'envios'
+  | 'caja_bancos'
+  | 'inventario'
+  | 'clientes'
+  | 'cxc'
+  | 'cxp';
 
 export const REPORTES: Record<string, { area: Area; titulo: string }> = {
   'ventas-dia': { area: 'ventas', titulo: 'Ventas por día' },
@@ -51,11 +58,19 @@ export const REPORTES: Record<string, { area: Area; titulo: string }> = {
     titulo: 'Antigüedad de saldos (cuentas por cobrar)',
   },
   'cxc-estado-cuenta': { area: 'cxc', titulo: 'Estado de cuenta del cliente' },
+  'cxp-antiguedad': {
+    area: 'cxp',
+    titulo: 'Antigüedad de saldos (cuentas por pagar)',
+  },
+  'cxp-estado-cuenta': {
+    area: 'cxp',
+    titulo: 'Estado de cuenta del proveedor',
+  },
 };
 
-// Permiso de cada área (Cuentas por Cobrar usa el suyo).
+// Permiso de cada área (Cuentas por Cobrar y por Pagar usan el suyo).
 function permisoArea(a: Area): string {
-  return a === 'cxc' ? 'cxc.ver' : `reportes.${a}`;
+  return a === 'cxc' || a === 'cxp' ? `${a}.ver` : `reportes.${a}`;
 }
 
 // Servicios del reporte "Clientes por servicio".
@@ -74,6 +89,7 @@ export type Filtros = {
   estado?: string;
   servicio?: string;
   clienteId?: string;
+  proveedorId?: string;
 };
 
 function texto(v: unknown): string {
@@ -209,9 +225,10 @@ export class ReportesService {
         'inventario',
         'clientes',
         'cxc',
+        'cxp',
       ] as Area[]
     ).filter((a) => p.has(permisoArea(a)));
-    const [agentes, cuentas, clientesCxc] = await Promise.all([
+    const [agentes, cuentas, clientesCxc, proveedoresCxp] = await Promise.all([
       p.has('reportes.envios')
         ? this.db.query(
             `SELECT id, codigo, nombre, is_active FROM remesa_agentes ORDER BY is_active DESC, codigo`,
@@ -231,6 +248,13 @@ export class ReportesService {
              ORDER BY lower(t.nombre)`,
           )
         : null,
+      p.has('cxp.ver')
+        ? this.db.query(
+            `SELECT t.id, t.nombre FROM terceros t
+             WHERE EXISTS (SELECT 1 FROM compras c WHERE c.proveedor_id = t.id AND c.condicion = 'credito')
+             ORDER BY lower(t.nombre)`,
+          )
+        : null,
     ]);
     return {
       reportes: Object.entries(REPORTES)
@@ -239,6 +263,7 @@ export class ReportesService {
       agentes: agentes?.rows ?? [],
       cuentas: cuentas?.rows ?? [],
       clientesCxc: clientesCxc?.rows ?? [],
+      proveedoresCxp: proveedoresCxp?.rows ?? [],
       servicios: Object.entries(SERVICIOS_CLIENTES).map(([codigo, nombre]) => ({
         codigo,
         nombre,
@@ -283,6 +308,10 @@ export class ReportesService {
         return this.cxcAntiguedad(cx);
       case 'cxc-estado-cuenta':
         return this.cxcEstadoCuenta(cx, texto(f.clienteId));
+      case 'cxp-antiguedad':
+        return this.cxpAntiguedad(cx);
+      case 'cxp-estado-cuenta':
+        return this.cxpEstadoCuenta(cx, texto(f.proveedorId));
       default:
         return this.inventario(cx);
     }
@@ -1508,6 +1537,171 @@ export class ReportesService {
         e.credito
           ? `Límite de crédito ${e.credito.limite} · disponible ${e.disponible} · plazo normal ${e.credito.plazo_dias} días.`
           : 'Sin crédito asignado.',
+      ],
+    });
+  }
+
+  // ---------- Cuentas por pagar ----------
+
+  // Lo que se le debe a cada proveedor al día "hasta", según los días de atraso.
+  private async cxpAntiguedad(cx: Contexto) {
+    const facturas = await facturasPendientes(this.db, cx.hasta, 0);
+    const t2 = (x: bigint) =>
+      `${x / 100n}.${String(x % 100n).padStart(2, '0')}`;
+    const por = new Map<
+      string,
+      { nombre: string; b: Record<string, bigint> }
+    >();
+    for (const f of facturas) {
+      const x = por.get(f.proveedor_id) ?? {
+        nombre: f.proveedor,
+        b: { por_vencer: 0n, d30: 0n, d60: 0n, d90: 0n, mas90: 0n },
+      };
+      const m = centavos(f.saldo);
+      if (!f.vencida) x.b.por_vencer += m;
+      else if (f.dias_atraso <= 30) x.b.d30 += m;
+      else if (f.dias_atraso <= 60) x.b.d60 += m;
+      else if (f.dias_atraso <= 90) x.b.d90 += m;
+      else x.b.mas90 += m;
+      por.set(f.proveedor_id, x);
+    }
+    const filas: Fila[] = [...por.values()]
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+      .map(({ nombre, b }) => ({
+        proveedor: nombre,
+        por_vencer: t2(b.por_vencer),
+        d30: t2(b.d30),
+        d60: t2(b.d60),
+        d90: t2(b.d90),
+        mas90: t2(b.mas90),
+        total: t2(b.por_vencer + b.d30 + b.d60 + b.d90 + b.mas90),
+      }));
+    const columnas: Columna[] = [
+      { clave: 'proveedor', titulo: 'Proveedor', tipo: 'texto' },
+      {
+        clave: 'por_vencer',
+        titulo: 'Por vencer',
+        tipo: 'dinero',
+        total: true,
+      },
+      { clave: 'd30', titulo: '1 a 30 días', tipo: 'dinero', total: true },
+      { clave: 'd60', titulo: '31 a 60 días', tipo: 'dinero', total: true },
+      { clave: 'd90', titulo: '61 a 90 días', tipo: 'dinero', total: true },
+      { clave: 'mas90', titulo: 'Más de 90 días', tipo: 'dinero', total: true },
+      { clave: 'total', titulo: 'Total', tipo: 'dinero', total: true },
+    ];
+    return this.armar('cxp-antiguedad', cx, columnas, filas, {
+      periodo: `Al ${dma(cx.hasta)}`,
+      notas: [
+        'Facturas registradas hasta esa fecha, menos los pagos vigentes hasta esa fecha. Días de atraso desde el vencimiento de cada factura.',
+      ],
+    });
+  }
+
+  // Facturas a crédito de un proveedor y los pagos que se le hicieron, con el saldo.
+  private async cxpEstadoCuenta(cx: Contexto, proveedorId: string) {
+    if (!UUID.test(proveedorId))
+      throw new BadRequestException('Seleccione el proveedor');
+    const prov = await this.db.query<{ nombre: string }>(
+      `SELECT nombre FROM terceros WHERE id = $1 AND rol = 'proveedor'`,
+      [proveedorId],
+    );
+    if (prov.rowCount === 0)
+      throw new NotFoundException('Proveedor no encontrado');
+    const [compras, pagos] = await Promise.all([
+      this.db.query<{
+        numero: string;
+        ncf: string | null;
+        fecha: string;
+        vencimiento: string;
+        a_pagar: string;
+      }>(
+        `SELECT c.numero, c.ncf, to_char(c.fecha_comprobante, 'YYYY-MM-DD') AS fecha,
+                to_char(c.vencimiento, 'YYYY-MM-DD') AS vencimiento, c.a_pagar
+         FROM compras c
+         WHERE c.proveedor_id = $1 AND c.condicion = 'credito' AND c.estado = 'registrada'
+           AND c.fecha_comprobante <= $2::date
+         ORDER BY c.fecha_comprobante, c.numero`,
+        [proveedorId, cx.hasta],
+      ),
+      this.db.query<{
+        numero: string;
+        fecha: string;
+        forma: string;
+        monto: string;
+        detalle: string;
+      }>(
+        `SELECT p.numero, to_char(p.fecha, 'YYYY-MM-DD') AS fecha, p.forma,
+                sum(cp.monto)::numeric(14,2) AS monto,
+                string_agg('CP-' || lpad(c.numero::text, 6, '0'), ', ' ORDER BY c.numero) AS detalle
+         FROM cxp_pagos p JOIN compra_pagos cp ON cp.pago_id = p.id
+         JOIN compras c ON c.id = cp.compra_id
+         WHERE p.proveedor_id = $1 AND p.estado = 'activo' AND p.fecha <= $2::date
+           AND c.estado = 'registrada'
+         GROUP BY p.id ORDER BY p.fecha, p.numero`,
+        [proveedorId, cx.hasta],
+      ),
+    ]);
+    type Mov = {
+      fecha: string;
+      orden: number;
+      documento: string;
+      detalle: string;
+      cargo: bigint;
+      abono: bigint;
+    };
+    const movs: Mov[] = [
+      ...compras.rows.map((c) => ({
+        fecha: c.fecha,
+        orden: 0,
+        documento: `CP-${String(c.numero).padStart(6, '0')}`,
+        detalle: `Factura a crédito${c.ncf ? ` ${c.ncf}` : ''} · vence ${dma(c.vencimiento)}`,
+        cargo: centavos(c.a_pagar),
+        abono: 0n,
+      })),
+      ...pagos.rows.map((p) => ({
+        fecha: p.fecha,
+        orden: 1,
+        documento: numeroPago(p.numero),
+        detalle: `Pago (${p.forma}) a ${p.detalle}`,
+        cargo: 0n,
+        abono: centavos(p.monto),
+      })),
+    ];
+    movs.sort((a, b) =>
+      a.fecha === b.fecha ? a.orden - b.orden : a.fecha < b.fecha ? -1 : 1,
+    );
+    const t2 = (x: bigint) =>
+      `${x < 0n ? '-' : ''}${(x < 0n ? -x : x) / 100n}.${String((x < 0n ? -x : x) % 100n).padStart(2, '0')}`;
+    let saldo = 0n;
+    const filas: Fila[] = movs.map((m) => {
+      saldo += m.cargo - m.abono;
+      return {
+        fecha: m.fecha,
+        documento: m.documento,
+        detalle: m.detalle,
+        cargo: m.cargo ? t2(m.cargo) : null,
+        abono: m.abono ? t2(m.abono) : null,
+        saldo: t2(saldo),
+      };
+    });
+    const pend = await facturasPendientes(this.db, cx.hasta, 0, proveedorId);
+    const vencido = pend
+      .filter((f) => f.vencida)
+      .reduce((a, f) => a + centavos(f.saldo), 0n);
+    const columnas: Columna[] = [
+      { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
+      { clave: 'documento', titulo: 'Documento', tipo: 'texto' },
+      { clave: 'detalle', titulo: 'Detalle', tipo: 'texto' },
+      { clave: 'cargo', titulo: 'Factura', tipo: 'dinero', total: true },
+      { clave: 'abono', titulo: 'Pago', tipo: 'dinero', total: true },
+      { clave: 'saldo', titulo: 'Saldo', tipo: 'dinero' },
+    ];
+    return this.armar('cxp-estado-cuenta', cx, columnas, filas, {
+      periodo: `Al ${dma(cx.hasta)}`,
+      detalle: prov.rows[0].nombre,
+      notas: [
+        `Se le debe: ${t2(saldo)}. Vencido: ${t2(vencido)}. Solo facturas a crédito y pagos no anulados.`,
       ],
     });
   }
