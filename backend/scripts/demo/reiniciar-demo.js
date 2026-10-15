@@ -208,20 +208,20 @@ async function main() {
     }
     unidadDe[u.codigo] = d.id;
   }
-   const categoriaDe = {};
+  const categoriaDe = {};
   for (const c of await s(`
       SELECT c.id, c.nombre, c.descripcion, c.prefijo, u.codigo AS unidad
       FROM categorias c JOIN unidades_negocio u ON u.id = c.unidad_negocio_id
       WHERE c.is_active AND u.is_active`)) {
-    // Las categorías por defecto (migración 032) ya existen en el demo: se usan esas.
-    const ya = await uno(
-      'SELECT id FROM categorias WHERE unidad_negocio_id = $1 AND lower(nombre) = lower($2)',
-      [unidadDe[c.unidad], c.nombre],
-    );
-    if (ya) {
-      categoriaDe[c.id] = ya.id;
-      continue;
-    }
+               // Las categorías por defecto (migración 032) ya existen en el demo: se usan esas.
+       const ya = await uno(
+         'SELECT id FROM categorias WHERE unidad_negocio_id = $1 AND lower(nombre) = lower($2)',
+         [unidadDe[c.unidad], c.nombre],
+       );
+       if (ya) {
+         categoriaDe[c.id] = ya.id;
+         continue;
+       }
     const r = await cat.crearCategoria(adminId, undefined, {
       unidadNegocioId: unidadDe[c.unidad],
       nombre: c.nombre,
@@ -229,7 +229,7 @@ async function main() {
       prefijo: c.prefijo ?? '',
     });
     categoriaDe[c.id] = r.id;
-
+  }
   const mapa = async (tabla) =>
     Object.fromEntries((await pool.query(`SELECT codigo, id FROM ${tabla}`)).rows.map((f) => [f.codigo, f.id]));
   const impuestoDe = await mapa('impuestos');
