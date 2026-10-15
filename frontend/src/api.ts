@@ -2994,3 +2994,147 @@ export const buscarProveedoresCxp = (token: string, texto: string) =>
     `/cxp/buscar-proveedores?${new URLSearchParams({ texto }).toString()}`,
     token,
   )
+
+// ---------- Contabilidad ----------
+
+export type TipoCuentaContable = 'activo' | 'pasivo' | 'capital' | 'ingreso' | 'costo' | 'gasto'
+
+export type CuentaContable = {
+  id: string
+  codigo: string
+  nombre: string
+  tipo: TipoCuentaContable
+  naturaleza: 'deudora' | 'acreedora'
+  padre_id: string | null
+  nivel: number
+  acepta_movimientos: boolean
+  validada: boolean
+  notas: string | null
+  is_active: boolean
+  debitos: string
+  creditos: string
+  saldo: string // según su naturaleza
+  tiene_movimientos: boolean
+}
+
+export type PrepararContabilidad = {
+  fechaInicio: string | null
+  hayAsientos: boolean
+  hayApertura: boolean
+  hoy: string
+  unidadesNegocio: { id: string; nombre: string }[]
+}
+
+export type FilaAsiento = {
+  id: string
+  numero: string
+  codigo: string
+  fecha: string
+  concepto: string
+  origen: string
+  documento: string | null
+  estado: 'activo' | 'anulado'
+  reverso_de: string | null
+  usuario: string
+  total: string
+}
+
+export type DetalleAsiento = FilaAsiento & {
+  motivo_anulacion: string | null
+  anulado_en: string | null
+  anulado_por: string | null
+  reverso_de_codigo: string | null
+  reversado_por_codigo: string | null
+  created_at: string
+  lineas: {
+    id: string
+    codigo: string
+    cuenta: string
+    debito: string
+    credito: string
+    descripcion: string | null
+    tercero: string | null
+    unidad_negocio: string | null
+  }[]
+}
+
+export type LineaAsientoEntrada = {
+  cuentaId: string
+  debito: string
+  credito: string
+  descripcion: string
+  unidadNegocioId: string
+}
+
+export type Balanza = {
+  hasta: string
+  filas: {
+    codigo: string
+    nombre: string
+    tipo: TipoCuentaContable
+    naturaleza: string
+    debitos: string
+    creditos: string
+    saldo_deudor: string
+    saldo_acreedor: string
+  }[]
+  totales: { debitos: string; creditos: string; cuadra: boolean }
+}
+
+export const prepararContabilidad = (token: string) => llamar<PrepararContabilidad>('GET', '/contabilidad/preparar', token)
+
+export const fijarFechaInicioContable = (token: string, fecha: string) =>
+  llamar<{ fechaInicio: string }>('PATCH', '/contabilidad/fecha-inicio', token, { fecha })
+
+export const catalogoCuentas = (token: string) => llamar<CuentaContable[]>('GET', '/contabilidad/cuentas', token)
+
+export const crearCuentaContable = (
+  token: string,
+  datos: { codigo: string; nombre: string; padreId: string; naturaleza: string; aceptaMovimientos: boolean; notas: string },
+) => llamar<{ id: string }>('POST', '/contabilidad/cuentas', token, datos)
+
+export const editarCuentaContable = (
+  token: string,
+  id: string,
+  datos: { nombre: string; naturaleza: string; aceptaMovimientos: boolean; notas: string },
+) => llamar<{ ok: boolean }>('PUT', `/contabilidad/cuentas/${id}`, token, datos)
+
+export const validarCuentaContable = (token: string, id: string, validada: boolean) =>
+  llamar<{ ok: boolean }>('PATCH', `/contabilidad/cuentas/${id}/validada`, token, { validada })
+
+export const estadoCuentaContable = (token: string, id: string, activo: boolean, motivo: string) =>
+  llamar<{ ok: boolean }>('PATCH', `/contabilidad/cuentas/${id}/estado`, token, { activo, motivo })
+
+export const listarAsientos = (
+  token: string,
+  f: { desde: string; hasta: string; texto: string; origen: string; pagina: number },
+) => {
+  const q = new URLSearchParams({ pagina: String(f.pagina) })
+  for (const k of ['desde', 'hasta', 'texto', 'origen'] as const) if (f[k].trim()) q.set(k, f[k].trim())
+  return llamar<{ filas: FilaAsiento[]; total: number; pagina: number; porPagina: number }>('GET', `/contabilidad/asientos?${q.toString()}`, token)
+}
+
+export const detalleAsiento = (token: string, id: string) => llamar<DetalleAsiento>('GET', `/contabilidad/asientos/${id}`, token)
+
+export const crearAsientoContable = (
+  token: string,
+  datos: { fecha: string; concepto: string; apertura: boolean; lineas: LineaAsientoEntrada[] },
+) => llamar<{ id: string; codigo: string }>('POST', '/contabilidad/asientos', token, datos)
+
+export const anularAsientoContable = (token: string, id: string, motivo: string) =>
+  llamar<{ ok: boolean; reverso: string; fechaReverso: string }>('POST', `/contabilidad/asientos/${id}/anular`, token, { motivo })
+
+export const periodosContables = (token: string) =>
+  llamar<{
+    fechaInicio: string | null
+    periodos: { anio: number; mes: number; estado: 'abierto' | 'cerrado'; cerrado_en: string | null; cerrado_por: string | null }[]
+  }>('GET', '/contabilidad/periodos', token)
+
+export const cerrarMesContable = (token: string, anio: number, mes: number) =>
+  llamar<{ ok: boolean }>('POST', '/contabilidad/periodos/cerrar', token, { anio, mes })
+
+export const reabrirMesContable = (token: string, anio: number, mes: number, motivo: string) =>
+  llamar<{ ok: boolean }>('POST', '/contabilidad/periodos/reabrir', token, { anio, mes, motivo })
+
+export const balanzaComprobacion = (token: string, hasta: string) =>
+  llamar<Balanza>('GET', `/contabilidad/balanza?${new URLSearchParams(hasta ? { hasta } : {}).toString()}`, token)

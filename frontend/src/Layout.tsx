@@ -39,6 +39,7 @@ import Categorias from './Categorias'
 import Compras from './Compras'
 import CuentasCobrar from './CuentasCobrar'
 import CuentasPagar from './CuentasPagar'
+import Contabilidad from './Contabilidad'
 import Inventario from './Inventario'
 import Roles from './Roles'
 import Sanes from './Sanes'
@@ -143,7 +144,13 @@ const MODULOS: Modulo[] = [
     permiso: 'bancos.ver',
   },
   { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
-  { id: 'contabilidad', nombre: 'Contabilidad', Icono: BookOpen, listo: false },
+  {
+    id: 'contabilidad',
+    nombre: 'Contabilidad',
+    Icono: BookOpen,
+    listo: true,
+    permiso: 'contabilidad.ver',
+  },
   {
     id: 'facturacion',
     nombre: 'Facturación electrónica',
@@ -375,6 +382,12 @@ export default function Layout({
               setGastoFijo(aviso)
               setPagina('compras')
             }}
+          />
+        ) : pagina === 'contabilidad' ? (
+          <Contabilidad
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
           />
         ) : pagina === 'compras' ? (
           <Compras

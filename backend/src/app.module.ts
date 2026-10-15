@@ -11,6 +11,7 @@ import { FacturacionModule } from './facturacion/facturacion.module';
 import { ComprasModule } from './compras/compras.module';
 import { CxcModule } from './cxc/cxc.module';
 import { CxpModule } from './cxp/cxp.module';
+import { ContabilidadModule } from './contabilidad/contabilidad.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { DatabaseModule } from './database/database.module';
 import { EmpresaModule } from './empresa/empresa.module';
@@ -43,6 +44,7 @@ import { VentasModule } from './ventas/ventas.module';
     ComprasModule,
     CxcModule,
     CxpModule,
+    ContabilidadModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
