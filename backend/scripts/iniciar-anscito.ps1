@@ -15,6 +15,17 @@ if (-not (Test-Path $config)) {
 }
 $envPath = (Get-Content $config -Raw | ConvertFrom-Json).envPath
 
+
+# Direcciones desde donde se pueden abrir las pantallas: esta laptop y,
+# por Tailscale, su nombre y su IP (celulares y PCs autorizadas).
+$equipo = $env:COMPUTERNAME.ToLower()
+$origenes = @('http://localhost:5173', "http://${equipo}:5173")
+try { $ipTs = (& tailscale ip -4 2>$null | Select-Object -First 1) } catch { $ipTs = $null }
+if ($ipTs) { $origenes += "http://${ipTs}:5173" }
+try { $dns = ((& tailscale status --json 2>$null) | ConvertFrom-Json).Self.DNSName.TrimEnd('.') } catch { $dns = $null }
+if ($dns) { $origenes += "http://${dns}:5173" }
+$cors = $origenes -join ','
+
 function Escuchando($puerto) {
   return [bool](Get-NetTCPConnection -LocalPort $puerto -State Listen -ErrorAction SilentlyContinue)
 }
@@ -40,7 +51,7 @@ if (Escuchando 3000) {
 } else {
   $cmd = "`$Host.UI.RawUI.WindowTitle = '$titulo'; " +
     "`$env:DOTENV_CONFIG_PATH = '$envPath'; `$env:DB_NAME = 'anscito'; `$env:PORT = '3000'; " +
-    "`$env:CORS_ORIGENES = 'http://localhost:5173'; Set-Location '$backend'; node dist/main.js"
+    "`$env:CORS_ORIGENES ='$cors'; Set-Location '$backend'; node dist/main.js"
   Start-Process powershell -ArgumentList '-NoExit', '-Command', $cmd -WindowStyle Minimized
 }
 
