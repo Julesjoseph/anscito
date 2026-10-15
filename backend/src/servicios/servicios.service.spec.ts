@@ -8,6 +8,7 @@ const valido = {
   codigo: 'imp-bn-01',
   nombre: 'Impresión blanco y negro',
   unidadNegocioId: ID,
+  categoriaId: ID,
   unidadMedidaId: ID,
   impuestoId: ID,
   precio: '5',
@@ -53,11 +54,13 @@ describe('ServiciosService.validar', () => {
 describe('ServiciosService.validar con categoría', () => {
   const servicio = new ServiciosService({} as DatabaseService);
 
-  it('la categoría es opcional', () => {
-    expect(servicio.validar(valido).categoria_id).toBeNull();
-    expect(
-      servicio.validar({ ...valido, categoriaId: '' }).categoria_id,
-    ).toBeNull();
+  it('la categoría es obligatoria', () => {
+    expect(() => servicio.validar({ ...valido, categoriaId: '' })).toThrow(
+      BadRequestException,
+    );
+    expect(() =>
+      servicio.validar({ ...valido, categoriaId: undefined }),
+    ).toThrow(BadRequestException);
   });
 
   it('acepta una categoría válida y rechaza una inválida', () => {

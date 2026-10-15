@@ -47,6 +47,13 @@ export function aPesos(usd: string, tasa: string): string {
   return textoDe((p + 5000n) / 10000n);
 }
 
+// RD$ → US$ al centavo más cercano (solo para mostrar los montos de una
+// factura cobrada en dólares; lo que se cobra va hacia arriba).
+export function aDolares(rd: string, tasa: string): string {
+  const t = tasaEntera(tasa);
+  return textoDe((centavosDe(rd) * 10000n * 2n + t) / (2n * t));
+}
+
 // RD$ → US$ que paga el cliente, subido al centavo (a favor del negocio).
 export function aDolaresArriba(rd: string, tasa: string): string {
   const t = tasaEntera(tasa);

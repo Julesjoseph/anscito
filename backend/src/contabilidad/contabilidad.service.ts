@@ -9,7 +9,7 @@ import { hoyLocal } from '../cxc/estado';
 import { DatabaseService } from '../database/database.service';
 import { centavos, texto2 } from '../sanes/calendario';
 import { normalizarMonto } from '../servicios/calculo-itbis';
-import { numeroAsiento, registrarAsiento } from './asientos';
+import { anularAsientoEn, numeroAsiento, registrarAsiento } from './asientos';
 import type { LineaAsiento } from './asientos';
 
 // Contabilidad: catálogo de cuentas, fecha de inicio, asientos manuales y de
@@ -517,65 +517,15 @@ export class ContabilidadService {
     const motivo = motivoValido(datos.motivo);
     try {
       return await this.db.transaccion(async (c) => {
-        const r = await c.query<{
-          numero: string;
-          fecha: string;
-          origen: string;
-          estado: string;
-          concepto: string;
-          documento: string | null;
-        }>(
-          `SELECT numero, to_char(fecha, 'YYYY-MM-DD') AS fecha, origen, estado, concepto, documento
-           FROM asientos WHERE id = $1 FOR UPDATE`,
-          [id],
-        );
-        if (r.rowCount === 0)
-          throw new NotFoundException('Asiento no encontrado');
-        const a = r.rows[0];
-        if (a.origen === 'reverso')
-          throw new BadRequestException('Un asiento de reverso no se anula');
-        if (a.estado === 'anulado')
-          throw new BadRequestException('El asiento ya está anulado');
-        const cerrado = await c.query(
-          `SELECT 1 FROM periodos_contables
-           WHERE anio = extract(year FROM $1::date) AND mes = extract(month FROM $1::date) AND estado = 'cerrado'`,
-          [a.fecha],
-        );
-        const fecha = (cerrado.rowCount ?? 0) > 0 ? await hoyLocal(c) : a.fecha;
-        const lineas = await c.query<{
-          cuenta_id: string;
-          debito: string;
-          credito: string;
-          descripcion: string | null;
-          tercero_id: string | null;
-          unidad_negocio_id: string | null;
-        }>(
-          `SELECT cuenta_id, debito, credito, descripcion, tercero_id, unidad_negocio_id
-           FROM asiento_lineas WHERE asiento_id = $1 ORDER BY id`,
-          [id],
-        );
-        const codigo = numeroAsiento(a.numero);
-        await c.query(
-          `UPDATE asientos SET estado = 'anulado', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
-           WHERE id = $1`,
-          [id, actorId, motivo],
-        );
-        const rev = await registrarAsiento(c, {
-          fecha,
-          concepto: `Reverso de ${codigo}: ${motivo}`.slice(0, 300),
-          origen: 'reverso',
-          documento: a.documento,
-          reversoDe: id,
-          lineas: lineas.rows.map((l) => ({
-            cuentaId: l.cuenta_id,
-            debito: l.credito,
-            credito: l.debito,
-            descripcion: l.descripcion,
-            terceroId: l.tercero_id,
-            unidadNegocioId: l.unidad_negocio_id,
-          })),
+        const an = await anularAsientoEn(c, {
+          id,
+          motivo,
           usuarioId: actorId,
+          hoy: await hoyLocal(c),
         });
+        const codigo = an.codigo;
+        const fecha = an.fechaReverso;
+        const rev = { codigo: an.reverso };
         await c.query('SET CONSTRAINTS ALL IMMEDIATE');
         await registrarAuditoria(c, {
           usuarioId: actorId,

@@ -1,3 +1,4 @@
+import { contabilizar, revertir } from '../contabilidad/motor';
 import {
   BadRequestException,
   ConflictException,
@@ -644,6 +645,15 @@ export class ComprasService {
             );
         }
 
+        // Sus asientos: la factura y, si fue de contado, el pago.
+        await contabilizar(c, 'compra', compraId, actorId);
+        const contado = await c.query<{ id: string }>(
+          'SELECT id FROM compra_pagos WHERE compra_id = $1 AND pago_id IS NULL',
+          [compraId],
+        );
+        for (const x of contado.rows)
+          await contabilizar(c, 'compra_pago', x.id, actorId);
+
         await registrarAuditoria(c, {
           usuarioId: actorId,
           accion: 'compra.registrar',
@@ -847,6 +857,10 @@ export class ComprasService {
                 motivo_anulacion = $3 WHERE id = $1`,
         [id, actorId, motivo],
       );
+      // Se anulan sus asientos: el pago de contado y la factura.
+      for (const pg of pagos.rows)
+        await revertir(c, 'compra_pago', pg.id, motivo, actorId);
+      await revertir(c, 'compra', id, motivo, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'compra.anular',

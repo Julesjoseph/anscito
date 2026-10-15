@@ -33,6 +33,7 @@ export type DatosServicio = {
   precioIncluyeItbis?: unknown;
   gananciaTipo?: unknown;
   comisionPct?: unknown;
+  porCuentaTercero?: unknown;
 };
 
 export type Filtros = {
@@ -56,6 +57,8 @@ type Limpio = {
   precio_incluye_itbis: boolean;
   ganancia_tipo: 'costo' | 'comision';
   comision_pct: string | null;
+  // Con comisión: el resto del cobro es de un tercero (no es ingreso).
+  por_cuenta_tercero: boolean;
 };
 
 type FilaServicio = Limpio & {
@@ -103,8 +106,9 @@ export class ServiciosService {
     if (!UUID.test(unidadNegocioId)) {
       throw new BadRequestException('Seleccione la unidad de negocio');
     }
-    if (categoriaId && !UUID.test(categoriaId)) {
-      throw new BadRequestException('Categoría inválida');
+    // La categoría es obligatoria (ordena los servicios y la ganancia por línea).
+    if (!UUID.test(categoriaId)) {
+      throw new BadRequestException('Seleccione la categoría del servicio');
     }
     if (!UUID.test(unidadMedidaId)) {
       throw new BadRequestException('Seleccione la unidad de medida');
@@ -181,6 +185,8 @@ export class ServiciosService {
       precio_incluye_itbis: datos.precioIncluyeItbis,
       ganancia_tipo: gananciaTipo,
       comision_pct: comisionPct,
+      por_cuenta_tercero:
+        gananciaTipo === 'comision' && datos.porCuentaTercero === true,
     };
   }
 
@@ -224,7 +230,7 @@ export class ServiciosService {
               s.categoria_id, cat.nombre AS categoria,
               s.unidad_medida_id, um.nombre AS unidad_medida,
               s.precio, s.moneda, s.costo, s.impuesto_id, i.nombre AS impuesto,
-              s.ganancia_tipo, s.comision_pct,
+              s.ganancia_tipo, s.comision_pct, s.por_cuenta_tercero,
               ${SQL_TASA_VIGENTE} AS tasa,
               s.precio_incluye_itbis, s.is_active
        FROM servicios s
@@ -363,8 +369,8 @@ export class ServiciosService {
           `INSERT INTO servicios
              (codigo, nombre, descripcion, unidad_negocio_id, unidad_medida_id,
               precio, costo, impuesto_id, precio_incluye_itbis, created_by,
-              categoria_id, ganancia_tipo, comision_pct, moneda)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+              categoria_id, ganancia_tipo, comision_pct, moneda, por_cuenta_tercero)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
            RETURNING id`,
           [
             d.codigo,
@@ -381,6 +387,7 @@ export class ServiciosService {
             d.ganancia_tipo,
             d.comision_pct,
             d.moneda,
+            d.por_cuenta_tercero,
           ],
         );
         const id = r.rows[0].id;
@@ -416,7 +423,7 @@ export class ServiciosService {
         const r = await c.query<Limpio>(
           `SELECT codigo, nombre, descripcion, unidad_negocio_id,
                   categoria_id, unidad_medida_id, precio, costo, impuesto_id,
-                  precio_incluye_itbis, ganancia_tipo, comision_pct, moneda
+                  precio_incluye_itbis, ganancia_tipo, comision_pct, moneda, por_cuenta_tercero
            FROM servicios WHERE id = $1 FOR UPDATE`,
           [id],
         );
@@ -432,7 +439,8 @@ export class ServiciosService {
                unidad_negocio_id = $5, unidad_medida_id = $6,
                precio = $7, costo = $8, impuesto_id = $9,
                precio_incluye_itbis = $10, categoria_id = $11,
-               ganancia_tipo = $12, comision_pct = $13, moneda = $14, updated_at = now()
+               ganancia_tipo = $12, comision_pct = $13, moneda = $14,
+               por_cuenta_tercero = $15, updated_at = now()
            WHERE id = $1`,
           [
             id,
@@ -449,6 +457,7 @@ export class ServiciosService {
             d.ganancia_tipo,
             d.comision_pct,
             d.moneda,
+            d.por_cuenta_tercero,
           ],
         );
 
@@ -459,7 +468,7 @@ export class ServiciosService {
           { accion: 'servicio.cambiar_costo', campos: ['costo'] },
           {
             accion: 'servicio.cambiar_ganancia',
-            campos: ['ganancia_tipo', 'comision_pct'],
+            campos: ['ganancia_tipo', 'comision_pct', 'por_cuenta_tercero'],
           },
           {
             accion: 'servicio.cambiar_impuesto',

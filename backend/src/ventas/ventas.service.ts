@@ -7,6 +7,7 @@ import {
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE, SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
+import { contabilizar, revertir } from '../contabilidad/motor';
 import { registrarCredito } from '../cxc/estado';
 import { DatabaseService } from '../database/database.service';
 import {
@@ -109,6 +110,7 @@ type Articulo = {
   comision_pct: string | null;
   is_active: boolean;
   moneda: 'DOP' | 'USD';
+  por_cuenta_tercero: boolean; // servicio cobrado por cuenta de un tercero
   // Servicio con precio en US$: precio y costo de arriba ya en RD$.
   precio_usd?: string | null;
   tasa_dolar?: string | null;
@@ -374,7 +376,8 @@ export class VentasService {
                 um.permite_decimales, p.precio_venta AS precio,
                 p.precio_incluye_itbis, p.impuesto_id, i.nombre AS impuesto,
                 ${SQL_TASA_VIGENTE} AS tasa, p.costo,
-                NULL::numeric AS comision_pct, p.is_active, 'DOP' AS moneda
+                NULL::numeric AS comision_pct, p.is_active, 'DOP' AS moneda,
+                false AS por_cuenta_tercero
          FROM productos p
          JOIN unidades_medida um ON um.id = p.unidad_id
          JOIN impuestos i ON i.id = p.impuesto_id
@@ -394,7 +397,7 @@ export class VentasService {
                 s.costo,
                 CASE WHEN s.ganancia_tipo = 'comision' THEN s.comision_pct END
                   AS comision_pct,
-                s.is_active, s.moneda
+                s.is_active, s.moneda, s.por_cuenta_tercero
          FROM servicios s
          JOIN unidades_medida um ON um.id = s.unidad_medida_id
          JOIN impuestos i ON i.id = s.impuesto_id
@@ -782,9 +785,9 @@ export class VentasService {
              (venta_id, tipo, producto_id, servicio_id, codigo, descripcion, unidad,
               cantidad, precio_unitario, precio_incluye_itbis, impuesto_id, impuesto,
               tasa, bruto, descuento, base, itbis, total, costo_unitario,
-              comision_pct, precio_usd, tasa_dolar)
+              comision_pct, precio_usd, tasa_dolar, por_cuenta_tercero)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                   $16, $17, $18, $19, $20, $21, $22)`,
+                   $16, $17, $18, $19, $20, $21, $22, $23)`,
           [
             ventaId,
             a.tipo,
@@ -808,6 +811,7 @@ export class VentasService {
             a.comision_pct,
             a.precio_usd ?? null,
             a.tasa_dolar ?? null,
+            a.por_cuenta_tercero === true,
           ],
         );
         if (a.tipo === 'producto') {
@@ -909,6 +913,9 @@ export class VentasService {
           [sesionCaja.id, cobrado, ventaId, actorId],
         );
       }
+
+      // Su asiento (si la contabilidad ya empezó; si no se puede, queda pendiente).
+      await contabilizar(c, 'venta', ventaId, actorId);
 
       // Su e-CF queda por emitir (si la facturación electrónica ya empezó).
       const ecf = await crearEcfDeVenta(
@@ -1454,6 +1461,7 @@ export class VentasService {
          WHERE id = $1`,
         [id, actorId, textoMotivo],
       );
+      await revertir(c, 'venta', id, textoMotivo, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'venta.anular',

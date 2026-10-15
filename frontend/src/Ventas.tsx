@@ -53,7 +53,7 @@ import type {
   TipoDocumento,
 } from './api'
 import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
-import { dolares, dolaresArriba, pesosDe, verTasa } from './dolar'
+import { dolares, dolaresArriba, dolaresDe, pesosDe, verTasa } from './dolar'
 import { ANCHOS_TICKET, htmlTicket, imprimirHtml } from './ticket'
 import type { AnchoTicket } from './ticket'
 import {
@@ -551,6 +551,9 @@ function NuevaVenta({
       : devueltaMoneda === 'USD'
         ? dolares(texto2(restoUsd))
         : dinero(texto2(pesosDe(restoUsd, tasa)))
+  // Factura en US$ cuando se cobra en dólares: solo cambia lo que se ve.
+  const plata = (v: string | null | undefined) =>
+    pagoUsd && tasa && v ? dolares(texto2(dolaresDe(centavos(v), tasa))) : dinero(v)
   const esConsumidorFinal = cliente?.id === prep?.consumidorFinal?.id
   const credActivo = resumen?.credito?.is_active ?? false
   const vencidas = resumen?.totales.cuentas_vencidas ?? 0
@@ -835,7 +838,9 @@ function NuevaVenta({
             <div className="flex items-center gap-2 font-medium">
               <CheckCircle2 size={18} /> Venta {hecha.numero} registrada
             </div>
-            <div>Total cobrado: {dinero(hecha.total)}</div>
+            <div>
+              Total cobrado: {hecha.dolares ? `${dolares(hecha.dolares.montoUsd)} (${dinero(hecha.total)})` : dinero(hecha.total)}
+            </div>
             {hecha.devuelta !== null && <div className="text-lg font-medium">Devuelta: {dinero(hecha.devuelta)}</div>}
             {hecha.dolares && (
               <div>
@@ -941,13 +946,21 @@ function NuevaVenta({
         </div>
 
         <dl className="flex flex-col gap-1 border-y border-gray-100 py-3 text-sm">
-          <div className="flex justify-between"><dt className="text-gray-500">Subtotal</dt><dd>{dinero(totales?.subtotal)}</dd></div>
+          <div className="flex justify-between"><dt className="text-gray-500">Subtotal</dt><dd>{plata(totales?.subtotal)}</dd></div>
           {totales && totales.descuento !== '0.00' && (
-            <div className="flex justify-between text-amber-800"><dt>Descuento</dt><dd>−{dinero(totales.descuento)}</dd></div>
+            <div className="flex justify-between text-amber-800"><dt>Descuento</dt><dd>−{plata(totales.descuento)}</dd></div>
           )}
-          <div className="flex justify-between"><dt className="text-gray-500">Base imponible</dt><dd>{dinero(totales?.base_imponible)}</dd></div>
-          <div className="flex justify-between"><dt className="text-gray-500">ITBIS</dt><dd>{dinero(totales?.itbis)}</dd></div>
-          <div className="mt-1 flex justify-between text-xl font-medium"><dt>Total</dt><dd>{dinero(totales?.total)}</dd></div>
+          <div className="flex justify-between"><dt className="text-gray-500">Base imponible</dt><dd>{plata(totales?.base_imponible)}</dd></div>
+          <div className="flex justify-between"><dt className="text-gray-500">ITBIS</dt><dd>{plata(totales?.itbis)}</dd></div>
+          <div className="mt-1 flex justify-between text-xl font-medium">
+            <dt>Total</dt>
+            <dd>{pagoUsd && !aCredito ? dolares(texto2(debeUsd)) : dinero(totales?.total)}</dd>
+          </div>
+          {pagoUsd && totales && (
+            <div className="text-right text-xs text-gray-500">
+              Equivalente: {dinero(totales.total)} a tasa {verTasa(tasa)}
+            </div>
+          )}
         </dl>
 
         {hayDescuento && (
@@ -1203,7 +1216,7 @@ function NuevaVenta({
             ? 'Registrando…'
             : aCredito
               ? `Registrar a crédito ${montoCredito > 0n ? dinero(texto2(montoCredito)) : ''}`
-              : `Cobrar ${totales ? dinero(totales.total) : ''}`}
+              : `Cobrar ${totales ? (pagoUsd ? dolares(texto2(debeUsd)) : dinero(totales.total)) : ''}`}
         </button>
         {lineas.length > 0 && (
           <button type="button" onClick={limpiar} className="text-xs text-gray-500 hover:underline">

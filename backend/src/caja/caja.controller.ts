@@ -122,6 +122,7 @@ export class CajaController {
       categoriaGastoId?: unknown;
       comprobante?: unknown;
       motivo?: unknown;
+      clase?: unknown;
     },
   ) {
     return this.caja.movimiento(req.usuario.id, id, req.ip, body ?? {});
@@ -133,7 +134,13 @@ export class CajaController {
   movimientoUsd(
     @Req() req: Peticion,
     @Param('id') id: string,
-    @Body() body: { tipo?: unknown; monto?: unknown; motivo?: unknown },
+    @Body()
+    body: {
+      tipo?: unknown;
+      monto?: unknown;
+      motivo?: unknown;
+      clase?: unknown;
+    },
   ) {
     return this.caja.movimientoUsd(req.usuario.id, id, req.ip, body ?? {});
   }

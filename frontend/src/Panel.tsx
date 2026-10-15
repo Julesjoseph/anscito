@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ClipboardList,
+  DollarSign,
+  HandCoins,
   Landmark,
   Send,
   ArrowUpRight,
@@ -16,7 +18,7 @@ import {
 } from 'lucide-react'
 import { SesionVencida, resumenPanel } from './api'
 import type { PeriodoPanel, ResumenPanel } from './api'
-import { dolares } from './dolar'
+import { dolares, verTasa } from './dolar'
 import { CajaError } from './componentes'
 import { cantidad, dinero, mensajeDe } from './formato'
 
@@ -128,6 +130,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
   const envios = datos?.remesas
   const serv = datos?.servicios
   const cxp = datos?.cxp
+  const usd = datos?.dolares
   const cambio = v ? variacion(v.total, v.total_anterior) : null
 
   return (
@@ -327,6 +330,41 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               </button>
             </Tarjeta>
           )}
+          {usd && (
+            <Tarjeta
+              titulo="Dólares (US$)"
+              icono={<DollarSign size={16} />}
+              valor={dolares(usd.total)}
+              detalle={
+                <>
+                  {usd.caja !== null && <span className="block">En caja: {dolares(usd.caja)}</span>}
+                  {usd.cajas?.map((x) => (
+                    <span key={x.caja} className="block pl-2 text-gray-500">
+                      {x.caja}: {dolares(x.usd)}{' '}
+                      {x.estado === 'abierta'
+                        ? '(abierta)'
+                        : `(contado al cierre del ${x.fecha ? new Date(x.fecha).toLocaleDateString('es-DO') : '—'})`}
+                    </span>
+                  ))}
+                  {usd.bancos !== null && (
+                    <span className="block">
+                      En bancos: {dolares(usd.bancos)}
+                      {usd.cuentas && usd.cuentas.length > 1 && ` (${usd.cuentas.map((c) => `${c.nombre} ${dolares(c.confirmado)}`).join(' · ')})`}
+                    </span>
+                  )}
+                  {usd.cuentas && usd.cuentas.length === 0 && <span className="block text-gray-400">Sin cuentas de banco en US$</span>}
+                  {usd.cuentas && usd.cuentas.some((c) => c.por_confirmar !== '0.00') && (
+                    <span className="block text-amber-700">Hay movimientos en US$ por confirmar</span>
+                  )}
+                  {usd.totalDop && usd.tasa && (
+                    <span className="block">
+                      ≈ {dinero(usd.totalDop)} a tasa {verTasa(usd.tasa)} (ahora, no depende del período)
+                    </span>
+                  )}
+                </>
+              }
+            />
+          )}
           {bancos && (
             <Tarjeta
               titulo="Dinero en bancos"
@@ -401,7 +439,33 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               </button>
             </Tarjeta>
           )}
-          <Proximamente titulo="Cuentas por cobrar" modulo="Cuentas por cobrar" />
+          {datos?.cxc ? (
+            <Tarjeta
+              titulo="Cuentas por cobrar"
+              alerta={datos.cxc.vencido !== '0.00'}
+              icono={datos.cxc.vencido !== '0.00' ? <AlertTriangle size={16} className="text-amber-600" /> : <HandCoins size={16} />}
+              valor={dinero(datos.cxc.total)}
+              detalle={
+                <>
+                  {datos.cxc.clientes === 0
+                    ? 'Nadie le debe'
+                    : `${datos.cxc.clientes} cliente${datos.cxc.clientes === 1 ? '' : 's'} le deben`}
+                  {datos.cxc.vencido !== '0.00' && (
+                    <span className="block text-red-700">
+                      Vencido: {dinero(datos.cxc.vencido)} ({datos.cxc.clientesVencidos} cliente{datos.cxc.clientesVencidos === 1 ? '' : 's'})
+                    </span>
+                  )}
+                  <span className="block">Incluye recargos (ahora, no depende del período)</span>
+                </>
+              }
+            >
+              <button type="button" onClick={() => onIr('cxc')} className="self-start text-xs text-[#C8102E] hover:underline">
+                Ver cuentas por cobrar
+              </button>
+            </Tarjeta>
+          ) : (
+            <Proximamente titulo="Cuentas por cobrar" modulo="Cuentas por cobrar" />
+          )}
         </div>
       )}
 

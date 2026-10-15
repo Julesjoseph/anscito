@@ -6,8 +6,8 @@ import {
   SQL_SALDOS,
 } from '../bancos/sql';
 import { SQL_SIGNO_CAJA } from '../caja/sql';
-import { SQL_SIGNO_CAJA_USD } from '../comun/dolar';
-import { hoyLocal } from '../cxc/estado';
+import { SQL_SIGNO_CAJA_USD, tasaVigente } from '../comun/dolar';
+import { estadoCliente, hoyLocal, tasasRecargo } from '../cxc/estado';
 import {
   avisosGastosFijos,
   diasAlerta,
@@ -121,7 +121,121 @@ export class PanelService {
     if (permisos.has('cxp.ver')) {
       resultado.cxp = await this.cxp();
     }
+    if (permisos.has('cxc.ver')) {
+      resultado.cxc = await this.cxc();
+    }
+    // Dólares: lo que hay en US$ en las cajas abiertas y en las cuentas en US$.
+    if (permisos.has('caja.ver') || permisos.has('bancos.ver')) {
+      resultado.dolares = await this.dolares(
+        permisos.has('caja.ver'),
+        permisos.has('bancos.ver'),
+      );
+    }
     return resultado;
+  }
+
+  // Dólares en caja (cajas abiertas) y en bancos (cuentas en US$), y su valor
+  // en RD$ con la tasa del día.
+  private async dolares(verCaja: boolean, verBancos: boolean) {
+    // Por cada caja activa: si está abierta, lo que debería haber ahora en
+    // US$; si está cerrada, lo que se contó en US$ al cerrar su última sesión.
+    const cajas = verCaja
+      ? (
+          await this.db.query<{
+            caja: string;
+            estado: 'abierta' | 'cerrada';
+            usd: string;
+            fecha: string | null;
+          }>(
+            `SELECT c.nombre AS caja,
+                    CASE WHEN a.id IS NOT NULL THEN 'abierta' ELSE 'cerrada' END AS estado,
+                    COALESCE(CASE WHEN a.id IS NOT NULL THEN
+                      a.fondo_inicial_usd + COALESCE((SELECT sum(m.monto * ${SQL_SIGNO_CAJA_USD})
+                        FROM caja_movimientos_usd m WHERE m.sesion_id = a.id), 0)
+                    ELSE u.contado_usd END, 0)::numeric(16,2) AS usd,
+                    CASE WHEN a.id IS NULL THEN u.cerrada_en END AS fecha
+             FROM cajas c
+             LEFT JOIN caja_sesiones a ON a.caja_id = c.id AND a.estado = 'abierta'
+             LEFT JOIN LATERAL (
+               SELECT s.contado_usd, s.cerrada_en FROM caja_sesiones s
+               WHERE s.caja_id = c.id AND s.estado = 'cerrada'
+               ORDER BY s.cerrada_en DESC LIMIT 1) u ON true
+             WHERE c.is_active
+             ORDER BY lower(c.nombre)`,
+          )
+        ).rows
+      : null;
+    const sumaCajas = await this.db.query<{ total: string }>(
+      'SELECT COALESCE((SELECT sum(v) FROM unnest($1::numeric[]) v), 0)::numeric(16,2) AS total',
+      [(cajas ?? []).map((x) => x.usd)],
+    );
+    const caja = cajas ? sumaCajas.rows[0].total : null;
+    const bancos = verBancos
+      ? await this.db.query<{
+          nombre: string;
+          confirmado: string;
+          por_confirmar: string;
+        }>(
+          `SELECT ct.nombre, COALESCE(s.confirmado, 0)::numeric(16,2) AS confirmado,
+                  COALESCE(s.por_confirmar, 0)::numeric(16,2) AS por_confirmar
+           FROM cuentas ct LEFT JOIN (${SQL_SALDOS}) s ON s.cuenta_id = ct.id
+           WHERE ct.is_active AND ct.moneda = 'USD' ORDER BY lower(ct.nombre)`,
+        )
+      : null;
+    const tasa = await tasaVigente(this.db);
+    const suma = await this.db.query<{
+      bancos: string;
+      total: string;
+      total_dop: string | null;
+    }>(
+      `SELECT x.bancos, ($1::numeric + x.bancos)::numeric(16,2) AS total,
+              CASE WHEN $3::numeric IS NULL THEN NULL
+                   ELSE round(($1::numeric + x.bancos) * $3::numeric, 2)::numeric(16,2)::text END AS total_dop
+       FROM (SELECT COALESCE((SELECT sum(v) FROM unnest($2::numeric[]) v), 0)::numeric(16,2) AS bancos) x`,
+      [
+        caja ?? '0',
+        (bancos?.rows ?? []).map((b) => b.confirmado),
+        tasa?.tasa ?? null,
+      ],
+    );
+    return {
+      caja,
+      cajas: cajas?.filter((x) => x.usd !== '0.00') ?? null,
+      bancos: bancos ? suma.rows[0].bancos : null,
+      cuentas: bancos?.rows ?? null,
+      total: suma.rows[0].total,
+      totalDop: suma.rows[0].total_dop,
+      tasa: tasa?.tasa ?? null,
+    };
+  }
+
+  // Cuentas por Cobrar: lo que deben los clientes hoy (capital + recargo),
+  // lo vencido y cuántos clientes deben (ahora, no depende del período).
+  private async cxc() {
+    const hoy = await hoyLocal(this.db);
+    const tasas = await tasasRecargo(this.db);
+    const clientes = await this.db.query<{ cliente_id: string }>(
+      `SELECT DISTINCT cliente_id FROM cuentas_cobrar WHERE estado = 'activa'`,
+    );
+    let total = 0n;
+    let vencido = 0n;
+    let deudores = 0;
+    let conVencidas = 0;
+    for (const x of clientes.rows) {
+      const e = await estadoCliente(this.db, x.cliente_id, hoy, tasas);
+      const t = centavos(e.totales.total);
+      if (t === 0n) continue;
+      total += t;
+      vencido += centavos(e.totales.vencido);
+      deudores++;
+      if (e.totales.cuentas_vencidas > 0) conVencidas++;
+    }
+    return {
+      total: texto2(total),
+      vencido: texto2(vencido),
+      clientes: deudores,
+      clientesVencidos: conVencidas,
+    };
   }
 
   // Cuentas por Pagar: facturas vencidas o por vencer y gastos fijos que tocan.

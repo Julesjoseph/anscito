@@ -1,4 +1,5 @@
 import {
+  aDolares,
   aDolaresArriba,
   aPesos,
   cobroEnDolares,
@@ -25,6 +26,12 @@ describe('dólares', () => {
     expect(aDolaresArriba('1210.00', '60.5000')).toBe('20.00'); // exacto
     expect(aDolaresArriba('1500.00', '60.5000')).toBe('24.80'); // 24.7933…
     expect(aDolaresArriba('0.01', '60.5000')).toBe('0.01');
+  });
+
+  it('RD$ a US$ para mostrar: al centavo más cercano', () => {
+    expect(aDolares('12000.00', '60.0000')).toBe('200.00');
+    expect(aDolares('1500.00', '60.5000')).toBe('24.79'); // 24.7933…
+    expect(aDolares('100.00', '60.5000')).toBe('1.65'); // 1.6528…
   });
 
   it('devuelta en US$ o en RD$', () => {

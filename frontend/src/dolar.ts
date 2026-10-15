@@ -49,3 +49,11 @@ export function verTasa(tasa: string | null | undefined): string {
   if (!tasa) return '—'
   return tasa.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
 }
+
+// Centavos de RD$ → centavos de US$ al centavo más cercano (solo para mostrar
+// los montos de una factura cobrada en dólares; lo cobrado va hacia arriba).
+export function dolaresDe(rdC: bigint, tasa: string): bigint {
+  const t = tasaEntera(tasa)
+  if (t <= 0n) return 0n
+  return (rdC * 10000n * 2n + t) / (2n * t)
+}

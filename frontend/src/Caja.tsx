@@ -210,6 +210,37 @@ function FormAbrir({
   )
 }
 
+// ---------- Qué fue un ingreso o un retiro (para la contabilidad) ----------
+
+const CLASES: Record<'ingreso' | 'retiro', [string, string][]> = {
+  ingreso: [
+    ['aporte', 'Aporte del dueño'],
+    ['prestamo', 'Préstamo recibido'],
+    ['otro', 'Otro (lo clasifica el contador)'],
+  ],
+  retiro: [
+    ['retiro_dueno', 'Retiro del dueño'],
+    ['otro', 'Otro (lo clasifica el contador)'],
+  ],
+}
+
+function SelectorClase({ tipo, clase, setClase }: { tipo: 'ingreso' | 'retiro'; clase: string; setClase: (v: string) => void }) {
+  return (
+    <label className="flex flex-col gap-1 text-sm text-gray-600">
+      ¿Qué fue?
+      <select value={clase} onChange={(e) => setClase(e.target.value)} className={CAMPO}>
+        <option value="">Seleccione…</option>
+        {CLASES[tipo].map(([v, nombre]) => (
+          <option key={v} value={v}>
+            {nombre}
+          </option>
+        ))}
+      </select>
+      {tipo === 'retiro' && <span className="text-xs text-gray-500">Si lo lleva al banco, use mejor “Depositar en banco”: es dinero que cambia de lugar.</span>}
+    </label>
+  )
+}
+
 // ---------- Dólares: ingreso o retiro ----------
 
 function FormDolares({
@@ -229,6 +260,7 @@ function FormDolares({
 }) {
   const [tipo, setTipo] = useState<'ingreso' | 'retiro'>('retiro')
   const [monto, setMonto] = useState('')
+  const [clase, setClase] = useState('')
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -240,7 +272,7 @@ function FormDolares({
     setGuardando(true)
     setError('')
     try {
-      await movimientoCajaUsd(token, sesionId, { tipo, monto: monto.trim(), motivo: motivo.trim() })
+      await movimientoCajaUsd(token, sesionId, { tipo, monto: monto.trim(), clase, motivo: motivo.trim() })
       onListo()
     } catch (err) {
       if (err instanceof SesionVencida) onSesionVencida()
@@ -265,7 +297,10 @@ function FormDolares({
           <button
             key={t}
             type="button"
-            onClick={() => setTipo(t)}
+            onClick={() => {
+              setTipo(t)
+              setClase('')
+            }}
             className={`flex-1 rounded-lg border px-3 py-2 ${tipo === t ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]' : 'border-gray-300 hover:bg-gray-50'}`}
           >
             {nombre}
@@ -277,6 +312,7 @@ function FormDolares({
         <input type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} autoFocus />
         {pasa && <span className="text-xs text-red-600">Es más de lo que hay ({dolares(esperadoUsd)}).</span>}
       </label>
+      <SelectorClase tipo={tipo} clase={clase} setClase={setClase} />
       <label className="flex flex-col gap-1 text-gray-600">
         Motivo
         <input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={500} placeholder={tipo === 'retiro' ? 'Ej.: Depósito US$ en Banreservas dólares' : 'Ej.: Dólares para dar cambio'} className={CAMPO} />
@@ -288,7 +324,7 @@ function FormDolares({
       )}
       {!prep.tasaDolar && <CajaError>No hay tasa del dólar: el administrador la pone en Facturación.</CajaError>}
       {error && <CajaError>{error}</CajaError>}
-      <button type="submit" disabled={guardando || !valido || pasa || motivo.trim().length < 5 || !prep.tasaDolar} className={BOTON_PRINCIPAL}>
+      <button type="submit" disabled={guardando || !valido || pasa || !clase || motivo.trim().length < 5 || !prep.tasaDolar} className={BOTON_PRINCIPAL}>
         <DollarSign size={16} /> {guardando ? 'Guardando…' : tipo === 'retiro' ? 'Registrar retiro de US$' : 'Registrar ingreso de US$'}
       </button>
     </form>
@@ -316,6 +352,7 @@ function FormMovimiento({
   const [monto, setMonto] = useState('')
   const [categoria, setCategoria] = useState('')
   const [comprobante, setComprobante] = useState('')
+  const [clase, setClase] = useState('')
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -334,6 +371,7 @@ function FormMovimiento({
         monto: monto.trim(),
         categoriaGastoId: tipo === 'gasto' ? categoria : undefined,
         comprobante: tipo === 'gasto' ? comprobante.trim() || undefined : undefined,
+        clase: tipo === 'gasto' ? undefined : clase,
         motivo,
       })
       onListo()
@@ -359,7 +397,10 @@ function FormMovimiento({
             key={id}
             type="button"
             title={ayuda}
-            onClick={() => setTipo(id)}
+            onClick={() => {
+              setTipo(id)
+              setClase('')
+            }}
             className={`flex-1 rounded-lg border px-3 py-2 text-sm ${tipo === id ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]' : 'border-gray-300 hover:bg-gray-50'}`}
           >
             {nombre}
@@ -398,6 +439,7 @@ function FormMovimiento({
           </label>
         </>
       )}
+      {tipo !== 'gasto' && <SelectorClase tipo={tipo} clase={clase} setClase={setClase} />}
       <label className="flex flex-col gap-1 text-sm text-gray-600">
         Motivo
         <input
@@ -411,7 +453,7 @@ function FormMovimiento({
       {error && <CajaError>{error}</CajaError>}
       <button
         type="submit"
-        disabled={guardando || !valido || pasa || motivo.trim().length < 5 || (tipo === 'gasto' && !categoria)}
+        disabled={guardando || !valido || pasa || motivo.trim().length < 5 || (tipo === 'gasto' ? !categoria : !clase)}
         className={BOTON_PRINCIPAL}
       >
         {guardando ? 'Guardando…' : `Registrar ${tipo}`}

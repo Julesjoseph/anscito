@@ -1,3 +1,4 @@
+import { contabilizar, revertir } from '../contabilidad/motor';
 import {
   BadRequestException,
   Injectable,
@@ -370,6 +371,7 @@ export class CxpService {
             ],
           );
       }
+      await contabilizar(c, 'cxp_pago', pagoId, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'cxp.pago',
@@ -497,6 +499,7 @@ export class CxpService {
          WHERE id = $1`,
         [id, actorId, motivo],
       );
+      await revertir(c, 'cxp_pago', id, motivo, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'cxp.anular_pago',

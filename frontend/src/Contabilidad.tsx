@@ -68,6 +68,14 @@ const NOMBRE_ORIGEN: Record<string, string> = {
   manual: 'Manual',
   apertura: 'Apertura',
   reverso: 'Reverso',
+  venta: 'Venta',
+  cxc_abono: 'Abono de crédito',
+  compra: 'Compra',
+  compra_pago: 'Pago de contado',
+  cxp_pago: 'Pago a proveedor',
+  caja_mov: 'Movimiento de caja',
+  caja_mov_usd: 'Movimiento de caja (US$)',
+  caja_cierre: 'Cierre de caja',
 }
 
 function useEnviar(onSesionVencida: () => void) {
@@ -587,6 +595,13 @@ function Asientos({
             <option value="manual">Manuales</option>
             <option value="apertura">Apertura</option>
             <option value="reverso">Reversos</option>
+            <option value="venta">Ventas</option>
+            <option value="cxc_abono">Abonos de crédito</option>
+            <option value="compra">Compras</option>
+            <option value="compra_pago">Pagos de contado</option>
+            <option value="cxp_pago">Pagos a proveedores</option>
+            <option value="caja_mov">Movimientos de caja</option>
+            <option value="caja_cierre">Cierres de caja</option>
           </select>
         </Campo>
         <div className="relative min-w-0 flex-1 sm:max-w-xs">

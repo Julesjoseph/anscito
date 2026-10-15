@@ -99,6 +99,8 @@ function FormServicio({
   const [gananciaTipo, setGananciaTipo] = useState<'costo' | 'comision'>(
     fila?.ganancia_tipo ?? 'costo',
   )
+  // Con comisión: el resto del cobro es de un tercero (solo la comisión es ingreso).
+  const [porTercero, setPorTercero] = useState(fila?.por_cuenta_tercero ?? false)
   const [comisionPct, setComisionPct] = useState(
     fila?.comision_pct ? fila.comision_pct.replace(/\.?0+$/, '') : '',
   )
@@ -164,6 +166,7 @@ function FormServicio({
       precioIncluyeItbis: incluye,
       gananciaTipo,
       comisionPct: comisionPct.trim(),
+      porCuentaTercero: gananciaTipo === 'comision' && porTercero,
     }
     try {
       if (fila) await editarServicio(token, fila.id, datos)
@@ -250,8 +253,8 @@ function FormServicio({
           >
             <option value="">
               {unidadNegocioId && categorias.length === 0
-                ? 'Sin categorías en esta unidad'
-                : 'Sin categoría'}
+                ? 'Esta unidad no tiene categorías: créelas en Categorías'
+                : 'Seleccione…'}
             </option>
             {categorias.map((c) => (
               <option key={c.id} value={c.id}>
@@ -356,9 +359,9 @@ function FormServicio({
           )}
           {gananciaTipo === 'comision' && local && /^\d{1,3}(\.\d{1,2})?$/.test(comisionPct.trim()) && Number(comisionPct) > 0 && Number(comisionPct) <= 100 && (
             <span className="text-xs text-gray-700">
-              Ganancia por cada servicio: {comisionPct.trim()}% de {dinero(local.base)} (sin ITBIS) ={' '}
+              Ganancia por cada servicio: {comisionPct.trim()}% de {plata(local.base)} (sin ITBIS) ={' '}
               <span className="font-medium">
-                {dinero(
+                {plata(
                   (() => {
                     const [e, d = ''] = local.base.split('.')
                     const base = BigInt(e) * 100n + BigInt(d.padEnd(2, '0'))
@@ -370,6 +373,22 @@ function FormServicio({
                 )}
               </span>
             </span>
+          )}
+          {gananciaTipo === 'costo' && costo.trim() === '' && (
+            <span className="flex items-start gap-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              Sin costo, todo lo cobrado cuenta como ganancia en los reportes. Si usted solo gana una comisión
+              (el resto es de otro), escoja “Comisión %”.
+            </span>
+          )}
+          {gananciaTipo === 'comision' && (
+            <label className="flex items-start gap-2 text-xs text-gray-700">
+              <input type="checkbox" className="mt-0.5" checked={porTercero} onChange={(e) => setPorTercero(e.target.checked)} />
+              <span>
+                Se cobra por cuenta de un tercero: el resto del dinero se le debe a otro (institución o proveedor). En la
+                contabilidad, solo la comisión es ingreso del negocio.
+              </span>
+            </label>
           )}
         </div>
       </div>
@@ -458,7 +477,7 @@ function FormServicio({
         <button type="button" onClick={onCancelar} className={BOTON_SECUNDARIO}>
           Cancelar
         </button>
-        <button type="submit" disabled={guardando} className={BOTON_PRINCIPAL}>
+        <button type="submit" disabled={guardando || !categoriaId} className={BOTON_PRINCIPAL}>
           {guardando
             ? 'Guardando…'
             : fila
@@ -745,12 +764,14 @@ function Catalogo({ token, permisos, onSesionVencida }: Props) {
                         ? `Comisión ${f.comision_pct?.replace(/\.?0+$/, '')}%`
                         : f.costo
                           ? `Costo ${f.moneda === 'USD' ? dolares(f.costo) : dinero(f.costo)}`
-                          : 'Sin costo registrado'}
+                          : (
+                            <span className="text-amber-700">Sin costo ni comisión: todo cuenta como ganancia</span>
+                          )}
                     </div>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">{etiquetaItbis(f)}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-right font-medium">
-                    {dinero(f.calculo?.total)}
+                    {f.moneda === 'USD' ? dolares(f.calculo?.total) : dinero(f.calculo?.total)}
                   </td>
                   <td className="px-4 py-3">
                     <span

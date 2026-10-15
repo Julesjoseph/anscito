@@ -156,6 +156,7 @@ export type FilaServicio = {
   // Ganancia por costo (precio − costo) o por comisión (precio × %).
   ganancia_tipo: 'costo' | 'comision'
   comision_pct: string | null
+  por_cuenta_tercero: boolean // con comisión: el resto del cobro es de un tercero
   is_active: boolean
   calculo: Desglose | null
 }
@@ -190,6 +191,7 @@ export type DatosServicio = {
   precioIncluyeItbis: boolean
   gananciaTipo: 'costo' | 'comision'
   comisionPct: string
+  porCuentaTercero: boolean
 }
 
 export type FiltrosServicios = {
@@ -1159,6 +1161,19 @@ export type ResumenPanel = {
     pendientes: number
     no_llegaron: number
   }
+  // Cuentas por cobrar hoy (null si no tiene permiso).
+  cxc?: { total: string; vencido: string; clientes: number; clientesVencidos: number }
+  // Dólares en las cajas abiertas y en las cuentas en US$ (null si no tiene permiso).
+  dolares?: {
+    caja: string | null
+    // Por caja: abierta = lo que debería haber; cerrada = lo contado al cierre.
+    cajas: { caja: string; estado: 'abierta' | 'cerrada'; usd: string; fecha: string | null }[] | null
+    bancos: string | null
+    cuentas: { nombre: string; confirmado: string; por_confirmar: string }[] | null
+    total: string
+    totalDop: string | null
+    tasa: string | null
+  }
   caja?: {
     abiertas: { caja: string; usuario: string; abierta_en: string; esperado: string; esperado_usd: string }[]
     total: string
@@ -1391,7 +1406,7 @@ export const abrirCaja = (
 export const movimientoCajaUsd = (
   token: string,
   sesionId: string,
-  datos: { tipo: 'ingreso' | 'retiro'; monto: string; motivo: string },
+  datos: { tipo: 'ingreso' | 'retiro'; monto: string; clase: string; motivo: string },
 ) => llamar<{ esperadoUsd: string }>('POST', `/caja/sesiones/${sesionId}/movimientos-usd`, token, datos)
 
 export const movimientoCaja = (
@@ -1402,6 +1417,7 @@ export const movimientoCaja = (
     monto: string
     categoriaGastoId?: string
     comprobante?: string
+    clase?: string // ingreso: aporte | prestamo | otro; retiro: retiro_dueno | otro
     motivo: string
   },
 ) =>

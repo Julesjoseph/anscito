@@ -1,4 +1,10 @@
 import PDFDocument from 'pdfkit';
+import {
+  aDolares,
+  centavosDe as centavosUsd,
+  normalizarTasa,
+  textoDe as textoUsd,
+} from '../comun/dolar';
 
 // Comprobante interno de venta en PDF para impresoras térmicas (80 y 58 mm)
 // y hoja carta. NO es un comprobante fiscal: el NCF/e-CF lo emite el sistema
@@ -203,6 +209,15 @@ function dibujar(
 
   linea();
 
+  // Factura cobrada en dólares (sin parte a crédito): los montos se muestran
+  // en US$ con la tasa de ese cobro; por dentro la venta sigue en RD$.
+  const pagoUsd = v.pagos.some((p) => p.forma_pago === 'Crédito')
+    ? undefined
+    : v.pagos.find((p) => p.moneda === 'USD' && p.tasa && p.monto_usd);
+  const tasaUsd = pagoUsd?.tasa ? normalizarTasa(pagoUsd.tasa) : null;
+  const plata = (x: string) =>
+    tasaUsd ? `US${dinero(aDolares(x, tasaUsd)).replace('RD', '')}` : dinero(x);
+
   if (carta) {
     // Tabla con columnas.
     const cols = [
@@ -239,12 +254,12 @@ function dibujar(
               : ` · por ${l.unidad.toLowerCase()}`
           }`,
           cantidad(l.cantidad),
-          dinero(l.precio_unitario),
-          l.descuento === '0.00' ? '-' : `-${dinero(l.descuento)}`,
+          plata(l.precio_unitario),
+          l.descuento === '0.00' ? '-' : `-${plata(l.descuento)}`,
           Number(l.tasa) === 0
             ? 'Exento'
-            : `${dinero(l.itbis)} (${cantidad(l.tasa)}%)`,
-          dinero(l.total),
+            : `${plata(l.itbis)} (${cantidad(l.tasa)}%)`,
+          plata(l.total),
         ],
         false,
       );
@@ -257,13 +272,12 @@ function dibujar(
         .fontSize(letra)
         .text(l.descripcion, margen, doc.y, { width: util });
       fila(
-        `${cantidad(l.cantidad)} x ${dinero(l.precio_unitario)}${
+        `${cantidad(l.cantidad)} x ${plata(l.precio_unitario)}${
           Number(l.tasa) === 0 ? '  Exento' : `  ITBIS ${cantidad(l.tasa)}%`
         }`,
-        dinero(l.total),
+        plata(l.total),
       );
-      if (l.descuento !== '0.00')
-        fila('  Descuento', `-${dinero(l.descuento)}`);
+      if (l.descuento !== '0.00') fila('  Descuento', `-${plata(l.descuento)}`);
       if (l.precio_usd)
         fila(`  Precio US$${l.precio_usd} x tasa ${Number(l.tasa_dolar)}`, '');
     }
@@ -275,21 +289,42 @@ function dibujar(
   const ancho = carta ? util * 0.45 : util;
   const total = (izq: string, der: string, negrita = false, tam = letra) =>
     fila(izq, der, negrita, tam, x, ancho);
-  total('Subtotal', dinero(v.subtotal));
-  if (v.descuento !== '0.00') total('Descuento', `-${dinero(v.descuento)}`);
-  total('Base imponible', dinero(v.base_imponible));
-  total('ITBIS', dinero(v.itbis));
+  total('Subtotal', plata(v.subtotal));
+  if (v.descuento !== '0.00') total('Descuento', `-${plata(v.descuento)}`);
+  total('Base imponible', plata(v.base_imponible));
+  total('ITBIS', plata(v.itbis));
+  if (pagoUsd?.monto_usd && tasaUsd) {
+    const sube =
+      centavosUsd(pagoUsd.monto_usd) - centavosUsd(aDolares(v.total, tasaUsd));
+    if (sube !== 0n)
+      total(
+        'Redondeo',
+        `${sube < 0n ? '-' : '+'}US$${textoUsd(sube < 0n ? -sube : sube)}`,
+      );
+  }
   doc.moveDown(0.2);
-  total('TOTAL', dinero(v.total), true, letra + 3);
+  total(
+    'TOTAL',
+    pagoUsd?.monto_usd
+      ? `US${dinero(pagoUsd.monto_usd).replace('RD', '')}`
+      : dinero(v.total),
+    true,
+    letra + 3,
+  );
+  if (pagoUsd && tasaUsd)
+    total('Equivalente en RD$', `${dinero(v.total)} (tasa ${Number(tasaUsd)})`);
+  // Con comprobante fiscal, lo que va a la DGII (e-CF, 607) está en RD$.
+  if (pagoUsd && tasaUsd && v.comprobante_fiscal)
+    total('ITBIS en RD$', dinero(v.itbis));
   doc.moveDown(0.3);
   for (const p of v.pagos) {
-    total(p.forma_pago, dinero(p.monto));
-    if (p.recibido) total('Recibido', dinero(p.recibido));
-    if (p.devuelta) total('Devuelta', dinero(p.devuelta), true);
-    // Pago en dólares: lo cobrado en US$, la tasa y la devuelta.
+    // Pago en dólares: lo cobrado en US$, lo que entregó y la devuelta.
     if (p.moneda === 'USD' && p.monto_usd && p.recibido_usd) {
-      total(`En dólares (tasa ${Number(p.tasa)})`, `US$${p.monto_usd}`);
-      total('Recibido', `US$${p.recibido_usd}`);
+      total(
+        `${p.forma_pago} en dólares`,
+        `US${dinero(p.monto_usd).replace('RD', '')}`,
+      );
+      total('Recibido', `US${dinero(p.recibido_usd).replace('RD', '')}`);
       if (p.devuelta_monto && p.devuelta_monto !== '0.00')
         total(
           'Devuelta',
@@ -298,6 +333,10 @@ function dibujar(
             : dinero(p.devuelta_monto),
           true,
         );
+    } else {
+      total(p.forma_pago, dinero(p.monto));
+      if (p.recibido) total('Recibido', dinero(p.recibido));
+      if (p.devuelta) total('Devuelta', dinero(p.devuelta), true);
     }
     if (p.referencia) total('Referencia', p.referencia);
   }

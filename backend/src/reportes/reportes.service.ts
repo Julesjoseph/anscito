@@ -443,8 +443,15 @@ export class ReportesService {
               sum(vl.base)::numeric(16,2) AS base,
               sum(vl.itbis)::numeric(16,2) AS itbis,
               sum(vl.total)::numeric(16,2) AS total,
-              sum(vl.base - (${SQL_GANANCIA_LINEA}))::numeric(16,2) AS costo,
+              -- Costo solo de lo que se gana por "precio − costo" (en los servicios
+              -- por comisión, el resto del cobro no es un costo).
+              sum(vl.base - (${SQL_GANANCIA_LINEA})) FILTER (WHERE vl.comision_pct IS NULL)::numeric(16,2) AS costo,
               sum(${SQL_GANANCIA_LINEA})::numeric(16,2) AS ganancia,
+              string_agg(DISTINCT CASE
+                WHEN vl.comision_pct IS NOT NULL
+                  THEN 'Comisión ' || rtrim(rtrim(vl.comision_pct::text, '0'), '.') || '%'
+                WHEN vl.costo_unitario IS NULL THEN 'Sin costo ni comisión (todo cuenta como ganancia)'
+                ELSE 'Precio − costo' END, ', ') AS ganancia_por,
               CASE WHEN sum(vl.base) > 0
                    THEN round(sum(${SQL_GANANCIA_LINEA}) * 100 / sum(vl.base), 1) END AS margen
        FROM venta_lineas vl JOIN ventas v ON v.id = vl.venta_id
@@ -466,14 +473,23 @@ export class ReportesService {
     ];
     if (costos)
       columnas.push(
+        { clave: 'ganancia_por', titulo: 'Ganancia por', tipo: 'texto' },
         { clave: 'costo', titulo: 'Costo', tipo: 'dinero', total: true },
         { clave: 'ganancia', titulo: 'Ganancia', tipo: 'dinero', total: true },
         { clave: 'margen', titulo: 'Margen', tipo: 'porcentaje' },
       );
+    const sinGanancia = r.rows.filter((x: { ganancia_por: string | null }) =>
+      (x.ganancia_por ?? '').startsWith('Sin costo'),
+    ).length;
     return this.armar('ventas-articulo', cx, columnas, r.rows, {
       notas: costos
         ? [
-            'Ganancia sin ITBIS: servicios por su comisión %, o precio menos costo; productos al costo promedio del momento de la venta. Sin ventas anuladas.',
+            'Ganancia sin ITBIS: servicios por su comisión % (el resto del cobro no es costo ni ganancia del negocio), o precio menos costo; productos al costo promedio del momento de la venta. Sin ventas anuladas.',
+            ...(sinGanancia
+              ? [
+                  `${sinGanancia} artículo(s) sin costo ni comisión: su venta completa cuenta como ganancia. Póngales su comisión % o su costo en SCITO SERVICE / Inventario (cuenta para las ventas nuevas).`,
+                ]
+              : []),
           ]
         : ['Sin ventas anuladas.'],
     });

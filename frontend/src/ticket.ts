@@ -1,4 +1,5 @@
 import type { DetalleVenta } from './api'
+import { centavosUsd, dolares, dolaresDe, texto2 } from './dolar'
 import { dinero } from './formato'
 
 // Comprobante de venta para imprimir directo desde el navegador (sin PDF).
@@ -87,13 +88,24 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
     e.correo ? `<div>${esc(e.correo)}</div>` : '',
   ].join('')
 
+  // Factura cobrada en dólares (sin parte a crédito): los montos se muestran en
+  // US$ con la tasa de ese cobro; por dentro la venta sigue en RD$.
+  const pagoUsd = !v.credito ? v.pagos.find((p) => p.moneda === 'USD' && p.tasa && p.monto_usd) : undefined
+  const tasaUsd = pagoUsd?.tasa ?? null
+  const m = (x: string | null | undefined) =>
+    tasaUsd && x ? dolares(texto2(dolaresDe(centavosUsd(x), tasaUsd))) : dinero(x)
+
+  // Lo cobrado en US$ va subido al centavo: la diferencia se muestra aparte.
+  const sube = pagoUsd?.monto_usd && tasaUsd ? centavosUsd(pagoUsd.monto_usd) - dolaresDe(centavosUsd(v.total), tasaUsd) : 0n
+  const redondeo = sube !== 0n ? fila('Redondeo', `${sube < 0n ? '-' : '+'}${dolares(texto2(sube < 0n ? -sube : sube))}`) : ''
+
   const lineas = carta
     ? `<table><thead><tr><th>Descripción</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Desc.</th><th class="n">ITBIS</th><th class="n">Total</th></tr></thead><tbody>${v.lineas
         .map(
           (l) =>
-            `<tr><td>${esc(l.descripcion)}${l.precio_usd ? `<br><span class="pequena">US$${esc(l.precio_usd)} x tasa ${esc(Number(l.tasa_dolar).toString())}</span>` : ''}</td><td class="n">${esc(cantidad(l.cantidad))}</td><td class="n">${dinero(l.precio_unitario)}</td><td class="n">${
-              l.descuento === '0.00' ? '—' : `-${dinero(l.descuento)}`
-            }</td><td class="n">${Number(l.tasa) === 0 ? 'Exento' : `${dinero(l.itbis)} (${esc(cantidad(l.tasa))}%)`}</td><td class="n">${dinero(l.total)}</td></tr>`,
+            `<tr><td>${esc(l.descripcion)}${l.precio_usd ? `<br><span class="pequena">US$${esc(l.precio_usd)} x tasa ${esc(Number(l.tasa_dolar).toString())}</span>` : ''}</td><td class="n">${esc(cantidad(l.cantidad))}</td><td class="n">${m(l.precio_unitario)}</td><td class="n">${
+              l.descuento === '0.00' ? '—' : `-${m(l.descuento)}`
+            }</td><td class="n">${Number(l.tasa) === 0 ? 'Exento' : `${m(l.itbis)} (${esc(cantidad(l.tasa))}%)`}</td><td class="n">${m(l.total)}</td></tr>`,
         )
         .join('')}</tbody></table>`
     : v.lineas
@@ -101,10 +113,10 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
           (l) =>
             `<div class="art">${esc(l.descripcion)}</div>` +
             fila(
-              `${esc(cantidad(l.cantidad))} x ${dinero(l.precio_unitario)} ${Number(l.tasa) === 0 ? 'Exento' : `ITBIS ${esc(cantidad(l.tasa))}%`}`,
-              dinero(l.total),
+              `${esc(cantidad(l.cantidad))} x ${m(l.precio_unitario)} ${Number(l.tasa) === 0 ? 'Exento' : `ITBIS ${esc(cantidad(l.tasa))}%`}`,
+              m(l.total),
             ) +
-            (l.descuento !== '0.00' ? fila('&nbsp;&nbsp;Descuento', `-${dinero(l.descuento)}`) : '') +
+            (l.descuento !== '0.00' ? fila('&nbsp;&nbsp;Descuento', `-${m(l.descuento)}`) : '') +
             (l.precio_usd ? fila(`&nbsp;&nbsp;US$${esc(l.precio_usd)} x tasa ${esc(Number(l.tasa_dolar).toString())}`, '') : ''),
         )
         .join('')
@@ -112,17 +124,16 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
   const pagos = v.pagos
     .map(
       (p) =>
-        fila(esc(p.forma_pago), dinero(p.monto)) +
-        (p.recibido ? fila('Recibido', dinero(p.recibido)) : '') +
-        (p.devuelta ? fila('Devuelta', dinero(p.devuelta), 'negrita') : '') +
-        // Pago en dólares: lo cobrado en US$, la tasa y la devuelta.
+        // Pago en dólares: lo cobrado en US$, lo que entregó y la devuelta.
         (p.moneda === 'USD' && p.monto_usd && p.recibido_usd
-          ? fila(`En dólares (tasa ${esc(Number(p.tasa).toString())})`, `US$${esc(p.monto_usd)}`) +
-            fila('Recibido', `US$${esc(p.recibido_usd)}`) +
+          ? fila(`${esc(p.forma_pago)} en dólares`, dolares(p.monto_usd)) +
+            fila('Recibido', dolares(p.recibido_usd)) +
             (p.devuelta_monto && p.devuelta_monto !== '0.00'
-              ? fila('Devuelta', p.devuelta_moneda === 'USD' ? `US$${esc(p.devuelta_monto)}` : dinero(p.devuelta_monto), 'negrita')
+              ? fila('Devuelta', p.devuelta_moneda === 'USD' ? dolares(p.devuelta_monto) : dinero(p.devuelta_monto), 'negrita')
               : '')
-          : '') +
+          : fila(esc(p.forma_pago), dinero(p.monto)) +
+            (p.recibido ? fila('Recibido', dinero(p.recibido)) : '') +
+            (p.devuelta ? fila('Devuelta', dinero(p.devuelta), 'negrita') : '')) +
         (p.referencia ? fila('Referencia', esc(p.referencia)) : ''),
     )
     .join('')
@@ -149,11 +160,14 @@ export function htmlTicket(d: DatosTicket, ancho: AnchoTicket): string {
     ${lineas}
     <hr>
     <div class="${carta ? 'totales' : ''}">
-      ${fila('Subtotal', dinero(v.subtotal))}
-      ${v.descuento !== '0.00' ? fila('Descuento', `-${dinero(v.descuento)}`) : ''}
-      ${fila('Base imponible', dinero(v.base_imponible))}
-      ${fila('ITBIS', dinero(v.itbis))}
-      ${fila('TOTAL', dinero(v.total), 'negrita grande')}
+      ${fila('Subtotal', m(v.subtotal))}
+      ${v.descuento !== '0.00' ? fila('Descuento', `-${m(v.descuento)}`) : ''}
+      ${fila('Base imponible', m(v.base_imponible))}
+      ${fila('ITBIS', m(v.itbis))}
+      ${redondeo}
+      ${fila('TOTAL', pagoUsd ? dolares(pagoUsd.monto_usd) : dinero(v.total), 'negrita grande')}
+      ${pagoUsd ? fila('Equivalente en RD$', `${dinero(v.total)} (tasa ${esc(Number(tasaUsd).toString())})`) : ''}
+      ${pagoUsd && (v.comprobante_fiscal || (v.ecf ?? []).some((x) => x.estado === 'emitido')) ? fila('ITBIS en RD$', dinero(v.itbis)) : ''}
       ${pagos}
     </div>
     <hr>

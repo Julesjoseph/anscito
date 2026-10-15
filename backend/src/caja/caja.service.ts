@@ -1,3 +1,4 @@
+import { contabilizar } from '../contabilidad/motor';
 import {
   BadRequestException,
   ConflictException,
@@ -58,6 +59,25 @@ async function mayorOIgual(
     [a, b],
   );
   return r.rows[0].ok;
+}
+
+// Qué fue un ingreso o un retiro de caja (para la contabilidad): aporte o
+// préstamo al entrar, retiro del dueño al salir; "otro" queda pendiente para
+// que el contador escoja la cuenta. Los gastos no llevan clase.
+function leerClase(tipo: string, v: unknown): string | null {
+  if (tipo !== 'ingreso' && tipo !== 'retiro') return null;
+  const clase = texto(v);
+  const validas =
+    tipo === 'ingreso'
+      ? ['aporte', 'prestamo', 'otro']
+      : ['retiro_dueno', 'otro'];
+  if (!validas.includes(clase))
+    throw new BadRequestException(
+      tipo === 'ingreso'
+        ? 'Escoja qué fue este ingreso: aporte del dueño, préstamo recibido u otro'
+        : 'Escoja qué fue este retiro: retiro del dueño u otro',
+    );
+  return clase;
 }
 
 @Injectable()
@@ -387,9 +407,11 @@ export class CajaService {
       categoriaGastoId?: unknown;
       comprobante?: unknown;
       motivo?: unknown;
+      clase?: unknown;
     },
   ) {
     const tipo = texto(datos.tipo);
+    const clase = leerClase(tipo, datos.clase);
     if (!['gasto', 'retiro', 'ingreso'].includes(tipo)) {
       throw new BadRequestException('Tipo inválido: gasto, retiro o ingreso');
     }
@@ -435,12 +457,13 @@ export class CajaService {
           );
         }
       }
-      await c.query(
+      const mov = await c.query<{ id: string }>(
         `INSERT INTO caja_movimientos
-           (sesion_id, tipo, monto, categoria_gasto_id, comprobante, motivo, usuario_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [sesionId, tipo, monto, categoria, comprobante, motivo, actorId],
+           (sesion_id, tipo, monto, categoria_gasto_id, comprobante, motivo, clase, usuario_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [sesionId, tipo, monto, categoria, comprobante, motivo, clase, actorId],
       );
+      await contabilizar(c, 'caja_mov', String(mov.rows[0].id), actorId);
       const e = await c.query<{ esperado: string }>(SQL_ESPERADO, [sesionId]);
       await registrarAuditoria(c, {
         usuarioId: actorId,
@@ -452,6 +475,7 @@ export class CajaService {
           sesion: numeroSesion(s.numero),
           tipo,
           monto,
+          clase,
           categoria: categoriaNombre,
           comprobante,
         },
@@ -469,9 +493,15 @@ export class CajaService {
     actorId: string,
     sesionId: string,
     ip: string | undefined,
-    datos: { tipo?: unknown; monto?: unknown; motivo?: unknown },
+    datos: {
+      tipo?: unknown;
+      monto?: unknown;
+      motivo?: unknown;
+      clase?: unknown;
+    },
   ) {
     const tipo = texto(datos.tipo);
+    const clase = leerClase(tipo, datos.clase);
     if (tipo !== 'ingreso' && tipo !== 'retiro')
       throw new BadRequestException(
         'Tipo inválido: ingreso o retiro de dólares',
@@ -502,9 +532,9 @@ export class CajaService {
             `No hay suficientes dólares en ${s.caja}: hay US$${hay}`,
           );
       }
-      await c.query(
-        `INSERT INTO caja_movimientos_usd (sesion_id, tipo, monto, tasa, monto_dop, motivo, usuario_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      const mov = await c.query<{ id: string }>(
+        `INSERT INTO caja_movimientos_usd (sesion_id, tipo, monto, tasa, monto_dop, motivo, clase, usuario_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
         [
           sesionId,
           tipo,
@@ -512,9 +542,11 @@ export class CajaService {
           tasa.tasa,
           aPesos(monto, tasa.tasa),
           motivo,
+          clase,
           actorId,
         ],
       );
+      await contabilizar(c, 'caja_mov_usd', String(mov.rows[0].id), actorId);
       const e = (
         await c.query<{ esperado_usd: string }>(SQL_ESPERADO_USD, [sesionId])
       ).rows[0].esperado_usd;
@@ -528,6 +560,7 @@ export class CajaService {
           sesion: numeroSesion(s.numero),
           tipo,
           monto_usd: monto,
+          clase,
           tasa: tasa.tasa,
           monto_dop: aPesos(monto, tasa.tasa),
         },
@@ -664,6 +697,7 @@ export class CajaService {
         ],
       );
       const totales = (await c.query(SQL_TOTALES_SESION, [sesionId])).rows[0];
+      await contabilizar(c, 'caja_cierre', sesionId, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'caja.cerrar',

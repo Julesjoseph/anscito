@@ -1,3 +1,4 @@
+import { contabilizar, revertir } from '../contabilidad/motor';
 import {
   BadRequestException,
   Injectable,
@@ -533,6 +534,7 @@ export class CxcService {
           [dest.id, monto, hoy, referencia, abonoId, actorId],
         );
       const codigo = numeroAbono(n);
+      await contabilizar(c, 'cxc_abono', abonoId, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'cxc.abono',
@@ -657,6 +659,7 @@ export class CxcService {
          WHERE id = $1`,
         [id, actorId, motivo],
       );
+      await revertir(c, 'cxc_abono', id, motivo, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'cxc.anular_abono',
