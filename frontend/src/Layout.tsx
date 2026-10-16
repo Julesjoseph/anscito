@@ -145,7 +145,6 @@ const MODULOS: Modulo[] = [
     listo: true,
     permiso: 'bancos.ver',
   },
-  { id: 'finanzas', nombre: 'Finanzas', Icono: Landmark, listo: false },
   {
     id: 'contabilidad',
     nombre: 'Contabilidad',
