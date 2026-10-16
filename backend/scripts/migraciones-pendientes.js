@@ -1,4 +1,4 @@
-// Revisa qué migraciones (021 a 032) tiene una base de ANSCITO y, si se pide,
+// Revisa qué migraciones (de la 021 en adelante) tiene una base de ANSCITO y, si se pide,
 // aplica las que faltan, en orden y una sola vez. Usa la conexión de backend/.env
 // (no muestra credenciales).
 //
@@ -29,7 +29,11 @@ const MIGRACIONES = [
   ['030', "SELECT to_regclass('public.contabilidad_reglas') IS NOT NULL"],
   ['031', "SELECT COALESCE((SELECT data_type = 'character varying' FROM information_schema.columns WHERE table_name = 'asientos' AND column_name = 'origen_id'), false)"],
   ['032', "SELECT EXISTS (SELECT 1 FROM auditoria WHERE accion = 'migracion.032')"],
-];
+  ['033', "SELECT to_regclass('public.contabilidad_clasificaciones') IS NOT NULL"],
+  // Cada migración nueva se agrega aquí con su comprobación, al publicarla.
+].filter(([n]) => fs.readdirSync(DATABASE).some((x) => x.startsWith(`${n}_`) && x.endsWith('.sql')));
+// (Solo cuentan las que vienen en esta versión del código: las que todavía no
+// llegaron con git pull no se revisan.)
 // Las que solo se revisan (no se aplican desde aquí): si faltan, hay que verlo aparte.
 const SOLO_REVISAR = new Set(['021', '023']);
 
@@ -69,7 +73,7 @@ function archivo(numero) {
 
     const primeraQueFalta = antes.findIndex(([, ok]) => !ok);
     if (primeraQueFalta === -1) {
-      console.log('\nNo falta ninguna (021 a 032).');
+      console.log(`\nNo falta ninguna (021 a ${MIGRACIONES.at(-1)[0]}).`);
       return;
     }
     const hueco = antes.slice(primeraQueFalta).some(([, ok]) => ok);
