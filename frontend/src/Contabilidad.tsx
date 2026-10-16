@@ -9,7 +9,6 @@ import {
   cambiarLineaContable,
   cambiarReglaContable,
   catalogoCuentas,
-  cerrarMesContable,
   clasificarPendiente,
   crearAsientoContable,
   crearCuentaContable,
@@ -45,6 +44,7 @@ import type {
 import { BOTON_PELIGRO, BOTON_PRINCIPAL, BOTON_SECUNDARIO, CAMPO, CajaError, Ventana } from './componentes'
 import { dinero, mensajeDe } from './formato'
 import { Estados, Mayor } from './Libros'
+import CierreMes from './CierreMes'
 
 // Contabilidad: catálogo de cuentas, asientos (manuales, de apertura y
 // automáticos), reglas (qué cuenta usa cada operación), pendientes, meses
@@ -1048,6 +1048,7 @@ function Meses({ token, puedeCerrar, onSesionVencida }: { token: string; puedeCe
   const [datos, setDatos] = useState<Awaited<ReturnType<typeof periodosContables>> | null>(null)
   const [error, setError] = useState('')
   const [reabrir, setReabrir] = useState<{ anio: number; mes: number } | null>(null)
+  const [cerrar, setCerrar] = useState<{ anio: number; mes: number } | null>(null)
   const [motivo, setMotivo] = useState('')
   const accion = useEnviar(onSesionVencida)
 
@@ -1086,7 +1087,8 @@ function Meses({ token, puedeCerrar, onSesionVencida }: { token: string; puedeCe
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-gray-600">
-        Un mes cerrado no acepta asientos. Ciérrelo cuando el contador termine de revisarlo. Reabrirlo pide un motivo y queda en la
+        Un mes cerrado no acepta asientos. Al cerrar, el sistema revisa el mes: lo grave (operaciones sin contabilizar, cajas
+        abiertas, el mes anterior abierto) no deja cerrar; lo demás avisa y pide un motivo. Reabrir pide un motivo y queda en la
         auditoría.
       </p>
       {accion.error && <CajaError>{accion.error}</CajaError>}
@@ -1111,12 +1113,7 @@ function Meses({ token, puedeCerrar, onSesionVencida }: { token: string; puedeCe
                 </td>
                 <td className="px-3 py-2 text-right">
                   {puedeCerrar && m.estado === 'abierto' && m.terminado && (
-                    <button
-                      type="button"
-                      className={BOTON_SECUNDARIO}
-                      disabled={accion.guardando}
-                      onClick={() => void accion.enviar(() => cerrarMesContable(token, m.anio, m.mes), () => void cargar())}
-                    >
+                    <button type="button" className={BOTON_SECUNDARIO} disabled={accion.guardando} onClick={() => setCerrar({ anio: m.anio, mes: m.mes })}>
                       <span className="flex items-center gap-2">
                         <Lock size={14} /> Cerrar
                       </span>
@@ -1135,6 +1132,19 @@ function Meses({ token, puedeCerrar, onSesionVencida }: { token: string; puedeCe
           </tbody>
         </table>
       </div>
+      {cerrar && (
+        <CierreMes
+          token={token}
+          anio={cerrar.anio}
+          mes={cerrar.mes}
+          onCerrar={() => setCerrar(null)}
+          onListo={() => {
+            setCerrar(null)
+            void cargar()
+          }}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
       {reabrir && (
         <Ventana titulo={`Reabrir ${MESES[reabrir.mes - 1]} ${reabrir.anio}`} onCerrar={() => setReabrir(null)}>
           <form

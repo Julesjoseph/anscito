@@ -114,6 +114,12 @@ export class ContabilidadController {
     return this.conta.periodos();
   }
 
+  @Get('periodos/revision')
+  @RequierePermiso('contabilidad.ver')
+  revisionMes(@Query('anio') anio?: string, @Query('mes') mes?: string) {
+    return this.conta.revisionMes({ anio, mes });
+  }
+
   @Post('periodos/cerrar')
   @HttpCode(200)
   @RequierePermiso('contabilidad.cerrar')

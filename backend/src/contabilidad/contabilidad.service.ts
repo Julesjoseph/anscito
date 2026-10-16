@@ -11,6 +11,7 @@ import { centavos, texto2 } from '../sanes/calendario';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { anularAsientoEn, numeroAsiento, registrarAsiento } from './asientos';
 import type { LineaAsiento } from './asientos';
+import { revisarMes } from './cierre-mes';
 import { contabilizar, origenDeTabla, PIDE_CUENTA } from './motor';
 
 // Contabilidad: catálogo de cuentas, fecha de inicio, asientos manuales y de
@@ -769,12 +770,22 @@ export class ContabilidadService {
     return { anio, mes };
   }
 
+  // Lista de revisión antes de cerrar un mes.
+  async revisionMes(datos: { anio?: unknown; mes?: unknown }) {
+    const { anio, mes } = this.leerMes(datos);
+    const inicio = await this.fechaInicio(this.db);
+    if (!inicio)
+      throw new BadRequestException('Primero indique la fecha de inicio');
+    return revisarMes(this.db, anio, mes, inicio);
+  }
+
   async cerrarMes(
     actorId: string,
     ip: string | undefined,
-    datos: { anio?: unknown; mes?: unknown },
+    datos: { anio?: unknown; mes?: unknown; motivo?: unknown },
   ) {
     const { anio, mes } = this.leerMes(datos);
+    const motivoTexto = texto(datos.motivo);
     return this.db.transaccion(async (c) => {
       const inicio = await this.fechaInicio(c);
       if (!inicio)
@@ -796,6 +807,19 @@ export class ContabilidadService {
       );
       if (r.rows[0].estado === 'cerrado')
         throw new BadRequestException('Ese mes ya está cerrado');
+      // Lo grave bloquea; con avisos, se cierra escribiendo el motivo.
+      const rev = await revisarMes(c, anio, mes, inicio);
+      if (rev.bloqueos.length > 0)
+        throw new BadRequestException(
+          `No se puede cerrar: ${rev.bloqueos.map((b) => `${b.titulo} (${b.cantidad})`).join('; ')}`,
+        );
+      if (
+        rev.avisos.length > 0 &&
+        (motivoTexto.length < 5 || motivoTexto.length > 500)
+      )
+        throw new BadRequestException(
+          'Hay avisos: escriba el motivo para cerrar de todos modos (5 a 500 caracteres)',
+        );
       await c.query(
         `UPDATE periodos_contables SET estado = 'cerrado', cerrado_por = $3, cerrado_en = now()
          WHERE anio = $1 AND mes = $2`,
@@ -805,7 +829,15 @@ export class ContabilidadService {
         usuarioId: actorId,
         accion: 'contabilidad.cerrar_mes',
         entidad: 'periodos_contables',
-        nuevo: { anio, mes, estado: 'cerrado' },
+        nuevo: {
+          anio,
+          mes,
+          estado: 'cerrado',
+          avisos: rev.avisos.map(
+            (a) => `${a.titulo} (${a.cantidad}): ${a.detalle}`,
+          ),
+        },
+        motivo: rev.avisos.length > 0 ? motivoTexto : undefined,
         ip,
       });
       return { ok: true };
