@@ -49,6 +49,7 @@ import {
   Ventana,
   SelectorLinea,
 } from './componentes'
+import Conciliacion from './Conciliacion'
 import { dinero, mensajeDe } from './formato'
 
 type Props = {
@@ -975,7 +976,7 @@ type Modal =
   | { tipo: 'ver'; cuenta: FilaCuenta }
 
 export default function Bancos({ token, permisos, onSesionVencida }: Props) {
-  const [seccion, setSeccion] = useState<'cuentas' | 'pendientes' | 'transferir'>('cuentas')
+  const [seccion, setSeccion] = useState<'cuentas' | 'pendientes' | 'transferir' | 'conciliacion'>('cuentas')
   const [prep, setPrep] = useState<PrepararBancos | null>(null)
   const [cuentas, setCuentas] = useState<FilaCuenta[] | null>(null)
   const [pendientes, setPendientes] = useState<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[] } | null>(null)
@@ -1047,6 +1048,7 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
             ['cuentas', 'Cuentas', true],
             ['pendientes', `Por confirmar${nPendientes ? ` (${nPendientes})` : ''}`, true],
             ['transferir', 'Transferir', permisos.includes('bancos.transferir')],
+            ['conciliacion', 'Conciliación', true],
           ] as const
         )
           .filter(([, , ver]) => ver)
@@ -1174,6 +1176,16 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
             </section>
           )}
         </div>
+      )}
+
+      {seccion === 'conciliacion' && cuentas && (
+        <Conciliacion
+          token={token}
+          cuentas={cuentas}
+          puedeConciliar={permisos.includes('bancos.confirmar')}
+          onCambio={cambio}
+          onSesionVencida={onSesionVencida}
+        />
       )}
 
       {seccion === 'transferir' && (

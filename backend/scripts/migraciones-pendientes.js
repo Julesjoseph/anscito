@@ -35,6 +35,7 @@ const MIGRACIONES = [
   ['036', "SELECT to_regclass('public.tipos_retencion_isr') IS NOT NULL"],
   ['037', "SELECT NOT EXISTS (SELECT 1 FROM categorias WHERE prefijo IS NULL)"],
   ['038', "SELECT EXISTS (SELECT 1 FROM configuracion WHERE clave = 'contabilidad.cierre_fiscal')"],
+  ['039', "SELECT to_regclass('public.conciliaciones') IS NOT NULL"],
   // Cada migración nueva se agrega aquí con su comprobación, al publicarla.
 ].filter(([n]) => fs.readdirSync(DATABASE).some((x) => x.startsWith(`${n}_`) && x.endsWith('.sql')));
 // (Solo cuentan las que vienen en esta versión del código: las que todavía no

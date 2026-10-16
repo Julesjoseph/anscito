@@ -31,7 +31,8 @@ export type Origen =
   | 'san_entrega'
   | 'remesa'
   | 'remesa_entrega'
-  | 'remesa_pago';
+  | 'remesa_pago'
+  | 'no_llego';
 
 // Tabla de cada origen (lo que queda en asientos.origen_tabla).
 export const TABLA_ORIGEN: Record<Origen, string> = {
@@ -50,6 +51,7 @@ export const TABLA_ORIGEN: Record<Origen, string> = {
   remesa: 'remesas',
   remesa_entrega: 'remesa_entregas',
   remesa_pago: 'remesa_pagos_comision',
+  no_llego: 'cuenta_confirmaciones',
 };
 
 // De la tabla al origen (para reintentar un pendiente).
@@ -1141,6 +1143,99 @@ async function remesaPago(
   };
 }
 
+// ---------- Dinero que no llegó al banco ----------
+
+// Un movimiento "por confirmar" (cobro por transferencia, depósito de la caja,
+// entrega de un agente…) se marcó "No llegó": su operación ya puso el dinero
+// en el banco en la contabilidad. El contador escoge a qué cuenta va (el
+// cliente lo sigue debiendo, una pérdida…). Si la operación no tiene asiento
+// (es de antes de la fecha de inicio o quedó pendiente) o se anuló, no hay
+// nada que corregir.
+async function noLlego(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    fecha: string;
+    movimiento: string;
+    tipo: string;
+    signo: number;
+    monto: string;
+    monto_dop: string;
+    cuenta_id: string;
+    cuenta: string;
+    simbolo: string;
+    motivo: string | null;
+    venta_id: string | null;
+    venta_estado: string | null;
+    cxc_abono_id: string | null;
+    abono_estado: string | null;
+    transferencia_id: string | null;
+    remesa_entrega_id: string | null;
+    san_recibo_id: string | null;
+  }>(
+    `SELECT to_char((cf.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha, m.id::text AS movimiento,
+            m.tipo, m.signo, m.monto, m.monto_dop, m.cuenta_id, ct.nombre AS cuenta, mo.simbolo, cf.motivo,
+            m.venta_id, v.estado AS venta_estado, m.cxc_abono_id, ab.estado AS abono_estado,
+            m.transferencia_id, m.remesa_entrega_id, m.san_recibo_id
+     FROM cuenta_confirmaciones cf JOIN cuenta_movimientos m ON m.id = cf.movimiento_id
+     JOIN cuentas ct ON ct.id = m.cuenta_id JOIN monedas mo ON mo.codigo = ct.moneda
+     LEFT JOIN ventas v ON v.id = m.venta_id
+     LEFT JOIN cxc_abonos ab ON ab.id = m.cxc_abono_id
+     WHERE cf.id = $1 AND cf.resultado = 'no_llego'`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0)
+    throw new ErrorContable('Confirmación "No llegó" no encontrada');
+  const x = r.rows[0];
+  if (x.venta_estado === 'anulada' || x.abono_estado === 'anulado') return null;
+  // La operación que puso el dinero en el banco en la contabilidad.
+  const [tabla, origenId] = x.venta_id
+    ? ['ventas', x.venta_id]
+    : x.cxc_abono_id
+      ? ['cxc_abonos', x.cxc_abono_id]
+      : x.transferencia_id
+        ? ['transferencias', x.transferencia_id]
+        : x.remesa_entrega_id
+          ? ['remesa_entregas', x.remesa_entrega_id]
+          : x.san_recibo_id
+            ? ['san_recibos', x.san_recibo_id]
+            : ['cuenta_movimientos', x.movimiento];
+  const asentado = await c.query(
+    `SELECT 1 FROM asientos WHERE origen_tabla = $1 AND origen_id = $2
+       AND reverso_de IS NULL AND estado = 'activo'`,
+    [tabla, origenId],
+  );
+  if (!asentado.rowCount) return null;
+  const banco = await cu.banco(x.cuenta_id);
+  const contra = await cu.clasificada(
+    TABLA_ORIGEN.no_llego,
+    id,
+    `No llegó a ${x.cuenta} (${x.simbolo}${x.monto}): ${PIDE_CUENTA}`,
+  );
+  const monto = centavos(x.monto_dop);
+  const descripcion = x.motivo?.slice(0, 300) ?? null;
+  const p = new Partida();
+  if (Number(x.signo) > 0) {
+    p.debe(contra, monto, { descripcion });
+    p.haber(banco, monto);
+  } else {
+    p.debe(banco, monto);
+    p.haber(contra, monto, { descripcion });
+  }
+  return {
+    fecha: x.fecha,
+    concepto:
+      `No llegó a ${x.cuenta}: ${x.simbolo}${x.monto}${x.motivo ? ` · ${x.motivo}` : ''}`.slice(
+        0,
+        300,
+      ),
+    documento: `NL-${id}`,
+    lineas: p.juntas(),
+  };
+}
+
 async function armar(
   c: Consulta,
   origen: Origen,
@@ -1178,6 +1273,8 @@ async function armar(
       return remesaEntrega(c, cu, id);
     case 'remesa_pago':
       return remesaPago(c, cu, id);
+    case 'no_llego':
+      return noLlego(c, cu, id);
   }
 }
 

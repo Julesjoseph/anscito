@@ -660,6 +660,15 @@ export class CxcService {
         [id, actorId, motivo],
       );
       await revertir(c, 'cxc_abono', id, motivo, actorId);
+      // Si su cobro se había marcado "No llegó", se deshace también eso.
+      const noLlegaron = await c.query<{ id: string }>(
+        `SELECT cf.id::text AS id FROM cuenta_confirmaciones cf
+         JOIN cuenta_movimientos m ON m.id = cf.movimiento_id
+         WHERE m.cxc_abono_id = $1 AND cf.resultado = 'no_llego'`,
+        [id],
+      );
+      for (const nl of noLlegaron.rows)
+        await revertir(c, 'no_llego', nl.id, motivo, actorId);
       await registrarAuditoria(c, {
         usuarioId: actorId,
         accion: 'cxc.anular_abono',

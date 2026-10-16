@@ -65,6 +65,7 @@ const QUE_ES: Record<string, string> = {
   remesas: 'Envío (SCITO TRANSFER)',
   remesa_entregas: 'Entrega de un agente',
   remesa_pagos_comision: 'Comisión de un agente',
+  cuenta_confirmaciones: 'Dinero que no llegó al banco',
 };
 
 // Operaciones en las que el contador puede escoger la cuenta (ingresos y
@@ -73,6 +74,7 @@ const CLASIFICABLES = [
   'caja_movimientos',
   'caja_movimientos_usd',
   'cuenta_movimientos',
+  'cuenta_confirmaciones',
 ];
 function clasificable(p: { origen_tabla: string; error: string }): boolean {
   return (
@@ -91,6 +93,11 @@ const SQL_DETALLE = `CASE p.origen_tabla
       SELECT cj.nombre || ' · ' || m.tipo || ' RD$' || m.monto || COALESCE(' · ' || m.motivo, '')
       FROM caja_movimientos m JOIN caja_sesiones s ON s.id = m.sesion_id JOIN cajas cj ON cj.id = s.caja_id
       WHERE m.id::text = p.origen_id)
+    WHEN 'cuenta_confirmaciones' THEN (
+      SELECT ct.nombre || ' · no llegó ' || mo.simbolo || m.monto || ' (' || m.tipo || ')' || COALESCE(' · ' || cf.motivo, '')
+      FROM cuenta_confirmaciones cf JOIN cuenta_movimientos m ON m.id = cf.movimiento_id
+      JOIN cuentas ct ON ct.id = m.cuenta_id JOIN monedas mo ON mo.codigo = ct.moneda
+      WHERE cf.id::text = p.origen_id)
     WHEN 'caja_movimientos_usd' THEN (
       SELECT cj.nombre || ' · ' || m.tipo || ' US$' || m.monto || ' (RD$' || m.monto_dop || ')' || COALESCE(' · ' || m.motivo, '')
       FROM caja_movimientos_usd m JOIN caja_sesiones s ON s.id = m.sesion_id JOIN cajas cj ON cj.id = s.caja_id
@@ -99,7 +106,8 @@ const SQL_DETALLE = `CASE p.origen_tabla
 const SQL_DOCUMENTO = `COALESCE(p.documento, CASE p.origen_tabla
     WHEN 'cuenta_movimientos' THEN 'BN-' || p.origen_id
     WHEN 'caja_movimientos' THEN 'CJ-' || p.origen_id
-    WHEN 'caja_movimientos_usd' THEN 'CJU-' || p.origen_id END)`;
+    WHEN 'caja_movimientos_usd' THEN 'CJU-' || p.origen_id
+    WHEN 'cuenta_confirmaciones' THEN 'NL-' || p.origen_id END)`;
 
 // Cuenta contable de cada categoría de gasto, tipo 606 y banco o billetera.
 // (Tablas fijas: nunca vienen del usuario.)

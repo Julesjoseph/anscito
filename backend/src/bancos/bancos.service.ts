@@ -799,9 +799,9 @@ export class BancosService {
         resultado === 'confirmado'
           ? await this.fecha(c, datos.fechaBanco)
           : null;
-      await c.query(
+      const cf = await c.query<{ id: string }>(
         `INSERT INTO cuenta_confirmaciones (movimiento_id, resultado, fecha_banco, motivo, usuario_id)
-         VALUES ($1, $2, $3, $4, $5)`,
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
         [movimientoId, resultado, fechaBanco, motivo, actorId],
       );
       await registrarAuditoria(c, {
@@ -821,6 +821,9 @@ export class BancosService {
         motivo: motivo ?? undefined,
         ip,
       });
+      // Lo que no llegó: el contador escoge la cuenta (queda en pendientes).
+      if (resultado === 'no_llego')
+        await contabilizar(c, 'no_llego', String(cf.rows[0].id), actorId);
       return { ok: true };
     });
   }
