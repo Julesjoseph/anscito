@@ -81,7 +81,6 @@ function FormServicio({
   onListo: () => void
   onCancelar: () => void
 }) {
-  const [codigo, setCodigo] = useState(fila?.codigo ?? '')
   const [nombre, setNombre] = useState(fila?.nombre ?? '')
   const [descripcion, setDescripcion] = useState(fila?.descripcion ?? '')
   const [unidadNegocioId, setUnidadNegocioId] = useState(
@@ -153,7 +152,6 @@ function FormServicio({
     setError('')
     setGuardando(true)
     const datos = {
-      codigo,
       nombre,
       descripcion,
       unidadNegocioId,
@@ -191,17 +189,15 @@ function FormServicio({
   return (
     <form onSubmit={enviar} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
+        <div className="flex flex-col gap-1 text-sm text-gray-600">
           Código
-          <input
-            type="text"
-            value={codigo}
-            onChange={(e) => setCodigo(e.target.value.toUpperCase())}
-            placeholder="IMP-BN-01"
-            autoComplete="off"
-            className={CAMPO}
-          />
-        </label>
+          <div className="flex h-10 items-center rounded-lg border border-gray-200 bg-gray-50 px-3 font-mono text-gray-700">
+            {fila ? fila.codigo : (catalogos.categorias.find((c) => c.id === categoriaId)?.proximo ?? '—')}
+          </div>
+          <span className="text-xs text-gray-400">
+            {fila ? 'No se cambia: está en ventas e informes.' : 'Se crea solo al guardar, según la categoría.'}
+          </span>
+        </div>
         <label className="flex flex-col gap-1 text-sm text-gray-600 sm:col-span-2">
           Nombre
           <input

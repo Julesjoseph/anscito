@@ -21,7 +21,8 @@ describe('ServiciosService.validar', () => {
 
   it('normaliza un servicio válido', () => {
     const d = servicio.validar(valido);
-    expect(d.codigo).toBe('IMP-BN-01');
+    // El código no viene de la pantalla: se crea al guardar.
+    expect(d.codigo).toBe('');
     expect(d.precio).toBe('5.00');
     expect(d.costo).toBeNull();
     expect(d.descripcion).toBeNull();
@@ -39,8 +40,6 @@ describe('ServiciosService.validar', () => {
     ['precio vacío', { precio: '' }],
     ['costo negativo', { costo: '-0.01' }],
     ['nombre vacío', { nombre: '   ' }],
-    ['código con espacios', { codigo: 'IMP 01' }],
-    ['código muy corto', { codigo: 'A' }],
     ['unidad de negocio inválida', { unidadNegocioId: 'x' }],
     ['impuesto vacío', { impuestoId: '' }],
     ['interruptor ITBIS que no es sí/no', { precioIncluyeItbis: 'true' }],

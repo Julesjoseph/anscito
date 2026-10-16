@@ -169,6 +169,7 @@ export type CategoriaOpcion = {
   nombre: string
   unidad_negocio_id: string
   impuesto_id: string | null // impuesto sugerido para sus servicios
+  proximo: string | null // vista previa del próximo código (se asigna al guardar)
 }
 
 export type CatalogosServicios = {
@@ -178,8 +179,8 @@ export type CatalogosServicios = {
   impuestos: ImpuestoVigente[]
 }
 
+// El código no se envía: el servidor lo crea al guardar (prefijo + número).
 export type DatosServicio = {
-  codigo: string
   nombre: string
   descripcion: string
   unidadNegocioId: string

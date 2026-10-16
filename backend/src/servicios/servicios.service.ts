@@ -6,11 +6,11 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { siguienteCodigo } from '../comun/codigos';
 import { DatabaseService } from '../database/database.service';
 import { calcularItbis, normalizarMonto } from './calculo-itbis';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CODIGO = /^[A-Z0-9._-]{2,30}$/;
 
 // Tasa vigente hoy de un impuesto (subconsulta reutilizable).
 const SQL_TASA_VIGENTE = `(SELECT t.tasa FROM impuesto_tasas t
@@ -79,8 +79,9 @@ export class ServiciosService {
   constructor(private readonly db: DatabaseService) {}
 
   // Valida y normaliza lo que llega de la pantalla.
+  // El código no viene de la pantalla: se crea solo al guardar (prefijo de
+  // la categoría + número) y no se cambia después (está en ventas e informes).
   validar(datos: DatosServicio): Limpio {
-    const codigo = texto(datos.codigo).toUpperCase();
     const nombre = texto(datos.nombre);
     const descripcion = texto(datos.descripcion);
     const unidadNegocioId = texto(datos.unidadNegocioId).toLowerCase();
@@ -88,11 +89,6 @@ export class ServiciosService {
     const unidadMedidaId = texto(datos.unidadMedidaId).toLowerCase();
     const impuestoId = texto(datos.impuestoId).toLowerCase();
 
-    if (!CODIGO.test(codigo)) {
-      throw new BadRequestException(
-        'Código inválido: use 2 a 30 letras, números, punto, guion o guion bajo (ej: IMP-BN-01)',
-      );
-    }
     if (!nombre || nombre.length > 150) {
       throw new BadRequestException(
         'El nombre es obligatorio (máximo 150 caracteres)',
@@ -172,7 +168,7 @@ export class ServiciosService {
     }
 
     return {
-      codigo,
+      codigo: '',
       nombre,
       descripcion: descripcion || null,
       unidad_negocio_id: unidadNegocioId,
@@ -261,7 +257,10 @@ export class ServiciosService {
          WHERE is_active = true ORDER BY nombre`,
         ),
         this.db.query(
-          `SELECT c.id, c.nombre, c.unidad_negocio_id, c.impuesto_id
+          `SELECT c.id, c.nombre, c.unidad_negocio_id, c.impuesto_id,
+                CASE WHEN c.prefijo IS NULL THEN NULL
+                     ELSE c.prefijo || '-' || lpad((c.ultimo_numero + 1)::text, 4, '0')
+                END AS proximo
          FROM categorias c
          JOIN unidades_negocio un ON un.id = c.unidad_negocio_id
            AND un.is_active = true
@@ -365,6 +364,7 @@ export class ServiciosService {
     try {
       return await this.db.transaccion(async (c) => {
         await this.verificarReferencias(c, d);
+        d.codigo = await siguienteCodigo(c, d.categoria_id as string);
         const r = await c.query<{ id: string }>(
           `INSERT INTO servicios
              (codigo, nombre, descripcion, unidad_negocio_id, unidad_medida_id,
@@ -399,7 +399,7 @@ export class ServiciosService {
           nuevo: d,
           ip,
         });
-        return { id };
+        return { id, codigo: d.codigo };
       });
     } catch (e) {
       if ((e as { code?: string }).code === '23505') {
@@ -431,6 +431,7 @@ export class ServiciosService {
           throw new NotFoundException('Servicio no encontrado');
         }
         const antes = r.rows[0];
+        d.codigo = antes.codigo; // el código no cambia
         await this.verificarReferencias(c, d);
 
         await c.query(

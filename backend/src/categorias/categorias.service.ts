@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { prefijoLibre } from '../comun/codigos';
 import { DatabaseService } from '../database/database.service';
 
 // Unidades de negocio y categorías: listas universales que comparten
@@ -367,6 +368,9 @@ export class CategoriasService {
       return await this.db.transaccion(async (c) => {
         await this.unidadActiva(c, d.unidadId);
         await this.impuestoActivo(c, d.impuesto_id);
+        // Sin prefijo escrito, se sugiere uno libre: el código de sus
+        // productos y servicios se arma con él.
+        if (!d.prefijo) d.prefijo = await prefijoLibre(c, d.nombre);
         const r = await c.query<{ id: string }>(
           `INSERT INTO categorias
              (unidad_negocio_id, nombre, descripcion, prefijo, impuesto_id, created_by)
@@ -395,7 +399,7 @@ export class CategoriasService {
           },
           ip,
         });
-        return { id };
+        return { id, prefijo: d.prefijo };
       });
     } catch (e) {
       if (esDuplicado(e)) throw errorCategoriaDuplicada(e);
@@ -433,6 +437,9 @@ export class CategoriasService {
         if (r.rowCount === 0)
           throw new NotFoundException('Categoría no encontrada');
         const antes = r.rows[0];
+        // Toda categoría tiene prefijo: si lo borran, se queda el que tenía.
+        if (!d.prefijo)
+          d.prefijo = antes.prefijo ?? (await prefijoLibre(c, d.nombre));
 
         if (antes.unidad_negocio_id !== d.unidadId) {
           await this.unidadActiva(c, d.unidadId);

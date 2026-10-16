@@ -251,7 +251,7 @@ function FormCategoria({
         />
       </label>
       <label className="flex flex-col gap-1 text-sm text-gray-600">
-        Prefijo para códigos de productos (opcional)
+        Prefijo para los códigos de productos y servicios
         <input
           type="text"
           value={prefijo}
@@ -266,7 +266,7 @@ function FormCategoria({
         <span className="text-xs text-gray-400">
           {prefijoFijo
             ? 'No se puede cambiar: la categoría ya tiene productos con este prefijo.'
-            : '2 a 5 letras o números. Solo hace falta si la categoría tendrá productos de inventario.'}
+            : '2 a 5 letras o números. Si lo deja vacío, el sistema pone uno (las 3 primeras letras del nombre).'}
         </span>
         {proximo && (
           <span className="text-xs text-gray-600">

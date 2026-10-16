@@ -34,6 +34,7 @@ import type {
   FiltrosProductos,
   PaginaProductos,
 } from './api'
+import Etiquetas from './Etiquetas'
 import Categorias from './Categorias'
 import {
   AREA,
@@ -1173,7 +1174,7 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
 // ---------- Página ----------
 
 export default function Inventario({ token, permisos, onSesionVencida }: Props) {
-  const [seccion, setSeccion] = useState<'productos' | 'categorias'>('productos')
+  const [seccion, setSeccion] = useState<'productos' | 'etiquetas' | 'categorias'>('productos')
   const verCategorias = permisos.includes('categorias.ver')
 
   return (
@@ -1185,12 +1186,12 @@ export default function Inventario({ token, permisos, onSesionVencida }: Props) 
         </p>
       </div>
 
-      {verCategorias && (
-        <div className="mb-4 flex gap-1 border-b border-gray-200">
+      <div className="mb-4 flex gap-1 border-b border-gray-200">
           {(
             [
               ['productos', 'Productos'],
-              ['categorias', 'Categorías'],
+              ['etiquetas', 'Etiquetas'],
+              ...(verCategorias ? ([['categorias', 'Categorías']] as const) : []),
             ] as const
           ).map(([id, nombre]) => (
             <button
@@ -1206,8 +1207,7 @@ export default function Inventario({ token, permisos, onSesionVencida }: Props) 
               {nombre}
             </button>
           ))}
-        </div>
-      )}
+      </div>
 
       {seccion === 'categorias' && verCategorias ? (
         <Categorias
@@ -1216,6 +1216,8 @@ export default function Inventario({ token, permisos, onSesionVencida }: Props) 
           onSesionVencida={onSesionVencida}
           incrustada
         />
+      ) : seccion === 'etiquetas' ? (
+        <Etiquetas token={token} onSesionVencida={onSesionVencida} />
       ) : (
         <Productos token={token} permisos={permisos} onSesionVencida={onSesionVencida} />
       )}

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { siguienteCodigo } from '../comun/codigos';
 import { DatabaseService } from '../database/database.service';
 import { calcularItbis, normalizarMonto } from '../servicios/calculo-itbis';
 import { margenTotal, rentabilidad, restar } from './rentabilidad';
@@ -14,12 +15,7 @@ import {
   SQL_TOTALES_PRODUCTO,
   STOCK_MINIMO_POR_DEFECTO,
 } from './sql';
-import {
-  armarCodigo,
-  esCero,
-  esEntera,
-  normalizarCantidad,
-} from './cantidades';
+import { esCero, esEntera, normalizarCantidad } from './cantidades';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -460,15 +456,8 @@ export class ProductosService {
         ]);
         await this.tasaVigente(c, d.impuesto_id);
 
-        // Toma el siguiente número de la categoría. La fila queda bloqueada
-        // hasta terminar, así dos personas no reciben el mismo número; si
-        // algo falla, todo se deshace y el número no se pierde.
-        const n = await c.query<{ prefijo: string; ultimo_numero: number }>(
-          `UPDATE categorias SET ultimo_numero = ultimo_numero + 1
-           WHERE id = $1 RETURNING prefijo, ultimo_numero`,
-          [d.categoria_id],
-        );
-        const codigo = armarCodigo(n.rows[0].prefijo, n.rows[0].ultimo_numero);
+        // Siguiente código de la categoría (comun/codigos.ts).
+        const codigo = await siguienteCodigo(c, d.categoria_id);
 
         const r = await c.query<{ id: string }>(
           `INSERT INTO productos
