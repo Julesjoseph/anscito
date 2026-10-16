@@ -20,6 +20,7 @@ type DatosCategoria = {
   nombre?: unknown;
   descripcion?: unknown;
   prefijo?: unknown;
+  impuestoId?: unknown;
 };
 type DatosEstado = { is_active?: unknown; motivo?: unknown };
 
@@ -72,6 +73,13 @@ export class UnidadesNegocioController {
 @Controller('categorias')
 export class CategoriasController {
   constructor(private readonly categorias: CategoriasService) {}
+
+  // Impuestos activos (para el impuesto sugerido de cada categoría).
+  @Get('impuestos')
+  @RequierePermiso('categorias.ver')
+  impuestos() {
+    return this.categorias.impuestos();
+  }
 
   @Post()
   @RequierePermiso('categorias.gestionar')

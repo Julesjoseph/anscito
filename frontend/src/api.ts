@@ -168,6 +168,7 @@ export type CategoriaOpcion = {
   id: string
   nombre: string
   unidad_negocio_id: string
+  impuesto_id: string | null // impuesto sugerido para sus servicios
 }
 
 export type CatalogosServicios = {
@@ -341,6 +342,7 @@ export type CategoriaArbol = {
   is_active: boolean
   prefijo: string | null
   proximo: string | null
+  impuesto_id: string | null // impuesto sugerido (vacío = sin sugerencia)
   servicios_activos: number
   productos_activos: number
   productos: number
@@ -361,7 +363,11 @@ export type DatosCategoria = {
   nombre: string
   descripcion: string
   prefijo: string
+  impuestoId: string // vacío = sin sugerencia
 }
+
+export const impuestosCategorias = (token: string) =>
+  llamar<{ id: string; codigo: string; nombre: string }[]>('GET', '/categorias/impuestos', token)
 
 export const arbolCategorias = (token: string) =>
   llamar<UnidadArbol[]>('GET', '/unidades-negocio', token)
@@ -409,6 +415,7 @@ export type CategoriaProducto = {
   id: string
   nombre: string
   prefijo: string | null
+  impuesto_id: string | null // impuesto sugerido para sus productos
   unidad_negocio: string
   proximo: string | null
 }

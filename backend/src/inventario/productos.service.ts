@@ -321,7 +321,7 @@ export class ProductosService {
   async catalogos() {
     const [categorias, unidades, impuestos] = await Promise.all([
       this.db.query(
-        `SELECT c.id, c.nombre, c.prefijo, un.nombre AS unidad_negocio,
+        `SELECT c.id, c.nombre, c.prefijo, c.impuesto_id, un.nombre AS unidad_negocio,
                 CASE WHEN c.prefijo IS NULL THEN NULL
                      ELSE c.prefijo || '-' || lpad((c.ultimo_numero + 1)::text, 4, '0')
                 END AS proximo

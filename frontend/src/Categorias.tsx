@@ -11,6 +11,7 @@ import {
 import {
   SesionVencida,
   arbolCategorias,
+  impuestosCategorias,
   crearCategoria,
   crearUnidad,
   editarCategoria,
@@ -174,6 +175,7 @@ function FormUnidad({
 function FormCategoria({
   token,
   unidades,
+  impuestos,
   unidadId,
   categoria,
   onListo,
@@ -181,6 +183,7 @@ function FormCategoria({
   onSesionVencida,
 }: PropsForm & {
   unidades: UnidadArbol[]
+  impuestos: { id: string; nombre: string }[]
   unidadId: string
   categoria?: CategoriaArbol
 }) {
@@ -188,6 +191,7 @@ function FormCategoria({
   const [nombre, setNombre] = useState(categoria?.nombre ?? '')
   const [descripcion, setDescripcion] = useState(categoria?.descripcion ?? '')
   const [prefijo, setPrefijo] = useState(categoria?.prefijo ?? '')
+  const [impuestoId, setImpuestoId] = useState(categoria?.impuesto_id ?? '')
   const { error, guardando, enviar } = useEnvio(onSesionVencida)
 
   // Con productos, el prefijo queda fijo: ya forma parte de sus códigos.
@@ -202,7 +206,7 @@ function FormCategoria({
   function guardar(e: FormEvent) {
     e.preventDefault()
     void enviar(async () => {
-      const datos = { unidadNegocioId: unidad, nombre, descripcion, prefijo }
+      const datos = { unidadNegocioId: unidad, nombre, descripcion, prefijo, impuestoId }
       if (categoria) await editarCategoria(token, categoria.id, datos)
       else await crearCategoria(token, datos)
       onListo(categoria ? 'Categoría actualizada' : 'Categoría creada')
@@ -270,6 +274,20 @@ function FormCategoria({
             <span className="font-mono font-medium text-gray-900">{proximo}</span>
           </span>
         )}
+      </label>
+      <label className="flex flex-col gap-1 text-sm text-gray-600">
+        Impuesto sugerido
+        <select value={impuestoId} onChange={(e) => setImpuestoId(e.target.value)} className={CAMPO}>
+          <option value="">Sin sugerencia (se escoge en cada producto o servicio)</option>
+          {impuestos.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.nombre}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-gray-400">
+          Se pone solo al crear un producto o servicio de esta categoría; ahí se puede cambiar. Su contador debe confirmarlo.
+        </span>
       </label>
       {error && <CajaError>{error}</CajaError>}
       <Botones
@@ -370,6 +388,7 @@ export default function Categorias({
   incrustada = false,
 }: Props) {
   const [unidades, setUnidades] = useState<UnidadArbol[] | null>(null)
+  const [impuestos, setImpuestos] = useState<{ id: string; nombre: string }[]>([])
   const [verInactivas, setVerInactivas] = useState(false)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
@@ -379,7 +398,9 @@ export default function Categorias({
 
   const cargar = useCallback(async () => {
     try {
-      setUnidades(await arbolCategorias(token))
+      const [arbol, imps] = await Promise.all([arbolCategorias(token), impuestosCategorias(token)])
+      setUnidades(arbol)
+      setImpuestos(imps)
       setError('')
     } catch (e) {
       if (e instanceof SesionVencida) onSesionVencida()
@@ -535,6 +556,11 @@ export default function Categorias({
                               {c.prefijo} · próximo {c.proximo}
                             </span>
                           )}
+                          {c.impuesto_id && (
+                            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-800" title="Impuesto sugerido">
+                              {impuestos.find((i) => i.id === c.impuesto_id)?.nombre ?? 'Impuesto'}
+                            </span>
+                          )}
                           {!c.is_active && <Insignia activo={false} />}
                         </div>
                         <div className="text-xs text-gray-500">
@@ -599,6 +625,7 @@ export default function Categorias({
           <FormCategoria
             {...propsForm}
             unidades={unidades}
+            impuestos={impuestos}
             unidadId={modal.unidadId}
             categoria={modal.categoria}
           />

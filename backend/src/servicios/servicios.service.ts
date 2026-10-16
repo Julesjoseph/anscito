@@ -261,7 +261,7 @@ export class ServiciosService {
          WHERE is_active = true ORDER BY nombre`,
         ),
         this.db.query(
-          `SELECT c.id, c.nombre, c.unidad_negocio_id
+          `SELECT c.id, c.nombre, c.unidad_negocio_id, c.impuesto_id
          FROM categorias c
          JOIN unidades_negocio un ON un.id = c.unidad_negocio_id
            AND un.is_active = true

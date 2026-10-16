@@ -92,6 +92,7 @@ export class CategoriasService {
                           'descripcion', c.descripcion,
                           'is_active', c.is_active,
                           'prefijo', c.prefijo,
+                          'impuesto_id', c.impuesto_id,
                           -- Vista previa del próximo código de producto.
                           'proximo', CASE WHEN c.prefijo IS NULL THEN NULL
                             ELSE c.prefijo || '-' ||
@@ -109,6 +110,13 @@ export class CategoriasService {
                 '[]'::json) AS categorias
        FROM unidades_negocio un
        ORDER BY lower(un.nombre)`,
+    );
+    return r.rows;
+  }
+
+  async impuestos() {
+    const r = await this.db.query(
+      'SELECT id, codigo, nombre FROM impuestos WHERE is_active = true ORDER BY nombre',
     );
     return r.rows;
   }
@@ -287,6 +295,7 @@ export class CategoriasService {
     prefijo?: unknown;
     nombre?: unknown;
     descripcion?: unknown;
+    impuestoId?: unknown;
   }) {
     const unidadId = texto(datos.unidadNegocioId).toLowerCase();
     if (!UUID.test(unidadId)) {
@@ -305,12 +314,29 @@ export class CategoriasService {
         'Prefijo inválido: 2 a 5 letras o números, sin espacios (ej: CUA)',
       );
     }
+    // Impuesto sugerido para sus productos y servicios (vacío = sin sugerencia).
+    const impuestoId = texto(datos.impuestoId).toLowerCase();
+    if (impuestoId && !UUID.test(impuestoId)) {
+      throw new BadRequestException('Impuesto inválido');
+    }
     return {
       unidadId,
       nombre,
       descripcion: descripcion || null,
       prefijo: prefijo || null,
+      impuesto_id: impuestoId || null,
     };
+  }
+
+  private async impuestoActivo(c: PoolClient, impuestoId: string | null) {
+    if (!impuestoId) return;
+    const r = await c.query(
+      'SELECT 1 FROM impuestos WHERE id = $1 AND is_active = true',
+      [impuestoId],
+    );
+    if (r.rowCount === 0) {
+      throw new BadRequestException('El impuesto no existe o está inactivo');
+    }
   }
 
   private async unidadActiva(c: PoolClient, unidadId: string) {
@@ -333,17 +359,26 @@ export class CategoriasService {
       nombre?: unknown;
       descripcion?: unknown;
       prefijo?: unknown;
+      impuestoId?: unknown;
     },
   ) {
     const d = this.validarCategoria(datos);
     try {
       return await this.db.transaccion(async (c) => {
         await this.unidadActiva(c, d.unidadId);
+        await this.impuestoActivo(c, d.impuesto_id);
         const r = await c.query<{ id: string }>(
           `INSERT INTO categorias
-             (unidad_negocio_id, nombre, descripcion, prefijo, created_by)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [d.unidadId, d.nombre, d.descripcion, d.prefijo, actorId],
+             (unidad_negocio_id, nombre, descripcion, prefijo, impuesto_id, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [
+            d.unidadId,
+            d.nombre,
+            d.descripcion,
+            d.prefijo,
+            d.impuesto_id,
+            actorId,
+          ],
         );
         const id = r.rows[0].id;
         await registrarAuditoria(c, {
@@ -356,6 +391,7 @@ export class CategoriasService {
             nombre: d.nombre,
             descripcion: d.descripcion,
             prefijo: d.prefijo,
+            impuesto_id: d.impuesto_id,
           },
           ip,
         });
@@ -376,6 +412,7 @@ export class CategoriasService {
       nombre?: unknown;
       descripcion?: unknown;
       prefijo?: unknown;
+      impuestoId?: unknown;
     },
   ) {
     if (!UUID.test(id)) throw new NotFoundException('Categoría no encontrada');
@@ -387,8 +424,9 @@ export class CategoriasService {
           nombre: string;
           descripcion: string | null;
           prefijo: string | null;
+          impuesto_id: string | null;
         }>(
-          `SELECT unidad_negocio_id, nombre, descripcion, prefijo
+          `SELECT unidad_negocio_id, nombre, descripcion, prefijo, impuesto_id
            FROM categorias WHERE id = $1 FOR UPDATE`,
           [id],
         );
@@ -423,8 +461,17 @@ export class CategoriasService {
           }
         }
 
+        if (antes.impuesto_id !== d.impuesto_id)
+          await this.impuestoActivo(c, d.impuesto_id);
+
         const cambios = (
-          ['unidad_negocio_id', 'nombre', 'descripcion', 'prefijo'] as const
+          [
+            'unidad_negocio_id',
+            'nombre',
+            'descripcion',
+            'prefijo',
+            'impuesto_id',
+          ] as const
         ).filter((k) => {
           const nuevo = k === 'unidad_negocio_id' ? d.unidadId : d[k];
           return antes[k] !== nuevo;
@@ -434,15 +481,16 @@ export class CategoriasService {
         await c.query(
           `UPDATE categorias
            SET unidad_negocio_id = $2, nombre = $3, descripcion = $4,
-               prefijo = $5, updated_at = now()
+               prefijo = $5, impuesto_id = $6, updated_at = now()
            WHERE id = $1`,
-          [id, d.unidadId, d.nombre, d.descripcion, d.prefijo],
+          [id, d.unidadId, d.nombre, d.descripcion, d.prefijo, d.impuesto_id],
         );
         const nuevo = {
           unidad_negocio_id: d.unidadId,
           nombre: d.nombre,
           descripcion: d.descripcion,
           prefijo: d.prefijo,
+          impuesto_id: d.impuesto_id,
         };
         await registrarAuditoria(c, {
           usuarioId: actorId,

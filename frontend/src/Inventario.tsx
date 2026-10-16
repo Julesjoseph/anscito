@@ -252,7 +252,12 @@ function FormProducto({
           Categoría
           <select
             value={categoriaId}
-            onChange={(e) => setCategoriaId(e.target.value)}
+            onChange={(e) => {
+              setCategoriaId(e.target.value)
+              // El impuesto sugerido por la categoría (se puede cambiar).
+              const sugerido = catalogos.categorias.find((c) => c.id === e.target.value)?.impuesto_id
+              if (sugerido && catalogos.impuestos.some((i) => i.id === sugerido)) setImpuestoId(sugerido)
+            }}
             className={CAMPO}
           >
             <option value="">Seleccione…</option>
