@@ -8,6 +8,7 @@ import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE } from '../bancos/sql';
 import { SQL_ESPERADO } from '../caja/sql';
+import { contabilizar } from '../contabilidad/motor';
 import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import {
@@ -1124,6 +1125,7 @@ export class SanesService {
         },
         ip,
       });
+      await contabilizar(c, 'san_recibo', reciboId, actorId);
       return {
         id: reciboId,
         recibo: numeroRecibo(n),
@@ -1306,6 +1308,7 @@ export class SanesService {
         },
         ip,
       });
+      await contabilizar(c, 'san_entrega', entregaId, actorId);
       return {
         id: entregaId,
         entrega: numeroEntrega(n),

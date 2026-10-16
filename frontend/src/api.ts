@@ -1600,6 +1600,7 @@ export type DatosMovimientoCuenta = {
   tasa?: string
   fecha?: string
   categoriaGastoId?: string
+  clase?: string // ingreso: aporte, prestamo u otro
   beneficiario?: string
   comprobante?: string
   referencia?: string
@@ -3039,7 +3040,56 @@ export type PrepararContabilidad = {
   hayApertura: boolean
   hoy: string
   unidadesNegocio: { id: string; nombre: string }[]
+  pendientes: number
 }
+
+export type ReglaContable = {
+  clave: string
+  nombre: string
+  descripcion: string
+  cuenta_id: string
+  codigo: string
+  cuenta: string
+  updated_at: string
+  cambiada_por: string | null
+}
+
+// Categoría de gasto, tipo 606 o cuenta de banco con su cuenta contable.
+export type CuentaDe = {
+  id: string
+  nombre: string
+  cuenta_id: string | null
+  codigo: string | null
+  cuenta: string | null
+}
+
+export type ReglasContables = {
+  reglas: ReglaContable[]
+  categorias: CuentaDe[]
+  tiposGasto: CuentaDe[]
+  bancos: CuentaDe[]
+}
+
+export type PendienteContable = {
+  id: string
+  origen_tabla: string
+  origen_id: string
+  que: string
+  documento: string | null
+  detalle: string | null
+  fecha: string
+  error: string
+  estado: 'pendiente' | 'resuelto' | 'descartado'
+  nota: string | null
+  created_at: string
+  resuelto_en: string | null
+  resuelto_por: string | null
+  clasificada: string | null
+  asiento: string | null
+  clasificable: boolean
+}
+
+export type ResultadoContable = { resultado: 'hecho' | 'omitido' | 'pendiente'; error: string | null }
 
 export type FilaAsiento = {
   id: string
@@ -3154,3 +3204,26 @@ export const reabrirMesContable = (token: string, anio: number, mes: number, mot
 
 export const balanzaComprobacion = (token: string, hasta: string) =>
   llamar<Balanza>('GET', `/contabilidad/balanza?${new URLSearchParams(hasta ? { hasta } : {}).toString()}`, token)
+
+export const reglasContables = (token: string) => llamar<ReglasContables>('GET', '/contabilidad/reglas', token)
+
+export const cambiarReglaContable = (token: string, clave: string, cuentaId: string) =>
+  llamar<{ ok: boolean }>('PUT', `/contabilidad/reglas/${encodeURIComponent(clave)}`, token, { cuentaId })
+
+export const cambiarCuentaDe = (token: string, tipo: 'categoria' | 'tipo_gasto' | 'banco', id: string, cuentaId: string) =>
+  llamar<{ ok: boolean }>('PUT', `/contabilidad/cuenta-de/${tipo}/${encodeURIComponent(id)}`, token, { cuentaId })
+
+export const pendientesContables = (token: string, estado: 'pendiente' | 'resuelto' | 'descartado' = 'pendiente') =>
+  llamar<PendienteContable[]>('GET', `/contabilidad/pendientes?${new URLSearchParams({ estado }).toString()}`, token)
+
+export const reintentarPendiente = (token: string, id: string) =>
+  llamar<ResultadoContable>('POST', `/contabilidad/pendientes/${id}/reintentar`, token)
+
+export const reintentarPendientes = (token: string) =>
+  llamar<{ hecho: number; omitido: number; pendiente: number }>('POST', '/contabilidad/pendientes/reintentar', token)
+
+export const clasificarPendiente = (token: string, id: string, cuentaId: string, nota: string) =>
+  llamar<ResultadoContable>('POST', `/contabilidad/pendientes/${id}/clasificar`, token, { cuentaId, nota })
+
+export const descartarPendiente = (token: string, id: string, nota: string) =>
+  llamar<{ ok: boolean }>('POST', `/contabilidad/pendientes/${id}/descartar`, token, { nota })

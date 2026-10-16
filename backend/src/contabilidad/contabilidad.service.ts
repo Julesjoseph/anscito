@@ -11,6 +11,7 @@ import { centavos, texto2 } from '../sanes/calendario';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { anularAsientoEn, numeroAsiento, registrarAsiento } from './asientos';
 import type { LineaAsiento } from './asientos';
+import { contabilizar, origenDeTabla, PIDE_CUENTA } from './motor';
 
 // Contabilidad: catálogo de cuentas, fecha de inicio, asientos manuales y de
 // apertura, anulación con asiento de reverso, meses (cerrar y reabrir) y la
@@ -47,6 +48,80 @@ function errorDeRegla(e: unknown): never {
   throw e;
 }
 
+// Qué es cada operación pendiente (por su tabla de origen).
+const QUE_ES: Record<string, string> = {
+  ventas: 'Venta',
+  cxc_abonos: 'Abono de cliente',
+  compras: 'Compra',
+  compra_pagos: 'Pago de compra',
+  cxp_pagos: 'Pago a proveedor',
+  caja_movimientos: 'Movimiento de caja',
+  caja_movimientos_usd: 'Movimiento de caja en US$',
+  caja_sesiones: 'Cierre de caja',
+  cuenta_movimientos: 'Movimiento de banco',
+  transferencias: 'Transferencia',
+  san_recibos: 'Cobro de SOL CASH',
+  san_entregas: 'Mano de SOL CASH',
+  remesas: 'Envío (SCITO TRANSFER)',
+  remesa_entregas: 'Entrega de un agente',
+  remesa_pagos_comision: 'Comisión de un agente',
+};
+
+// Operaciones en las que el contador puede escoger la cuenta (ingresos y
+// retiros marcados "otro"), si su error lo pide.
+const CLASIFICABLES = [
+  'caja_movimientos',
+  'caja_movimientos_usd',
+  'cuenta_movimientos',
+];
+function clasificable(p: { origen_tabla: string; error: string }): boolean {
+  return (
+    CLASIFICABLES.includes(p.origen_tabla) && p.error.endsWith(PIDE_CUENTA)
+  );
+}
+
+// Documento y detalle de los movimientos de caja y banco (para que el
+// contador sepa qué fue antes de escoger la cuenta).
+const SQL_DETALLE = `CASE p.origen_tabla
+    WHEN 'cuenta_movimientos' THEN (
+      SELECT ct.nombre || ' · ' || m.tipo || ' ' || mo.simbolo || m.monto || COALESCE(' · ' || m.motivo, '')
+      FROM cuenta_movimientos m JOIN cuentas ct ON ct.id = m.cuenta_id JOIN monedas mo ON mo.codigo = ct.moneda
+      WHERE m.id::text = p.origen_id)
+    WHEN 'caja_movimientos' THEN (
+      SELECT cj.nombre || ' · ' || m.tipo || ' RD$' || m.monto || COALESCE(' · ' || m.motivo, '')
+      FROM caja_movimientos m JOIN caja_sesiones s ON s.id = m.sesion_id JOIN cajas cj ON cj.id = s.caja_id
+      WHERE m.id::text = p.origen_id)
+    WHEN 'caja_movimientos_usd' THEN (
+      SELECT cj.nombre || ' · ' || m.tipo || ' US$' || m.monto || ' (RD$' || m.monto_dop || ')' || COALESCE(' · ' || m.motivo, '')
+      FROM caja_movimientos_usd m JOIN caja_sesiones s ON s.id = m.sesion_id JOIN cajas cj ON cj.id = s.caja_id
+      WHERE m.id::text = p.origen_id)
+  END`;
+const SQL_DOCUMENTO = `COALESCE(p.documento, CASE p.origen_tabla
+    WHEN 'cuenta_movimientos' THEN 'BN-' || p.origen_id
+    WHEN 'caja_movimientos' THEN 'CJ-' || p.origen_id
+    WHEN 'caja_movimientos_usd' THEN 'CJU-' || p.origen_id END)`;
+
+// Cuenta contable de cada categoría de gasto, tipo 606 y banco o billetera.
+// (Tablas fijas: nunca vienen del usuario.)
+const CUENTA_DE: Record<
+  string,
+  { tabla: string; llave: string; patron: RegExp; que: string }
+> = {
+  categoria: {
+    tabla: 'categorias_gasto',
+    llave: 'id',
+    patron: UUID,
+    que: 'Categoría de gasto',
+  },
+  tipo_gasto: {
+    tabla: 'tipos_gasto',
+    llave: 'codigo',
+    patron: /^[0-9]{2}$/,
+    que: 'Tipo de gasto 606',
+  },
+  banco: { tabla: 'cuentas', llave: 'id', patron: UUID, que: 'Cuenta' },
+};
+
 // Saldo de cada cuenta de detalle (débitos − créditos de TODOS los asientos).
 const SQL_SALDOS = `SELECT l.cuenta_id, sum(l.debito)::numeric(16,2) AS debitos, sum(l.credito)::numeric(16,2) AS creditos
   FROM asiento_lineas l JOIN asientos a ON a.id = l.asiento_id`;
@@ -63,7 +138,7 @@ export class ContabilidadService {
   }
 
   async preparar() {
-    const [inicio, hay, hoy, unidades] = await Promise.all([
+    const [inicio, hay, hoy, unidades, pendientes] = await Promise.all([
       this.fechaInicio(this.db),
       this.db.query<{ n: number; apertura: boolean }>(
         `SELECT count(*)::int AS n,
@@ -74,6 +149,9 @@ export class ContabilidadService {
       this.db.query(
         'SELECT id, nombre FROM unidades_negocio WHERE is_active ORDER BY lower(nombre)',
       ),
+      this.db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM contabilidad_pendientes WHERE estado = 'pendiente'`,
+      ),
     ]);
     return {
       fechaInicio: inicio,
@@ -81,6 +159,7 @@ export class ContabilidadService {
       hayApertura: hay.rows[0].apertura,
       hoy,
       unidadesNegocio: unidades.rows,
+      pendientes: pendientes.rows[0].n,
     };
   }
 
@@ -794,5 +873,328 @@ export class ContabilidadService {
       filas,
       totales: { debitos: texto2(td), creditos: texto2(tc), cuadra: td === tc },
     };
+  }
+
+  // ---------- Reglas (qué cuenta usa cada operación) ----------
+
+  async reglas() {
+    const [reglas, categorias, tipos, bancos] = await Promise.all([
+      this.db.query(
+        `SELECT r.clave, r.nombre, r.descripcion, r.cuenta_id, c.codigo, c.nombre AS cuenta,
+                r.updated_at, u.username AS cambiada_por
+         FROM contabilidad_reglas r JOIN cuentas_contables c ON c.id = r.cuenta_id
+         LEFT JOIN usuarios u ON u.id = r.updated_by
+         ORDER BY r.orden`,
+      ),
+      this.db.query(
+        `SELECT g.id, g.nombre, g.cuenta_contable_id AS cuenta_id, c.codigo, c.nombre AS cuenta
+         FROM categorias_gasto g LEFT JOIN cuentas_contables c ON c.id = g.cuenta_contable_id
+         WHERE g.is_active ORDER BY g.orden, lower(g.nombre)`,
+      ),
+      this.db.query(
+        `SELECT t.codigo AS id, t.codigo || ' · ' || t.nombre AS nombre, t.cuenta_contable_id AS cuenta_id,
+                c.codigo, c.nombre AS cuenta
+         FROM tipos_gasto t LEFT JOIN cuentas_contables c ON c.id = t.cuenta_contable_id
+         WHERE t.is_active ORDER BY t.orden`,
+      ),
+      this.db.query(
+        `SELECT ct.id, ct.nombre || ' (' || ct.moneda || ')' AS nombre, ct.cuenta_contable_id AS cuenta_id,
+                c.codigo, c.nombre AS cuenta
+         FROM cuentas ct LEFT JOIN cuentas_contables c ON c.id = ct.cuenta_contable_id
+         WHERE ct.is_active ORDER BY lower(ct.nombre)`,
+      ),
+    ]);
+    return {
+      reglas: reglas.rows,
+      categorias: categorias.rows,
+      tiposGasto: tipos.rows,
+      bancos: bancos.rows,
+    };
+  }
+
+  // Una cuenta de detalle activa (las reglas y operaciones solo usan esas).
+  private async cuentaDeDetalle(c: Pick<DatabaseService, 'query'>, v: unknown) {
+    const id = texto(v).toLowerCase();
+    if (!UUID.test(id))
+      throw new BadRequestException('Escoja una cuenta del catálogo');
+    const r = await c.query<{ id: string; codigo: string; nombre: string }>(
+      `SELECT id, codigo, nombre FROM cuentas_contables
+       WHERE id = $1 AND acepta_movimientos AND is_active`,
+      [id],
+    );
+    if (r.rowCount === 0)
+      throw new BadRequestException(
+        'Escoja una cuenta activa que acepte movimientos',
+      );
+    return r.rows[0];
+  }
+
+  async cambiarRegla(
+    actorId: string,
+    clave: string,
+    ip: string | undefined,
+    datos: { cuentaId?: unknown },
+  ) {
+    if (!/^[a-z_]{2,40}$/.test(clave))
+      throw new NotFoundException('Regla no encontrada');
+    return this.db.transaccion(async (c) => {
+      const r = await c.query<{
+        nombre: string;
+        codigo: string;
+        cuenta: string;
+      }>(
+        `SELECT r.nombre, c.codigo, c.nombre AS cuenta
+         FROM contabilidad_reglas r JOIN cuentas_contables c ON c.id = r.cuenta_id
+         WHERE r.clave = $1 FOR UPDATE OF r`,
+        [clave],
+      );
+      if (r.rowCount === 0) throw new NotFoundException('Regla no encontrada');
+      const antes = r.rows[0];
+      const cuenta = await this.cuentaDeDetalle(c, datos.cuentaId);
+      if (cuenta.codigo === antes.codigo) return { ok: true };
+      await c.query(
+        `UPDATE contabilidad_reglas SET cuenta_id = $2, updated_by = $3, updated_at = now() WHERE clave = $1`,
+        [clave, cuenta.id, actorId],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.regla',
+        entidad: 'contabilidad_reglas',
+        entidadId: clave,
+        anterior: {
+          regla: antes.nombre,
+          cuenta: `${antes.codigo} ${antes.cuenta}`,
+        },
+        nuevo: { cuenta: `${cuenta.codigo} ${cuenta.nombre}` },
+        ip,
+      });
+      return { ok: true };
+    });
+  }
+
+  // Cuenta contable de una categoría de gasto, un tipo 606 o un banco.
+  async cambiarCuentaDe(
+    actorId: string,
+    tipo: string,
+    id: string,
+    ip: string | undefined,
+    datos: { cuentaId?: unknown },
+  ) {
+    const d = Object.hasOwn(CUENTA_DE, tipo) ? CUENTA_DE[tipo] : undefined;
+    if (!d || !d.patron.test(id)) throw new NotFoundException('No encontrado');
+    return this.db.transaccion(async (c) => {
+      const r = await c.query<{ nombre: string; codigo: string | null }>(
+        `SELECT x.nombre, cc.codigo FROM ${d.tabla} x
+         LEFT JOIN cuentas_contables cc ON cc.id = x.cuenta_contable_id
+         WHERE x.${d.llave} = $1 FOR UPDATE OF x`,
+        [id],
+      );
+      if (r.rowCount === 0) throw new NotFoundException(`${d.que}: no existe`);
+      const antes = r.rows[0];
+      const cuenta = await this.cuentaDeDetalle(c, datos.cuentaId);
+      if (cuenta.codigo === antes.codigo) return { ok: true };
+      await c.query(
+        `UPDATE ${d.tabla} SET cuenta_contable_id = $2${tipo === 'banco' ? ', updated_at = now()' : ''}
+         WHERE ${d.llave} = $1`,
+        [id, cuenta.id],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.cuenta_de',
+        entidad: d.tabla,
+        entidadId: id,
+        anterior: { [tipo]: antes.nombre, cuenta: antes.codigo },
+        nuevo: { cuenta: `${cuenta.codigo} ${cuenta.nombre}` },
+        ip,
+      });
+      return { ok: true };
+    });
+  }
+
+  // ---------- Pendientes ----------
+
+  async pendientes(filtros: { estado?: string }) {
+    const estado = texto(filtros.estado) || 'pendiente';
+    if (!['pendiente', 'resuelto', 'descartado'].includes(estado))
+      throw new BadRequestException('Estado inválido');
+    const r = await this.db.query<{
+      origen_tabla: string;
+      error: string;
+      estado: string;
+      asiento: string | null;
+    }>(
+      `SELECT p.id, p.origen_tabla, p.origen_id, ${SQL_DOCUMENTO} AS documento, ${SQL_DETALLE} AS detalle,
+              to_char(p.fecha, 'YYYY-MM-DD') AS fecha,
+              p.error, p.estado, p.nota, p.created_at, p.resuelto_en, u.username AS resuelto_por,
+              (SELECT c.codigo || ' ' || c.nombre FROM contabilidad_clasificaciones k
+                 JOIN cuentas_contables c ON c.id = k.cuenta_id
+               WHERE k.origen_tabla = p.origen_tabla AND k.origen_id = p.origen_id
+               ORDER BY k.created_at DESC LIMIT 1) AS clasificada,
+              (SELECT a.numero FROM asientos a
+               WHERE a.origen_tabla = p.origen_tabla AND a.origen_id = p.origen_id
+                 AND a.reverso_de IS NULL AND a.estado = 'activo') AS asiento
+       FROM contabilidad_pendientes p LEFT JOIN usuarios u ON u.id = p.resuelto_por
+       WHERE p.estado = $1
+       ORDER BY p.fecha DESC, p.created_at DESC LIMIT 300`,
+      [estado],
+    );
+    return r.rows.map((x) => ({
+      ...x,
+      que: QUE_ES[x.origen_tabla] ?? x.origen_tabla,
+      clasificable: x.estado === 'pendiente' && clasificable(x),
+      asiento: x.asiento != null ? numeroAsiento(x.asiento) : null,
+    }));
+  }
+
+  private async pendiente(c: Pick<DatabaseService, 'query'>, id: string) {
+    if (!UUID.test(id)) throw new NotFoundException('Pendiente no encontrado');
+    const r = await c.query<{
+      origen_tabla: string;
+      origen_id: string;
+      documento: string | null;
+      error: string;
+    }>(
+      `SELECT origen_tabla, origen_id, documento, error FROM contabilidad_pendientes
+       WHERE id = $1 AND estado = 'pendiente' FOR UPDATE`,
+      [id],
+    );
+    if (r.rowCount === 0)
+      throw new NotFoundException('Pendiente no encontrado o ya resuelto');
+    return r.rows[0];
+  }
+
+  // Vuelve a contabilizar: 'hecho', 'omitido' o 'pendiente' con su error.
+  private async intentar(
+    c: Pick<DatabaseService, 'query'>,
+    p: { origen_tabla: string; origen_id: string },
+    actorId: string,
+  ) {
+    const origen = origenDeTabla(p.origen_tabla);
+    if (!origen)
+      throw new BadRequestException('Esta operación no se puede reintentar');
+    const resultado = await contabilizar(c, origen, p.origen_id, actorId);
+    if (resultado !== 'pendiente') return { resultado, error: null };
+    const e = await c.query<{ error: string }>(
+      `SELECT error FROM contabilidad_pendientes
+       WHERE origen_tabla = $1 AND origen_id = $2 AND estado = 'pendiente'`,
+      [p.origen_tabla, p.origen_id],
+    );
+    return { resultado, error: e.rows[0]?.error ?? null };
+  }
+
+  async reintentar(actorId: string, id: string, ip: string | undefined) {
+    return this.db.transaccion(async (c) => {
+      if (!(await this.fechaInicio(c)))
+        throw new BadRequestException('Primero fije la fecha de inicio');
+      const p = await this.pendiente(c, id);
+      const r = await this.intentar(c, p, actorId);
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.pendiente_reintentar',
+        entidad: 'contabilidad_pendientes',
+        entidadId: id,
+        anterior: { documento: p.documento, error: p.error },
+        nuevo: r,
+        ip,
+      });
+      return r;
+    });
+  }
+
+  async reintentarTodos(actorId: string, ip: string | undefined) {
+    return this.db.transaccion(async (c) => {
+      if (!(await this.fechaInicio(c)))
+        throw new BadRequestException('Primero fije la fecha de inicio');
+      const lista = await c.query<{
+        id: string;
+        origen_tabla: string;
+        origen_id: string;
+      }>(
+        `SELECT id, origen_tabla, origen_id FROM contabilidad_pendientes
+         WHERE estado = 'pendiente' ORDER BY fecha, created_at LIMIT 500 FOR UPDATE`,
+      );
+      const cuenta = { hecho: 0, omitido: 0, pendiente: 0 };
+      for (const p of lista.rows) {
+        if (!origenDeTabla(p.origen_tabla)) {
+          cuenta.pendiente++;
+          continue;
+        }
+        cuenta[(await this.intentar(c, p, actorId)).resultado]++;
+      }
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.pendientes_reintentar',
+        entidad: 'contabilidad_pendientes',
+        nuevo: cuenta,
+        ip,
+      });
+      return cuenta;
+    });
+  }
+
+  // El contador escoge la cuenta de un ingreso o retiro "otro" y se contabiliza.
+  async clasificar(
+    actorId: string,
+    id: string,
+    ip: string | undefined,
+    datos: { cuentaId?: unknown; nota?: unknown },
+  ) {
+    const nota = motivoValido(datos.nota, 300);
+    return this.db.transaccion(async (c) => {
+      if (!(await this.fechaInicio(c)))
+        throw new BadRequestException('Primero fije la fecha de inicio');
+      const p = await this.pendiente(c, id);
+      if (!clasificable(p))
+        throw new BadRequestException(
+          'Esta operación no se clasifica: corrija la causa (por ejemplo, la cuenta de una regla) y reintente',
+        );
+      const cuenta = await this.cuentaDeDetalle(c, datos.cuentaId);
+      await c.query(
+        `INSERT INTO contabilidad_clasificaciones (origen_tabla, origen_id, cuenta_id, nota, created_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [p.origen_tabla, p.origen_id, cuenta.id, nota, actorId],
+      );
+      const r = await this.intentar(c, p, actorId);
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.pendiente_clasificar',
+        entidad: 'contabilidad_pendientes',
+        entidadId: id,
+        anterior: { documento: p.documento, error: p.error },
+        nuevo: { cuenta: `${cuenta.codigo} ${cuenta.nombre}`, ...r },
+        motivo: nota,
+        ip,
+      });
+      return r;
+    });
+  }
+
+  // La operación no se contabilizará (por ejemplo, ya se registró a mano).
+  async descartar(
+    actorId: string,
+    id: string,
+    ip: string | undefined,
+    datos: { nota?: unknown },
+  ) {
+    const nota = motivoValido(datos.nota, 300);
+    return this.db.transaccion(async (c) => {
+      const p = await this.pendiente(c, id);
+      await c.query(
+        `UPDATE contabilidad_pendientes SET estado = 'descartado', resuelto_en = now(), resuelto_por = $2, nota = $3
+         WHERE id = $1`,
+        [id, actorId, nota],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.pendiente_descartar',
+        entidad: 'contabilidad_pendientes',
+        entidadId: id,
+        anterior: { documento: p.documento, error: p.error },
+        nuevo: { estado: 'descartado' },
+        motivo: nota,
+        ip,
+      });
+      return { ok: true };
+    });
   }
 }

@@ -133,4 +133,83 @@ export class ContabilidadController {
   balanza(@Query('hasta') hasta?: string) {
     return this.conta.balanza({ hasta });
   }
+
+  // ---------- Reglas ----------
+
+  @Get('reglas')
+  @RequierePermiso('contabilidad.ver')
+  reglas() {
+    return this.conta.reglas();
+  }
+
+  @Put('reglas/:clave')
+  @RequierePermiso('contabilidad.catalogo')
+  cambiarRegla(
+    @Req() req: Peticion,
+    @Param('clave') clave: string,
+    @Body() body: Cuerpo,
+  ) {
+    return this.conta.cambiarRegla(req.usuario.id, clave, req.ip, body ?? {});
+  }
+
+  @Put('cuenta-de/:tipo/:id')
+  @RequierePermiso('contabilidad.catalogo')
+  cambiarCuentaDe(
+    @Req() req: Peticion,
+    @Param('tipo') tipo: string,
+    @Param('id') id: string,
+    @Body() body: Cuerpo,
+  ) {
+    return this.conta.cambiarCuentaDe(
+      req.usuario.id,
+      tipo,
+      id,
+      req.ip,
+      body ?? {},
+    );
+  }
+
+  // ---------- Pendientes ----------
+
+  @Get('pendientes')
+  @RequierePermiso('contabilidad.ver')
+  pendientes(@Query('estado') estado?: string) {
+    return this.conta.pendientes({ estado });
+  }
+
+  @Post('pendientes/reintentar')
+  @HttpCode(200)
+  @RequierePermiso('contabilidad.asientos')
+  reintentarTodos(@Req() req: Peticion) {
+    return this.conta.reintentarTodos(req.usuario.id, req.ip);
+  }
+
+  @Post('pendientes/:id/reintentar')
+  @HttpCode(200)
+  @RequierePermiso('contabilidad.asientos')
+  reintentar(@Req() req: Peticion, @Param('id') id: string) {
+    return this.conta.reintentar(req.usuario.id, id, req.ip);
+  }
+
+  @Post('pendientes/:id/clasificar')
+  @HttpCode(200)
+  @RequierePermiso('contabilidad.asientos')
+  clasificar(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body() body: Cuerpo,
+  ) {
+    return this.conta.clasificar(req.usuario.id, id, req.ip, body ?? {});
+  }
+
+  @Post('pendientes/:id/descartar')
+  @HttpCode(200)
+  @RequierePermiso('contabilidad.anular')
+  descartar(
+    @Req() req: Peticion,
+    @Param('id') id: string,
+    @Body() body: Cuerpo,
+  ) {
+    return this.conta.descartar(req.usuario.id, id, req.ip, body ?? {});
+  }
 }

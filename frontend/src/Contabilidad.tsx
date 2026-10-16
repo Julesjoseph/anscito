@@ -5,26 +5,46 @@ import {
   SesionVencida,
   anularAsientoContable,
   balanzaComprobacion,
+  cambiarCuentaDe,
+  cambiarReglaContable,
   catalogoCuentas,
   cerrarMesContable,
+  clasificarPendiente,
   crearAsientoContable,
   crearCuentaContable,
+  descartarPendiente,
   detalleAsiento,
   editarCuentaContable,
   estadoCuentaContable,
   fijarFechaInicioContable,
   listarAsientos,
+  pendientesContables,
   periodosContables,
   prepararContabilidad,
   reabrirMesContable,
+  reglasContables,
+  reintentarPendiente,
+  reintentarPendientes,
   validarCuentaContable,
 } from './api'
-import type { Balanza, CuentaContable, DetalleAsiento, FilaAsiento, LineaAsientoEntrada, PrepararContabilidad } from './api'
+import type {
+  Balanza,
+  CuentaContable,
+  CuentaDe,
+  DetalleAsiento,
+  FilaAsiento,
+  LineaAsientoEntrada,
+  PendienteContable,
+  PrepararContabilidad,
+  ReglasContables,
+  ResultadoContable,
+} from './api'
 import { BOTON_PELIGRO, BOTON_PRINCIPAL, BOTON_SECUNDARIO, CAMPO, CajaError, Ventana } from './componentes'
 import { dinero, mensajeDe } from './formato'
 
-// Contabilidad: catálogo de cuentas, asientos (manuales y de apertura),
-// meses (cerrar y reabrir) y balanza de comprobación. Todo en RD$.
+// Contabilidad: catálogo de cuentas, asientos (manuales, de apertura y
+// automáticos), reglas (qué cuenta usa cada operación), pendientes, meses
+// (cerrar y reabrir) y balanza de comprobación. Todo en RD$.
 
 type Props = {
   token: string
@@ -76,6 +96,13 @@ const NOMBRE_ORIGEN: Record<string, string> = {
   caja_mov: 'Movimiento de caja',
   caja_mov_usd: 'Movimiento de caja (US$)',
   caja_cierre: 'Cierre de caja',
+  cuenta_mov: 'Movimiento de banco',
+  transferencia: 'Transferencia',
+  san_recibo: 'Cobro de SOL CASH',
+  san_entrega: 'Mano de SOL CASH',
+  remesa: 'Envío (SCITO TRANSFER)',
+  remesa_entrega: 'Entrega de un agente',
+  remesa_pago: 'Comisión de un agente',
 }
 
 function useEnviar(onSesionVencida: () => void) {
@@ -107,7 +134,7 @@ function Campo({ etiqueta, children }: { etiqueta: string; children: ReactNode }
 }
 
 export default function Contabilidad({ token, permisos, onSesionVencida }: Props) {
-  const [pestana, setPestana] = useState<'catalogo' | 'asientos' | 'meses' | 'balanza'>('catalogo')
+  const [pestana, setPestana] = useState<'catalogo' | 'asientos' | 'reglas' | 'pendientes' | 'meses' | 'balanza'>('catalogo')
   const [prep, setPrep] = useState<PrepararContabilidad | null>(null)
   const [cuentas, setCuentas] = useState<CuentaContable[] | null>(null)
   const [error, setError] = useState('')
@@ -166,6 +193,8 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
           [
             ['catalogo', 'Catálogo de cuentas'],
             ['asientos', 'Asientos'],
+            ['reglas', 'Reglas'],
+            ['pendientes', 'Pendientes'],
             ['meses', 'Meses'],
             ['balanza', 'Balanza'],
           ] as const
@@ -179,6 +208,9 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
             }`}
           >
             {nombre}
+            {id === 'pendientes' && (prep?.pendientes ?? 0) > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs text-amber-800">{prep?.pendientes}</span>
+            )}
           </button>
         ))}
       </div>
@@ -194,6 +226,18 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
           puedeNuevo={puedeAsientos && prep.fechaInicio !== null}
           puedeAnular={permisos.includes('contabilidad.anular')}
           onNuevo={() => setNuevo('manual')}
+          onCambio={() => void cargar()}
+          onSesionVencida={onSesionVencida}
+        />
+      ) : pestana === 'reglas' ? (
+        <Reglas token={token} cuentas={cuentas} puedeEditar={permisos.includes('contabilidad.catalogo')} onSesionVencida={onSesionVencida} />
+      ) : pestana === 'pendientes' ? (
+        <Pendientes
+          token={token}
+          cuentas={cuentas}
+          hayInicio={prep.fechaInicio !== null}
+          puedeAsientos={puedeAsientos}
+          puedeDescartar={permisos.includes('contabilidad.anular')}
           onCambio={() => void cargar()}
           onSesionVencida={onSesionVencida}
         />
@@ -602,6 +646,13 @@ function Asientos({
             <option value="cxp_pago">Pagos a proveedores</option>
             <option value="caja_mov">Movimientos de caja</option>
             <option value="caja_cierre">Cierres de caja</option>
+            <option value="cuenta_mov">Movimientos de banco</option>
+            <option value="transferencia">Transferencias</option>
+            <option value="san_recibo">Cobros de SOL CASH</option>
+            <option value="san_entrega">Manos de SOL CASH</option>
+            <option value="remesa">Envíos</option>
+            <option value="remesa_entrega">Entregas de agentes</option>
+            <option value="remesa_pago">Comisiones de agentes</option>
           </select>
         </Campo>
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
@@ -1176,5 +1227,438 @@ function VerBalanza({ token, hoy, onSesionVencida }: { token: string; hoy: strin
         Suma todos los asientos hasta esa fecha. Un asiento anulado y su reverso se cancelan entre sí.
       </p>
     </div>
+  )
+}
+
+// ---------- Reglas: qué cuenta usa cada operación ----------
+
+function SelectorCuenta({ cuentas, valor, setValor }: { cuentas: CuentaContable[]; valor: string; setValor: (v: string) => void }) {
+  const detalle = useMemo(() => cuentas.filter((c) => c.acepta_movimientos && c.is_active), [cuentas])
+  return (
+    <select className={CAMPO} value={valor} onChange={(e) => setValor(e.target.value)} aria-label="Cuenta contable">
+      <option value="">Seleccione la cuenta…</option>
+      {detalle.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.codigo} · {c.nombre}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+type FilaRegla = { llave: string; nombre: string; descripcion?: string; cuentaId: string | null; codigo: string | null; cuenta: string | null; extra?: string }
+
+function TablaCuentas({ titulo, ayuda, filas, puedeEditar, onCambiar }: { titulo: string; ayuda: string; filas: FilaRegla[]; puedeEditar: boolean; onCambiar: (f: FilaRegla) => void }) {
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-100 px-4 py-3">
+        <h2 className="font-medium">{titulo}</h2>
+        <p className="text-xs text-gray-500">{ayuda}</p>
+      </div>
+      <ul className="divide-y divide-gray-100">
+        {filas.map((f) => (
+          <li key={f.llave} className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="font-medium">{f.nombre}</div>
+              {f.descripcion && <div className="text-xs text-gray-500">{f.descripcion}</div>}
+              {f.extra && <div className="text-xs text-gray-400">{f.extra}</div>}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {f.codigo ? (
+                <span className="text-right">
+                  <span className="font-mono text-xs text-gray-500">{f.codigo}</span> {f.cuenta}
+                </span>
+              ) : (
+                <span className="text-amber-700">Sin cuenta contable</span>
+              )}
+              {puedeEditar && (
+                <button type="button" className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50" onClick={() => onCambiar(f)} aria-label={`Cambiar la cuenta de ${f.nombre}`}>
+                  <Pencil size={14} />
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+type CambioCuenta = { tipo: 'regla' | 'categoria' | 'tipo_gasto' | 'banco'; fila: FilaRegla }
+
+function Reglas({ token, cuentas, puedeEditar, onSesionVencida }: { token: string; cuentas: CuentaContable[]; puedeEditar: boolean; onSesionVencida: () => void }) {
+  const [datos, setDatos] = useState<ReglasContables | null>(null)
+  const [error, setError] = useState('')
+  const [cambio, setCambio] = useState<CambioCuenta | null>(null)
+
+  const cargar = useCallback(async () => {
+    try {
+      setDatos(await reglasContables(token))
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    }
+  }, [token, onSesionVencida])
+
+  useEffect(() => {
+    void cargar()
+  }, [cargar])
+
+  if (error) return <CajaError>{error}</CajaError>
+  if (!datos) return <p className="text-sm text-gray-500">Cargando…</p>
+
+  const de = (x: CuentaDe): FilaRegla => ({ llave: x.id, nombre: x.nombre, cuentaId: x.cuenta_id, codigo: x.codigo, cuenta: x.cuenta })
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        Estas reglas deciden a qué cuenta va cada operación automática (ventas, compras, caja, bancos, SOL CASH y envíos). Son
+        una propuesta: su contador debe revisarlas. Un cambio vale para las operaciones nuevas; los asientos ya registrados no
+        cambian.
+      </div>
+      <TablaCuentas
+        titulo="Reglas generales"
+        ayuda="Cada papel del dinero apunta a una cuenta del catálogo."
+        filas={datos.reglas.map((r) => ({
+          llave: r.clave,
+          nombre: r.nombre,
+          descripcion: r.descripcion,
+          cuentaId: r.cuenta_id,
+          codigo: r.codigo,
+          cuenta: r.cuenta,
+          extra: r.cambiada_por ? `Cambiada por ${r.cambiada_por} el ${fechaCorta(r.updated_at)}` : undefined,
+        }))}
+        puedeEditar={puedeEditar}
+        onCambiar={(fila) => setCambio({ tipo: 'regla', fila })}
+      />
+      <TablaCuentas titulo="Categorías de gasto (Caja y Bancos)" ayuda="Cuenta de gasto de cada categoría." filas={datos.categorias.map(de)} puedeEditar={puedeEditar} onCambiar={(fila) => setCambio({ tipo: 'categoria', fila })} />
+      <TablaCuentas titulo="Tipos de gasto 606 (Compras)" ayuda="Cuenta de gasto de cada tipo de la DGII (lo que no va al inventario)." filas={datos.tiposGasto.map(de)} puedeEditar={puedeEditar} onCambiar={(fila) => setCambio({ tipo: 'tipo_gasto', fila })} />
+      <TablaCuentas titulo="Cuentas de banco y billeteras" ayuda="Cuenta contable de cada cuenta de banco, MonCash o NatCash." filas={datos.bancos.map(de)} puedeEditar={puedeEditar} onCambiar={(fila) => setCambio({ tipo: 'banco', fila })} />
+      {cambio && (
+        <FormCambioCuenta
+          token={token}
+          cuentas={cuentas}
+          cambio={cambio}
+          onCerrar={() => setCambio(null)}
+          onListo={() => {
+            setCambio(null)
+            void cargar()
+          }}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
+    </div>
+  )
+}
+
+function FormCambioCuenta({
+  token,
+  cuentas,
+  cambio,
+  onCerrar,
+  onListo,
+  onSesionVencida,
+}: {
+  token: string
+  cuentas: CuentaContable[]
+  cambio: CambioCuenta
+  onCerrar: () => void
+  onListo: () => void
+  onSesionVencida: () => void
+}) {
+  const [cuentaId, setCuentaId] = useState(cambio.fila.cuentaId ?? '')
+  const { error, guardando, enviar } = useEnviar(onSesionVencida)
+  return (
+    <Ventana titulo="Cambiar la cuenta" onCerrar={onCerrar} ancho="max-w-lg">
+      <form
+        className="flex flex-col gap-3 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void enviar(
+            () => (cambio.tipo === 'regla' ? cambiarReglaContable(token, cambio.fila.llave, cuentaId) : cambiarCuentaDe(token, cambio.tipo, cambio.fila.llave, cuentaId)),
+            onListo,
+          )
+        }}
+      >
+        <div>
+          <div className="font-medium">{cambio.fila.nombre}</div>
+          {cambio.fila.descripcion && <div className="text-xs text-gray-500">{cambio.fila.descripcion}</div>}
+          <div className="mt-1 text-xs text-gray-500">Ahora: {cambio.fila.codigo ? `${cambio.fila.codigo} · ${cambio.fila.cuenta}` : 'sin cuenta'}</div>
+        </div>
+        <Campo etiqueta="Nueva cuenta">
+          <SelectorCuenta cuentas={cuentas} valor={cuentaId} setValor={setCuentaId} />
+        </Campo>
+        <p className="text-xs text-gray-500">Vale para las operaciones nuevas. El cambio queda en la auditoría.</p>
+        {error && <CajaError>{error}</CajaError>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={BOTON_SECUNDARIO} onClick={onCerrar}>
+            Cancelar
+          </button>
+          <button type="submit" className={BOTON_PRINCIPAL} disabled={guardando || !cuentaId || cuentaId === cambio.fila.cuentaId}>
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </form>
+    </Ventana>
+  )
+}
+
+// ---------- Pendientes: operaciones que no se pudieron contabilizar ----------
+
+type AccionPendiente = { tipo: 'clasificar' | 'descartar'; p: PendienteContable }
+
+function Pendientes({
+  token,
+  cuentas,
+  hayInicio,
+  puedeAsientos,
+  puedeDescartar,
+  onCambio,
+  onSesionVencida,
+}: {
+  token: string
+  cuentas: CuentaContable[]
+  hayInicio: boolean
+  puedeAsientos: boolean
+  puedeDescartar: boolean
+  onCambio: () => void
+  onSesionVencida: () => void
+}) {
+  const [estado, setEstado] = useState<'pendiente' | 'resuelto' | 'descartado'>('pendiente')
+  const [lista, setLista] = useState<PendienteContable[] | null>(null)
+  const [error, setError] = useState('')
+  const [aviso, setAviso] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+  const [accion, setAccion] = useState<AccionPendiente | null>(null)
+
+  const cargar = useCallback(async () => {
+    try {
+      setLista(await pendientesContables(token, estado))
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    }
+  }, [token, estado, onSesionVencida])
+
+  useEffect(() => {
+    void cargar()
+  }, [cargar])
+
+  async function correr(f: () => Promise<string>) {
+    setOcupado(true)
+    setError('')
+    setAviso('')
+    try {
+      setAviso(await f())
+      await cargar()
+      onCambio()
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const resultado = (r: ResultadoContable) =>
+    r.resultado === 'hecho' ? 'Listo: se registró el asiento.' : r.resultado === 'omitido' ? 'No había nada que registrar.' : `Sigue pendiente: ${r.error ?? ''}`
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-gray-500">
+        Operaciones que se guardaron pero no se pudieron contabilizar solas: falta una cuenta, el mes está cerrado o hay que
+        decir qué fue (ingresos y retiros “otro”). Corrija la causa y reintente, escoja la cuenta o descártela con una nota.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <Campo etiqueta="Mostrar">
+          <select className={CAMPO} value={estado} onChange={(e) => setEstado(e.target.value as typeof estado)}>
+            <option value="pendiente">Pendientes</option>
+            <option value="resuelto">Resueltos</option>
+            <option value="descartado">Descartados</option>
+          </select>
+        </Campo>
+        <button type="button" className={BOTON_SECUNDARIO} onClick={() => void cargar()} aria-label="Actualizar">
+          <RefreshCw size={16} />
+        </button>
+        {estado === 'pendiente' && puedeAsientos && hayInicio && (lista?.length ?? 0) > 0 && (
+          <button
+            type="button"
+            className={BOTON_PRINCIPAL}
+            disabled={ocupado}
+            onClick={() =>
+              void correr(async () => {
+                const r = await reintentarPendientes(token)
+                return `Reintento: ${r.hecho} contabilizada(s), ${r.pendiente} siguen pendientes${r.omitido ? `, ${r.omitido} sin nada que registrar` : ''}.`
+              })
+            }
+          >
+            <RefreshCw size={16} /> Reintentar todos
+          </button>
+        )}
+      </div>
+      {!hayInicio && <p className="text-sm text-amber-700">Primero fije la fecha de inicio de la contabilidad.</p>}
+      {aviso && <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">{aviso}</div>}
+      {error && <CajaError>{error}</CajaError>}
+      {!lista ? (
+        <p className="text-sm text-gray-500">Cargando…</p>
+      ) : lista.length === 0 ? (
+        <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
+          <CheckCircle2 size={18} className="text-green-600" />
+          {estado === 'pendiente' ? 'No hay operaciones pendientes de contabilizar.' : 'No hay nada aquí.'}
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {lista.map((p) => (
+            <li key={p.id} className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium">
+                  {p.que}
+                  {p.documento && <span className="ml-2 font-mono text-xs text-gray-500">{p.documento}</span>}
+                </span>
+                <span className="text-xs text-gray-500">{fechaCorta(p.fecha)}</span>
+              </div>
+              {p.detalle && <div className="text-gray-700">{p.detalle}</div>}
+              <div className={p.estado === 'pendiente' ? 'text-amber-800' : 'text-gray-500'}>
+                {p.estado === 'pendiente' ? <AlertTriangle size={14} className="mr-1 inline" /> : null}
+                {p.error}
+              </div>
+              {p.estado !== 'pendiente' && (
+                <div className="text-xs text-gray-500">
+                  {p.estado === 'resuelto' ? 'Resuelto' : 'Descartado'}
+                  {p.resuelto_por ? ` por ${p.resuelto_por}` : ''} el {fechaCorta(p.resuelto_en)}
+                  {p.asiento ? ` · asiento ${p.asiento}` : ''}
+                  {p.clasificada ? ` · cuenta ${p.clasificada}` : ''}
+                  {p.nota ? ` · ${p.nota}` : ''}
+                </div>
+              )}
+              {p.estado === 'pendiente' && hayInicio && (
+                <div className="flex flex-wrap gap-2">
+                  {puedeAsientos && (
+                    <button
+                      type="button"
+                      className={`${BOTON_SECUNDARIO} flex items-center gap-2`}
+                      disabled={ocupado}
+                      onClick={() => void correr(async () => resultado(await reintentarPendiente(token, p.id)))}
+                    >
+                      <RefreshCw size={14} /> Reintentar
+                    </button>
+                  )}
+                  {puedeAsientos && p.clasificable && (
+                    <button type="button" className={BOTON_PRINCIPAL} disabled={ocupado} onClick={() => setAccion({ tipo: 'clasificar', p })}>
+                      <BookOpen size={14} /> Escoger la cuenta
+                    </button>
+                  )}
+                  {puedeDescartar && (
+                    <button type="button" className={BOTON_PELIGRO} disabled={ocupado} onClick={() => setAccion({ tipo: 'descartar', p })}>
+                      <Ban size={14} /> Descartar
+                    </button>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {accion && (
+        <FormPendiente
+          token={token}
+          cuentas={cuentas}
+          accion={accion}
+          onCerrar={() => setAccion(null)}
+          onListo={(texto) => {
+            setAccion(null)
+            setAviso(texto)
+            void cargar()
+            onCambio()
+          }}
+          onSesionVencida={onSesionVencida}
+        />
+      )}
+    </div>
+  )
+}
+
+function FormPendiente({
+  token,
+  cuentas,
+  accion,
+  onCerrar,
+  onListo,
+  onSesionVencida,
+}: {
+  token: string
+  cuentas: CuentaContable[]
+  accion: AccionPendiente
+  onCerrar: () => void
+  onListo: (aviso: string) => void
+  onSesionVencida: () => void
+}) {
+  const [cuentaId, setCuentaId] = useState('')
+  const [nota, setNota] = useState('')
+  const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const clasificar = accion.tipo === 'clasificar'
+  const p = accion.p
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault()
+    setGuardando(true)
+    setError('')
+    try {
+      if (clasificar) {
+        const r = await clasificarPendiente(token, p.id, cuentaId, nota.trim())
+        onListo(r.resultado === 'hecho' ? 'Listo: se registró el asiento con la cuenta escogida.' : `Se guardó la cuenta, pero sigue pendiente: ${r.error ?? ''}`)
+      } else {
+        await descartarPendiente(token, p.id, nota.trim())
+        onListo('Descartado: esta operación no se contabilizará.')
+      }
+    } catch (e2) {
+      if (e2 instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e2))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Ventana titulo={clasificar ? 'Escoger la cuenta' : 'Descartar'} onCerrar={onCerrar} ancho="max-w-lg">
+      <form className="flex flex-col gap-3 text-sm" onSubmit={(e) => void guardar(e)}>
+        <div className="rounded-lg bg-gray-50 px-3 py-2">
+          <div className="font-medium">
+            {p.que} {p.documento && <span className="font-mono text-xs text-gray-500">{p.documento}</span>}
+          </div>
+          {p.detalle && <div className="text-gray-700">{p.detalle}</div>}
+          <div className="text-xs text-gray-500">{fechaCorta(p.fecha)}</div>
+        </div>
+        {clasificar ? (
+          <>
+            <p className="text-gray-600">
+              ¿A qué cuenta va? Por ejemplo: <em>Otros ingresos</em> si es un ingreso que no es venta, <em>Capital</em> si es
+              dinero del dueño o una cuenta por pagar si es dinero de otra persona.
+            </p>
+            <Campo etiqueta="Cuenta">
+              <SelectorCuenta cuentas={cuentas} valor={cuentaId} setValor={setCuentaId} />
+            </Campo>
+          </>
+        ) : (
+          <p className="text-gray-600">
+            La operación sigue guardada, pero no tendrá asiento automático. Úselo solo si ya se registró a mano o si no debe ir a
+            la contabilidad.
+          </p>
+        )}
+        <Campo etiqueta={clasificar ? 'Nota (por qué esa cuenta)' : 'Motivo'}>
+          <input className={CAMPO} value={nota} maxLength={300} onChange={(e) => setNota(e.target.value)} placeholder={clasificar ? 'Ej.: reembolso de un cliente' : 'Ej.: ya registrado en el asiento AS-000120'} />
+        </Campo>
+        {error && <CajaError>{error}</CajaError>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={BOTON_SECUNDARIO} onClick={onCerrar}>
+            Cancelar
+          </button>
+          <button type="submit" className={clasificar ? BOTON_PRINCIPAL : BOTON_PELIGRO} disabled={guardando || nota.trim().length < 5 || (clasificar && !cuentaId)}>
+            {guardando ? 'Guardando…' : clasificar ? 'Guardar y contabilizar' : 'Descartar'}
+          </button>
+        </div>
+      </form>
+    </Ventana>
   )
 }

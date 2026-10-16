@@ -7,6 +7,7 @@ import {
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
+import { contabilizar, revertir } from '../contabilidad/motor';
 import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import {
@@ -32,6 +33,8 @@ const SIGNO: Record<TipoManual, 1 | -1> = {
   ingreso: 1,
 };
 const CAMBIADO_POR = ['casa_cambio', 'agente', 'banco', 'otro'];
+// Qué fue un ingreso (para la contabilidad): "otro" queda en pendientes.
+const CLASES_INGRESO = ['aporte', 'prestamo', 'otro'];
 
 function texto(v: unknown): string {
   return typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
@@ -521,6 +524,7 @@ export class BancosService {
       tasa?: unknown;
       fecha?: unknown;
       categoriaGastoId?: unknown;
+      clase?: unknown;
       beneficiario?: unknown;
       comprobante?: unknown;
       referencia?: unknown;
@@ -544,6 +548,14 @@ export class BancosService {
       categoria = texto(datos.categoriaGastoId).toLowerCase();
       if (!UUID.test(categoria))
         throw new BadRequestException('Seleccione la categoría del pago');
+    }
+    let clase: string | null = null;
+    if (tipo === 'ingreso') {
+      clase = texto(datos.clase);
+      if (!CLASES_INGRESO.includes(clase))
+        throw new BadRequestException(
+          '¿Qué fue el ingreso? Aporte del dueño, préstamo recibido u otro',
+        );
     }
 
     return this.db.transaccion(async (c) => {
@@ -574,9 +586,9 @@ export class BancosService {
       const r = await c.query<{ id: string; monto_dop: string }>(
         `INSERT INTO cuenta_movimientos
            (cuenta_id, tipo, signo, monto, tasa, monto_dop, fecha, categoria_gasto_id,
-            beneficiario, comprobante, referencia, motivo, usuario_id)
+            beneficiario, comprobante, referencia, motivo, usuario_id, clase)
          VALUES ($1, $2, $3, $4, $5, round($4::numeric * $5::numeric, 2), $6, $7,
-                 $8, $9, $10, $11, $12)
+                 $8, $9, $10, $11, $12, $13)
          RETURNING id, monto_dop`,
         [
           cuentaId,
@@ -591,6 +603,7 @@ export class BancosService {
           referencia,
           motivo,
           actorId,
+          clase,
         ],
       );
       await registrarAuditoria(c, {
@@ -607,6 +620,7 @@ export class BancosService {
           monto_dop: r.rows[0].monto_dop,
           fecha,
           categoria: categoriaNombre,
+          clase,
           beneficiario,
           comprobante,
           referencia,
@@ -614,6 +628,7 @@ export class BancosService {
         motivo,
         ip,
       });
+      await contabilizar(c, 'cuenta_mov', r.rows[0].id, actorId);
       return {
         id: r.rows[0].id,
         disponible: await this.disponible(c, cuentaId),
@@ -718,6 +733,10 @@ export class BancosService {
         motivo,
         ip,
       });
+      // Se anula el asiento del original; si el original es de antes de la
+      // fecha de inicio (no tenía asiento), el reverso lleva el suyo.
+      await revertir(c, 'cuenta_mov', movimientoId, motivo, actorId);
+      await contabilizar(c, 'cuenta_mov', n.rows[0].id, actorId);
       return { id: n.rows[0].id };
     });
   }
@@ -1156,6 +1175,7 @@ export class BancosService {
         motivo: motivo ?? undefined,
         ip,
       });
+      await contabilizar(c, 'transferencia', tId, actorId);
       return { id: tId, numero: numeroTransferencia(n), montoDop };
     });
   }

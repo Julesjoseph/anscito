@@ -1,5 +1,7 @@
+import { numeroTransferencia } from '../bancos/sql';
 import { numeroAbono } from '../cxc/estado';
 import type { DatabaseService } from '../database/database.service';
+import { numeroEnvio } from '../remesas/calculo';
 import { centavos, texto2 } from '../sanes/calendario';
 import { anularAsientoEn, registrarAsiento } from './asientos';
 import type { LineaAsiento } from './asientos';
@@ -22,7 +24,14 @@ export type Origen =
   | 'cxp_pago'
   | 'caja_mov'
   | 'caja_mov_usd'
-  | 'caja_cierre';
+  | 'caja_cierre'
+  | 'cuenta_mov'
+  | 'transferencia'
+  | 'san_recibo'
+  | 'san_entrega'
+  | 'remesa'
+  | 'remesa_entrega'
+  | 'remesa_pago';
 
 // Tabla de cada origen (lo que queda en asientos.origen_tabla).
 export const TABLA_ORIGEN: Record<Origen, string> = {
@@ -34,7 +43,20 @@ export const TABLA_ORIGEN: Record<Origen, string> = {
   caja_mov: 'caja_movimientos',
   caja_mov_usd: 'caja_movimientos_usd',
   caja_cierre: 'caja_sesiones',
+  cuenta_mov: 'cuenta_movimientos',
+  transferencia: 'transferencias',
+  san_recibo: 'san_recibos',
+  san_entrega: 'san_entregas',
+  remesa: 'remesas',
+  remesa_entrega: 'remesa_entregas',
+  remesa_pago: 'remesa_pagos_comision',
 };
+
+// De la tabla al origen (para reintentar un pendiente).
+export function origenDeTabla(tabla: string): Origen | null {
+  const x = Object.entries(TABLA_ORIGEN).find(([, t]) => t === tabla);
+  return x ? (x[0] as Origen) : null;
+}
 
 type Borrador = {
   fecha: string;
@@ -44,6 +66,10 @@ type Borrador = {
 };
 
 class ErrorContable extends Error {}
+
+// Fin del mensaje de las operaciones que esperan que el contador escoja la
+// cuenta (ingresos y retiros "otro"): solo esas se clasifican en Pendientes.
+export const PIDE_CUENTA = 'el contador debe escoger la cuenta';
 
 // ---------- Cuentas ----------
 
@@ -61,6 +87,22 @@ class Cuentas {
     if (r.rowCount === 0)
       throw new ErrorContable(`Falta la regla contable "${clave}"`);
     this.reglas.set(clave, r.rows[0].cuenta_id);
+    return r.rows[0].cuenta_id;
+  }
+
+  // Cuenta que escogió el contador desde Pendientes (la última). Si no hay,
+  // la operación queda pendiente con el mensaje.
+  async clasificada(
+    tabla: string,
+    id: string,
+    mensaje: string,
+  ): Promise<string> {
+    const r = await this.c.query<{ cuenta_id: string }>(
+      `SELECT cuenta_id FROM contabilidad_clasificaciones
+       WHERE origen_tabla = $1 AND origen_id = $2 ORDER BY created_at DESC LIMIT 1`,
+      [tabla, id],
+    );
+    if (r.rowCount === 0) throw new ErrorContable(mensaje);
     return r.rows[0].cuenta_id;
   }
 
@@ -177,16 +219,29 @@ async function patasDinero(
   c: Consulta,
   cu: Cuentas,
   p: Partida,
-  columna: 'venta_id' | 'cxc_abono_id' | 'compra_pago_id',
+  columna:
+    | 'venta_id'
+    | 'cxc_abono_id'
+    | 'compra_pago_id'
+    | 'transferencia_id'
+    | 'san_recibo_id'
+    | 'san_entrega_id'
+    | 'remesa_id'
+    | 'remesa_entrega_id'
+    | 'remesa_pago_id',
   ids: string[],
   tiposCaja: { entra: string[]; sale: string[] },
   tiposCuenta: string[],
 ) {
   if (!ids.length) return;
-  const caja = await c.query<{ tipo: string; monto: string }>(
-    `SELECT tipo, monto FROM caja_movimientos WHERE ${columna} = ANY($1::uuid[]) AND tipo = ANY($2::text[])`,
-    [ids, [...tiposCaja.entra, ...tiposCaja.sale]],
-  );
+  // La caja no tiene remesa_id (el envío sale de la billetera).
+  const caja =
+    columna === 'remesa_id'
+      ? { rows: [] as { tipo: string; monto: string }[] }
+      : await c.query<{ tipo: string; monto: string }>(
+          `SELECT tipo, monto FROM caja_movimientos WHERE ${columna} = ANY($1::uuid[]) AND tipo = ANY($2::text[])`,
+          [ids, [...tiposCaja.entra, ...tiposCaja.sale]],
+        );
   for (const m of caja.rows) {
     if (tiposCaja.entra.includes(m.tipo))
       p.debe(await cu.regla('caja_rd'), centavos(m.monto));
@@ -548,15 +603,18 @@ async function movCaja(
     p.haber(caja, monto);
   } else if (x.tipo === 'ingreso' || x.tipo === 'retiro') {
     const clave = x.clase ? CLASES[x.clase] : undefined;
-    if (!clave)
-      throw new ErrorContable(
-        `${x.tipo === 'ingreso' ? 'Ingreso' : 'Retiro'} de caja sin clasificar ("otro"): el contador debe escoger la cuenta`,
-      );
+    const contra = clave
+      ? await cu.regla(clave)
+      : await cu.clasificada(
+          TABLA_ORIGEN[usd ? 'caja_mov_usd' : 'caja_mov'],
+          id,
+          `${x.tipo === 'ingreso' ? 'Ingreso' : 'Retiro'} de caja sin clasificar ("otro"): ${PIDE_CUENTA}`,
+        );
     if (x.tipo === 'ingreso') {
       p.debe(caja, monto);
-      p.haber(await cu.regla(clave), monto, { descripcion });
+      p.haber(contra, monto, { descripcion });
     } else {
-      p.debe(await cu.regla(clave), monto, { descripcion });
+      p.debe(contra, monto, { descripcion });
       p.haber(caja, monto);
     }
   } else return null; // ventas, cuotas, depósitos… se contabilizan con su operación
@@ -642,6 +700,420 @@ async function cierreCaja(
   };
 }
 
+// ---------- Bancos ----------
+
+// Pago, cargo, interés o ingreso registrado a mano en una cuenta de banco o
+// billetera. Lo que viene de otro módulo (ventas, transferencias, SOL CASH,
+// envíos, compras, abonos) se contabiliza con su operación. El saldo inicial
+// no: ya está en el asiento de apertura. Un reverso anula el asiento del
+// original; solo si el original es de antes de la fecha de inicio (no tenía
+// asiento) se registra el reverso como asiento al revés.
+async function movCuenta(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+  clasifId = id,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    tipo: string;
+    monto: string;
+    monto_dop: string;
+    clase: string | null;
+    motivo: string | null;
+    fecha: string;
+    cuenta_id: string;
+    cuenta: string;
+    simbolo: string;
+    reverso_de: string | null;
+    cuenta_gasto: string | null;
+    categoria: string | null;
+    de_otro: boolean;
+  }>(
+    `SELECT m.tipo, m.monto, m.monto_dop, m.clase, m.motivo, to_char(m.fecha, 'YYYY-MM-DD') AS fecha,
+            m.cuenta_id, ct.nombre AS cuenta, mo.simbolo, m.reverso_de::text AS reverso_de,
+            g.cuenta_contable_id AS cuenta_gasto, g.nombre AS categoria,
+            (m.venta_id IS NOT NULL OR m.transferencia_id IS NOT NULL OR m.remesa_id IS NOT NULL
+              OR m.remesa_entrega_id IS NOT NULL OR m.remesa_pago_id IS NOT NULL
+              OR m.san_recibo_id IS NOT NULL OR m.san_entrega_id IS NOT NULL
+              OR m.compra_pago_id IS NOT NULL OR m.cxc_abono_id IS NOT NULL) AS de_otro
+     FROM cuenta_movimientos m JOIN cuentas ct ON ct.id = m.cuenta_id
+     JOIN monedas mo ON mo.codigo = ct.moneda
+     LEFT JOIN categorias_gasto g ON g.id = m.categoria_gasto_id
+     WHERE m.id = $1`,
+    [id],
+  );
+  if (r.rowCount === 0)
+    throw new ErrorContable('Movimiento de banco no encontrado');
+  const x = r.rows[0];
+  if (x.de_otro) return null;
+  const documento = `BN-${id}`;
+  if (x.tipo === 'reverso') {
+    if (!x.reverso_de) return null;
+    const inicio = await fechaInicio(c);
+    const o = await c.query<{ fecha: string }>(
+      `SELECT to_char(fecha, 'YYYY-MM-DD') AS fecha FROM cuenta_movimientos WHERE id = $1`,
+      [x.reverso_de],
+    );
+    if (!inicio || !o.rows[0] || o.rows[0].fecha >= inicio) return null;
+    const original = await movCuenta(c, cu, x.reverso_de, id);
+    if (!original) return null;
+    return {
+      fecha: x.fecha,
+      concepto: `Reverso de ${original.concepto}`.slice(0, 300),
+      documento,
+      lineas: original.lineas.map((l) => ({
+        ...l,
+        debito: l.credito,
+        credito: l.debito,
+      })),
+    };
+  }
+  const banco = await cu.banco(x.cuenta_id);
+  const monto = centavos(x.monto_dop);
+  const descripcion = x.motivo?.slice(0, 300) ?? null;
+  const p = new Partida();
+  let que: string;
+  if (x.tipo === 'pago') {
+    if (!x.cuenta_gasto)
+      throw new ErrorContable(
+        `La categoría de gasto "${x.categoria}" no tiene cuenta contable`,
+      );
+    p.debe(x.cuenta_gasto, monto, { descripcion });
+    p.haber(banco, monto);
+    que = `Pago (${x.categoria})`;
+  } else if (x.tipo === 'cargo') {
+    p.debe(await cu.regla('cargos_bancarios'), monto, { descripcion });
+    p.haber(banco, monto);
+    que = 'Cargo del banco';
+  } else if (x.tipo === 'interes') {
+    p.debe(banco, monto);
+    p.haber(await cu.regla('intereses_ganados'), monto, { descripcion });
+    que = 'Intereses';
+  } else if (x.tipo === 'ingreso') {
+    const clave = x.clase ? CLASES[x.clase] : undefined;
+    const contra = clave
+      ? await cu.regla(clave)
+      : await cu.clasificada(
+          TABLA_ORIGEN.cuenta_mov,
+          clasifId,
+          `Ingreso de banco sin clasificar ("otro"): ${PIDE_CUENTA}`,
+        );
+    p.debe(banco, monto);
+    p.haber(contra, monto, { descripcion });
+    que = 'Ingreso';
+  } else return null; // saldo inicial (va en la apertura) y los demás tipos
+  const moneda = x.simbolo === 'RD$' ? '' : ` (${x.simbolo}${x.monto})`;
+  return {
+    fecha: x.fecha,
+    concepto:
+      `${que} en ${x.cuenta}${moneda}${x.motivo ? `: ${x.motivo}` : ''}`.slice(
+        0,
+        300,
+      ),
+    documento,
+    lineas: p.juntas(),
+  };
+}
+
+// Transferencia entre cuentas, o entre la caja y una cuenta: el dinero
+// cambia de lugar (no es ingreso ni gasto). Las dos puntas van por el mismo
+// valor en RD$ (el lado en pesos manda; si ninguno, la tasa del día).
+async function transferencia(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    numero: string;
+    fecha: string;
+    origen: string;
+    destino: string;
+    motivo: string | null;
+  }>(
+    `SELECT t.numero,
+            COALESCE((SELECT to_char(min(m.fecha), 'YYYY-MM-DD') FROM cuenta_movimientos m WHERE m.transferencia_id = t.id),
+                     to_char((t.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD')) AS fecha,
+            COALESCE(co.nombre, cjo.nombre) AS origen, COALESCE(cd.nombre, cjd.nombre) AS destino, t.motivo
+     FROM transferencias t
+     LEFT JOIN cuentas co ON co.id = t.origen_cuenta_id
+     LEFT JOIN cuentas cd ON cd.id = t.destino_cuenta_id
+     LEFT JOIN caja_sesiones so ON so.id = t.origen_sesion_id LEFT JOIN cajas cjo ON cjo.id = so.caja_id
+     LEFT JOIN caja_sesiones sd ON sd.id = t.destino_sesion_id LEFT JOIN cajas cjd ON cjd.id = sd.caja_id
+     WHERE t.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0) throw new ErrorContable('Transferencia no encontrada');
+  const x = r.rows[0];
+  const p = new Partida();
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'transferencia_id',
+    [id],
+    { entra: ['desde_cuenta'], sale: ['deposito'] },
+    ['transferencia_entrada', 'transferencia_salida'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  const documento = numeroTransferencia(x.numero);
+  return {
+    fecha: x.fecha,
+    concepto:
+      `Transferencia ${documento}: ${x.origen} → ${x.destino}${x.motivo ? ` · ${x.motivo}` : ''}`.slice(
+        0,
+        300,
+      ),
+    documento,
+    lineas: p.juntas(),
+  };
+}
+
+// ---------- SOL CASH ----------
+// (Los números R-000001 y M-000001 son los mismos de sanes.service.)
+
+// Cobro de cuotas: las cuotas son dinero de los participantes (se deben);
+// solo la mora es ganancia de SCITO.
+async function sanRecibo(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    numero: string;
+    fecha: string;
+    tercero_id: string;
+    persona: string;
+    cuotas: string;
+    mora: string;
+    san: string;
+  }>(
+    `SELECT r.numero, to_char((r.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
+            r.tercero_id, t.nombre AS persona, r.cuotas, r.mora, s.nombre AS san
+     FROM san_recibos r JOIN terceros t ON t.id = r.tercero_id JOIN sanes s ON s.id = r.san_id
+     WHERE r.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0)
+    throw new ErrorContable('Recibo de SOL CASH no encontrado');
+  const x = r.rows[0];
+  const quien = { terceroId: x.tercero_id };
+  const p = new Partida();
+  p.haber(await cu.regla('sol_cash_cuotas'), centavos(x.cuotas), quien);
+  p.haber(await cu.regla('moras_sol_cash'), centavos(x.mora), quien);
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'san_recibo_id',
+    [id],
+    { entra: ['san_cuota'], sale: [] },
+    ['san_cuota'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  const documento = `R-${String(x.numero).padStart(6, '0')}`;
+  return {
+    fecha: x.fecha,
+    concepto: `SOL CASH ${documento} · ${x.persona} (${x.san})`,
+    documento,
+    lineas: p.juntas(),
+  };
+}
+
+// Entrega de la mano: sale el dinero de los participantes; la comisión es
+// ganancia de SCITO y lo que debía (cuotas y moras) se paga con la mano.
+async function sanEntrega(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    numero: string;
+    fecha: string;
+    tercero_id: string;
+    persona: string;
+    bruto: string;
+    comision: string;
+    cuotas: string;
+    moras: string;
+    san: string;
+  }>(
+    `SELECT e.numero, to_char((e.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
+            p.tercero_id, t.nombre AS persona, e.bruto, e.comision, s.nombre AS san,
+            COALESCE((SELECT sum(cuota) FROM san_pagos WHERE entrega_id = e.id), 0)::numeric(16,2) AS cuotas,
+            COALESCE((SELECT sum(mora) FROM san_pagos WHERE entrega_id = e.id), 0)::numeric(16,2) AS moras
+     FROM san_entregas e JOIN san_participaciones p ON p.id = e.participacion_id
+     JOIN terceros t ON t.id = p.tercero_id JOIN sanes s ON s.id = e.san_id
+     WHERE e.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0)
+    throw new ErrorContable('Entrega de SOL CASH no encontrada');
+  const x = r.rows[0];
+  const quien = { terceroId: x.tercero_id };
+  const p = new Partida();
+  const cuotas = await cu.regla('sol_cash_cuotas');
+  p.debe(cuotas, centavos(x.bruto), quien);
+  p.haber(await cu.regla('comision_sol_cash'), centavos(x.comision), quien);
+  p.haber(cuotas, centavos(x.cuotas), {
+    ...quien,
+    descripcion: 'Cuotas descontadas de la mano',
+  });
+  p.haber(await cu.regla('moras_sol_cash'), centavos(x.moras), quien);
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'san_entrega_id',
+    [id],
+    { entra: [], sale: ['san_mano'] },
+    ['san_mano'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  const documento = `M-${String(x.numero).padStart(6, '0')}`;
+  return {
+    fecha: x.fecha,
+    concepto: `SOL CASH mano ${documento} · ${x.persona} (${x.san})`,
+    documento,
+    lineas: p.juntas(),
+  };
+}
+
+// ---------- SCITO TRANSFER ----------
+
+// Envío confirmado: el agente debe lo que cobró (envío + comisión), las
+// gourdes salen de la billetera y la comisión es ganancia. La parte del
+// agente autorizado es gasto el día que se le paga (decisión del dueño).
+async function remesa(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    numero: string;
+    fecha: string;
+    estado: string;
+    origen: string;
+    total_pagar: string;
+    comision: string;
+    agente: string;
+    beneficiario: string;
+  }>(
+    `SELECT e.numero, to_char((e.resuelto_en AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
+            e.estado, e.origen, e.total_pagar, e.comision,
+            a.codigo || ' ' || a.nombre AS agente, e.beneficiario_nombre AS beneficiario
+     FROM remesas e JOIN remesa_agentes a ON a.id = e.agente_id WHERE e.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0) throw new ErrorContable('Envío no encontrado');
+  const x = r.rows[0];
+  if (x.estado !== 'confirmado' || x.origen !== 'sistema') return null;
+  const agente = { descripcion: x.agente };
+  const p = new Partida();
+  p.debe(await cu.regla('agentes_envios'), centavos(x.total_pagar), agente);
+  p.haber(await cu.regla('comision_envios'), centavos(x.comision));
+  await patasDinero(c, cu, p, 'remesa_id', [id], { entra: [], sale: [] }, [
+    'remesa',
+  ]);
+  await cerrarRedondeo(p, cu, 0n);
+  const documento = numeroEnvio(x.numero);
+  return {
+    fecha: x.fecha,
+    concepto: `Envío ${documento} · ${x.agente} → ${x.beneficiario}`.slice(
+      0,
+      300,
+    ),
+    documento,
+    lineas: p.juntas(),
+  };
+}
+
+// El agente entrega lo cobrado (a la caja o a una cuenta).
+async function remesaEntrega(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    fecha: string;
+    dia: string;
+    monto: string;
+    agente: string;
+  }>(
+    `SELECT to_char((e.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
+            to_char(e.dia, 'YYYY-MM-DD') AS dia, e.monto, a.codigo || ' ' || a.nombre AS agente
+     FROM remesa_entregas e JOIN remesa_agentes a ON a.id = e.agente_id WHERE e.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0)
+    throw new ErrorContable('Entrega del agente no encontrada');
+  const x = r.rows[0];
+  const p = new Partida();
+  p.haber(await cu.regla('agentes_envios'), centavos(x.monto), {
+    descripcion: x.agente,
+  });
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'remesa_entrega_id',
+    [id],
+    { entra: ['ingreso'], sale: [] },
+    ['ingreso'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  return {
+    fecha: x.fecha,
+    concepto: `Entrega de envíos de ${x.agente} (${x.dia})`,
+    documento: null,
+    lineas: p.juntas(),
+  };
+}
+
+// Pago de la comisión a un agente autorizado: gasto del día del pago.
+async function remesaPago(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    fecha: string;
+    desde: string;
+    hasta: string;
+    cantidad: number;
+    monto: string;
+    agente: string;
+  }>(
+    `SELECT to_char((p.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
+            to_char(p.desde, 'YYYY-MM-DD') AS desde, to_char(p.hasta, 'YYYY-MM-DD') AS hasta,
+            p.cantidad, p.monto, a.codigo || ' ' || a.nombre AS agente
+     FROM remesa_pagos_comision p JOIN remesa_agentes a ON a.id = p.agente_id WHERE p.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0)
+    throw new ErrorContable('Pago de comisión no encontrado');
+  const x = r.rows[0];
+  const p = new Partida();
+  p.debe(await cu.regla('comision_agentes'), centavos(x.monto), {
+    descripcion: x.agente,
+  });
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'remesa_pago_id',
+    [id],
+    { entra: [], sale: ['gasto'] },
+    ['pago'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  return {
+    fecha: x.fecha,
+    concepto: `Comisión de envíos de ${x.agente} (${x.desde} a ${x.hasta}, ${x.cantidad} envíos)`,
+    documento: null,
+    lineas: p.juntas(),
+  };
+}
+
 async function armar(
   c: Consulta,
   origen: Origen,
@@ -665,6 +1137,20 @@ async function armar(
       return movCaja(c, cu, id, true);
     case 'caja_cierre':
       return cierreCaja(c, cu, id);
+    case 'cuenta_mov':
+      return movCuenta(c, cu, id);
+    case 'transferencia':
+      return transferencia(c, cu, id);
+    case 'san_recibo':
+      return sanRecibo(c, cu, id);
+    case 'san_entrega':
+      return sanEntrega(c, cu, id);
+    case 'remesa':
+      return remesa(c, cu, id);
+    case 'remesa_entrega':
+      return remesaEntrega(c, cu, id);
+    case 'remesa_pago':
+      return remesaPago(c, cu, id);
   }
 }
 
@@ -704,7 +1190,10 @@ export async function contabilizar(
        AND reverso_de IS NULL AND estado = 'activo'`,
     [tabla, id],
   );
-  if ((ya.rowCount ?? 0) > 0) return 'omitido';
+  if ((ya.rowCount ?? 0) > 0) {
+    await resolverPendiente(c, tabla, id, usuarioId);
+    return 'omitido';
+  }
   await c.query('SAVEPOINT conta_auto');
   let fecha: string | null = null;
   let documento: string | null = null;

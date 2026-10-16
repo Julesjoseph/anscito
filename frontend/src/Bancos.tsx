@@ -395,6 +395,7 @@ function FormMovimiento({
   const [tasa, setTasa] = useState('')
   const [dia, setDia] = useState(hoy())
   const [categoria, setCategoria] = useState('')
+  const [clase, setClase] = useState('')
   const [beneficiario, setBeneficiario] = useState('')
   const [comprobante, setComprobante] = useState('')
   const [referencia, setReferencia] = useState('')
@@ -414,6 +415,7 @@ function FormMovimiento({
               tasa: extranjera ? tasa.trim() : undefined,
               fecha: dia,
               categoriaGastoId: tipo === 'pago' ? categoria : undefined,
+              clase: tipo === 'ingreso' ? clase : undefined,
               beneficiario: beneficiario.trim() || undefined,
               comprobante: comprobante.trim() || undefined,
               referencia: referencia.trim() || undefined,
@@ -450,7 +452,7 @@ function FormMovimiento({
             ? 'Lo que cobra el banco: comisiones, impuesto 0.15%, mantenimiento (resta).'
             : tipo === 'interes'
               ? 'Intereses que pagó el banco (suma).'
-              : 'Dinero que entra y no viene de una venta. Si es capital del dueño o dinero de terceros, dígalo en el motivo (suma).'}{' '}
+              : 'Dinero que entra y no viene de una venta, de un cobro ni de una transferencia entre sus cuentas (suma).'}{' '}
         Disponible: {enMoneda(cuenta.simbolo, cuenta.disponible)}.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -473,6 +475,17 @@ function FormMovimiento({
                   {c.nombre}
                 </option>
               ))}
+            </select>
+          </label>
+        )}
+        {tipo === 'ingreso' && (
+          <label className="flex flex-col gap-1 text-gray-600">
+            ¿Qué fue?
+            <select value={clase} onChange={(e) => setClase(e.target.value)} className={CAMPO}>
+              <option value="">Seleccione…</option>
+              <option value="aporte">Aporte del dueño (su dinero)</option>
+              <option value="prestamo">Préstamo recibido</option>
+              <option value="otro">Otro (el contador escoge la cuenta)</option>
             </select>
           </label>
         )}
@@ -500,7 +513,7 @@ function FormMovimiento({
       {error && <CajaError>{error}</CajaError>}
       <button
         type="submit"
-        disabled={guardando || !positivo(monto) || motivo.trim().length < 5 || (tipo === 'pago' && !categoria) || (extranjera && !TASA.test(tasa.trim()))}
+        disabled={guardando || !positivo(monto) || motivo.trim().length < 5 || (tipo === 'pago' && !categoria) || (tipo === 'ingreso' && !clase) || (extranjera && !TASA.test(tasa.trim()))}
         className={BOTON_PRINCIPAL}
       >
         {guardando ? 'Guardando…' : 'Registrar'}

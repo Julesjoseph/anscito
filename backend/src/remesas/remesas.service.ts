@@ -8,6 +8,7 @@ import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE } from '../bancos/sql';
 import { SQL_ESPERADO } from '../caja/sql';
+import { contabilizar } from '../contabilidad/motor';
 import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { enmascarar } from '../terceros/documentos';
@@ -888,6 +889,7 @@ export class RemesasService {
           },
           ip,
         });
+        await contabilizar(c, 'remesa', id, actorId);
         return { ok: true };
       });
     } catch (err) {
@@ -1195,6 +1197,7 @@ export class RemesasService {
         },
         ip,
       });
+      await contabilizar(c, 'remesa_entrega', e.rows[0].id, actorId);
       return {
         id: e.rows[0].id,
         debe: (await this.saldos(c, agenteId))[0].debe,
@@ -1354,6 +1357,7 @@ export class RemesasService {
         },
         ip,
       });
+      await contabilizar(c, 'remesa_pago', pagoId, actorId);
       return {
         id: pagoId,
         monto: t.monto,
