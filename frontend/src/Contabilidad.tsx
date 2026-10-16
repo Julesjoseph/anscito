@@ -44,6 +44,7 @@ import type {
 } from './api'
 import { BOTON_PELIGRO, BOTON_PRINCIPAL, BOTON_SECUNDARIO, CAMPO, CajaError, Ventana } from './componentes'
 import { dinero, mensajeDe } from './formato'
+import { Estados, Mayor } from './Libros'
 
 // Contabilidad: catálogo de cuentas, asientos (manuales, de apertura y
 // automáticos), reglas (qué cuenta usa cada operación), pendientes, meses
@@ -137,7 +138,7 @@ function Campo({ etiqueta, children }: { etiqueta: string; children: ReactNode }
 }
 
 export default function Contabilidad({ token, permisos, onSesionVencida }: Props) {
-  const [pestana, setPestana] = useState<'catalogo' | 'asientos' | 'reglas' | 'pendientes' | 'lineas' | 'meses' | 'balanza'>('catalogo')
+  const [pestana, setPestana] = useState<'catalogo' | 'asientos' | 'mayor' | 'estados' | 'reglas' | 'pendientes' | 'lineas' | 'meses' | 'balanza'>('catalogo')
   const [prep, setPrep] = useState<PrepararContabilidad | null>(null)
   const [cuentas, setCuentas] = useState<CuentaContable[] | null>(null)
   const [error, setError] = useState('')
@@ -195,7 +196,9 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
         {(
           [
             ['catalogo', 'Catálogo de cuentas'],
-            ['asientos', 'Asientos'],
+            ['asientos', 'Asientos (diario)'],
+            ['mayor', 'Libro mayor'],
+            ['estados', 'Estados financieros'],
             ['reglas', 'Reglas'],
             ['pendientes', 'Pendientes'],
             ['lineas', 'Por línea de negocio'],
@@ -233,6 +236,10 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
           onCambio={() => void cargar()}
           onSesionVencida={onSesionVencida}
         />
+      ) : pestana === 'mayor' ? (
+        <Mayor token={token} hoy={prep.hoy} cuentas={cuentas} onSesionVencida={onSesionVencida} />
+      ) : pestana === 'estados' ? (
+        <Estados token={token} hoy={prep.hoy} puedeCerrar={permisos.includes('contabilidad.cerrar')} onSesionVencida={onSesionVencida} />
       ) : pestana === 'reglas' ? (
         <Reglas token={token} cuentas={cuentas} puedeEditar={permisos.includes('contabilidad.catalogo')} onSesionVencida={onSesionVencida} />
       ) : pestana === 'pendientes' ? (
