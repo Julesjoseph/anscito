@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FileCheck2,
   FileText,
+  FileSpreadsheet,
   HandCoins,
   Landmark,
   LayoutDashboard,
@@ -29,6 +30,7 @@ import type { AvisoGastoFijo, Marca, Perfil } from './api'
 import Empresa from './Empresa'
 import Envios from './Envios'
 import Facturacion from './Facturacion'
+import Fiscal from './Fiscal'
 import Panel from './Panel'
 import Reportes from './Reportes'
 import { LogoMarca } from './marca'
@@ -157,6 +159,13 @@ const MODULOS: Modulo[] = [
     Icono: FileCheck2,
     listo: true,
     permiso: 'facturacion.ver',
+  },
+  {
+    id: 'fiscal',
+    nombre: 'Formatos DGII (606/607)',
+    Icono: FileSpreadsheet,
+    listo: true,
+    permiso: 'fiscal.ver',
   },
   { id: 'nomina', nombre: 'Nómina', Icono: Briefcase, listo: false },
   {
@@ -355,6 +364,8 @@ export default function Layout({
             permisos={perfil.permisos}
             onSesionVencida={onSalir}
           />
+        ) : pagina === 'fiscal' ? (
+          <Fiscal token={token} onSesionVencida={onSalir} />
         ) : pagina === 'facturacion' ? (
           <Facturacion
             token={token}

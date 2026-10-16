@@ -36,7 +36,7 @@ export type Rol = { id: string; codigo: string; nombre: string }
 
 export class SesionVencida extends Error {}
 
-async function llamar<T>(
+export async function llamar<T>(
   metodo: string,
   ruta: string,
   token: string,
@@ -2606,6 +2606,7 @@ export const ticketSan = (token: string, tipo: 'recibos' | 'entregas', id: strin
 
 export type PrepararCompras = {
   tiposGasto: { codigo: string; nombre: string }[]
+  tiposRetencionIsr: { codigo: string; nombre: string }[]
   unidadesNegocio: { id: string; nombre: string }[]
   cajas: { id: string; nombre: string; sesion_id: string | null }[]
   cuentas: { id: string; nombre: string }[]
@@ -2648,6 +2649,7 @@ export type DatosCompra = {
   gastoFijoId?: string
   gastoFijoMes?: string // YYYY-MM: mes al que corresponde la factura
   unidadNegocioId?: string // línea de negocio del gasto (vacío = general)
+  tipoRetencionIsr?: string // con ISR retenido: tipo de retención (lo pide el 606)
 }
 
 export type FilaCompra = {

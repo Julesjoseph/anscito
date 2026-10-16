@@ -270,6 +270,7 @@ function NuevaFactura({
   const [itbis, setItbis] = useState(gastoFijo?.itbis ?? '')
   const [itbisRetenido, setItbisRetenido] = useState('')
   const [isrRetenido, setIsrRetenido] = useState('')
+  const [tipoRetencion, setTipoRetencion] = useState('')
   const [condicion, setCondicion] = useState<'contado' | 'credito'>(gastoFijo ? 'credito' : 'contado')
   const [vencimiento, setVencimiento] = useState(gastoFijo?.fecha ?? '')
   const [forma, setForma] = useState<'efectivo' | 'banco'>('efectivo')
@@ -334,6 +335,7 @@ function NuevaFactura({
         itbis,
         itbisRetenido,
         isrRetenido,
+        tipoRetencionIsr: centavos(isrRetenido) > 0n ? tipoRetencion : undefined,
         descripcion,
         notas: '',
         gastoFijoId: gasto?.id,
@@ -537,6 +539,19 @@ function NuevaFactura({
                 ISR retenido (RD$)
                 <input className={CAMPO} value={isrRetenido} inputMode="decimal" onChange={(e) => setIsrRetenido(e.target.value)} placeholder="0.00" />
               </label>
+              {centavos(isrRetenido) > 0n && (
+                <label className="flex flex-col gap-1 sm:col-span-2">
+                  Tipo de retención del ISR (lo pide el 606)
+                  <select className={CAMPO} value={tipoRetencion} onChange={(e) => setTipoRetencion(e.target.value)}>
+                    <option value="">Seleccione…</option>
+                    {prep.tiposRetencionIsr.map((t) => (
+                      <option key={t.codigo} value={t.codigo}>
+                        {t.codigo} · {t.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
             <p className="mt-1 text-xs text-amber-700">Cuándo y cuánto retener lo decide su contador.</p>
           </details>
@@ -626,7 +641,7 @@ function NuevaFactura({
           <div className="flex justify-between text-lg font-medium"><dt>{condicion === 'contado' ? 'Paga ahora' : 'Queda debiendo'}</dt><dd>{dinero(texto2(aPagar))}</dd></div>
         </dl>
         {error && <CajaError>{error}</CajaError>}
-        <button type="submit" className={`${BOTON_PRINCIPAL} h-12`} disabled={guardando || !proveedor || total <= 0n || aPagar < 0n}>
+        <button type="submit" className={`${BOTON_PRINCIPAL} h-12`} disabled={guardando || !proveedor || total <= 0n || aPagar < 0n || (centavos(isrRetenido) > 0n && !tipoRetencion)}>
           <PackagePlus size={18} /> {guardando ? 'Registrando…' : 'Registrar factura'}
         </button>
       </section>

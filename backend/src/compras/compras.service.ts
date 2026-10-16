@@ -94,24 +94,29 @@ export class ComprasService {
   // ---------- Datos para la pantalla ----------
 
   async preparar() {
-    const [tipos, cajas, cuentas, hoy, unidades] = await Promise.all([
-      this.db.query(
-        'SELECT codigo, nombre FROM tipos_gasto WHERE is_active ORDER BY orden',
-      ),
-      this.db.query(
-        `SELECT c.id, c.nombre, s.id AS sesion_id FROM cajas c
+    const [tipos, cajas, cuentas, hoy, unidades, retenciones] =
+      await Promise.all([
+        this.db.query(
+          'SELECT codigo, nombre FROM tipos_gasto WHERE is_active ORDER BY orden',
+        ),
+        this.db.query(
+          `SELECT c.id, c.nombre, s.id AS sesion_id FROM cajas c
          LEFT JOIN caja_sesiones s ON s.caja_id = c.id AND s.estado = 'abierta'
          WHERE c.is_active ORDER BY lower(c.nombre)`,
-      ),
-      this.db.query(
-        `SELECT id, nombre FROM cuentas WHERE is_active AND moneda = 'DOP' ORDER BY lower(nombre)`,
-      ),
-      this.hoy(this.db),
-      this.db.query(SQL_UNIDADES),
-    ]);
+        ),
+        this.db.query(
+          `SELECT id, nombre FROM cuentas WHERE is_active AND moneda = 'DOP' ORDER BY lower(nombre)`,
+        ),
+        this.hoy(this.db),
+        this.db.query(SQL_UNIDADES),
+        this.db.query(
+          'SELECT codigo, nombre FROM tipos_retencion_isr WHERE is_active ORDER BY orden',
+        ),
+      ]);
     return {
       tiposGasto: tipos.rows,
       unidadesNegocio: unidades.rows,
+      tiposRetencionIsr: retenciones.rows,
       cajas: cajas.rows,
       cuentas: cuentas.rows,
       hoy,
@@ -391,6 +396,13 @@ export class ComprasService {
       throw new BadRequestException(
         'El ITBIS retenido no puede ser mayor que el ITBIS de la factura',
       );
+    // Con ISR retenido, el 606 pide el tipo de retención (códigos DGII).
+    const tipoRetencionIsr =
+      centavos(isrRetenido) > 0n ? texto(datos.tipoRetencionIsr) : null;
+    if (tipoRetencionIsr !== null && !/^\d{2}$/.test(tipoRetencionIsr))
+      throw new BadRequestException(
+        'Seleccione el tipo de retención del ISR (lo pide el 606)',
+      );
     const descripcion = opcional(datos.descripcion, 300, 'Descripción');
     const gastoFijoId = texto(datos.gastoFijoId).toLowerCase() || null;
     if (gastoFijoId && !UUID.test(gastoFijoId))
@@ -429,6 +441,14 @@ export class ComprasService {
           throw new BadRequestException('Tipo de gasto inválido');
         // De qué línea de negocio es el gasto (opcional: vacío = generales).
         const unidad = await leerUnidad(c, datos.unidadNegocioId);
+        if (tipoRetencionIsr) {
+          const tr = await c.query(
+            'SELECT 1 FROM tipos_retencion_isr WHERE codigo = $1 AND is_active',
+            [tipoRetencionIsr],
+          );
+          if (tr.rowCount === 0)
+            throw new BadRequestException('Tipo de retención del ISR inválido');
+        }
         if (gastoFijoId) {
           const gf = await c.query(
             'SELECT 1 FROM gastos_fijos WHERE id = $1 AND proveedor_id = $2',
@@ -536,8 +556,8 @@ export class ComprasService {
           `INSERT INTO compras (numero, proveedor_id, sucursal_id, ncf, fecha_comprobante, tipo_gasto,
                                 condicion, vencimiento, monto_bienes, monto_servicios, itbis,
                                 itbis_retenido, isr_retenido, total, a_pagar, descripcion, notas, created_by,
-                                gasto_fijo_id, gasto_fijo_mes, unidad_negocio_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                                gasto_fijo_id, gasto_fijo_mes, unidad_negocio_id, tipo_retencion_isr)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
            RETURNING id`,
           [
             n,
@@ -561,6 +581,7 @@ export class ComprasService {
             gastoFijoId,
             gastoFijoId ? `${(mesTexto || fecha).slice(0, 7)}-01` : null,
             unidad?.id ?? null,
+            tipoRetencionIsr,
           ],
         );
         const compraId = r.rows[0].id;
