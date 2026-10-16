@@ -47,6 +47,7 @@ import {
   CAMPO,
   CajaError,
   Ventana,
+  SelectorLinea,
 } from './componentes'
 import { dinero, mensajeDe } from './formato'
 
@@ -395,6 +396,7 @@ function FormMovimiento({
   const [tasa, setTasa] = useState('')
   const [dia, setDia] = useState(hoy())
   const [categoria, setCategoria] = useState('')
+  const [unidad, setUnidad] = useState('')
   const [clase, setClase] = useState('')
   const [beneficiario, setBeneficiario] = useState('')
   const [comprobante, setComprobante] = useState('')
@@ -415,6 +417,7 @@ function FormMovimiento({
               tasa: extranjera ? tasa.trim() : undefined,
               fecha: dia,
               categoriaGastoId: tipo === 'pago' ? categoria : undefined,
+              unidadNegocioId: tipo === 'pago' ? unidad || undefined : undefined,
               clase: tipo === 'ingreso' ? clase : undefined,
               beneficiario: beneficiario.trim() || undefined,
               comprobante: comprobante.trim() || undefined,
@@ -489,6 +492,7 @@ function FormMovimiento({
             </select>
           </label>
         )}
+        {tipo === 'pago' && <SelectorLinea unidades={prep.unidadesNegocio} valor={unidad} setValor={setUnidad} />}
         {tipo === 'pago' && (
           <label className="flex flex-col gap-1 text-gray-600">
             A quién se pagó (opcional)

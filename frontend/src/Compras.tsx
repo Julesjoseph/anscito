@@ -26,7 +26,7 @@ import type {
   TipoDocumento,
 } from './api'
 import { cajaDeEstaComputadora } from './cajaLocal'
-import { AREA, BOTON_PELIGRO, BOTON_PRINCIPAL, BOTON_SECUNDARIO, CAMPO, CajaError, Ventana } from './componentes'
+import { AREA, BOTON_PELIGRO, BOTON_PRINCIPAL, BOTON_SECUNDARIO, CAMPO, CajaError, SelectorLinea, Ventana } from './componentes'
 import { cantidad as verCantidad, dinero, mensajeDe } from './formato'
 
 // Compras: facturas de proveedor. Los productos entran al inventario; de
@@ -263,6 +263,7 @@ function NuevaFactura({
   const [ncf, setNcf] = useState('')
   const [fecha, setFecha] = useState(prep.hoy)
   const [tipoGasto, setTipoGasto] = useState(gastoFijo?.tipo_gasto ?? '09')
+  const [unidad, setUnidad] = useState('')
   const [lineas, setLineas] = useState<LineaForm[]>([])
   const [otrosBienes, setOtrosBienes] = useState('')
   const [servicios, setServicios] = useState(gastoFijo?.monto ?? '')
@@ -337,6 +338,7 @@ function NuevaFactura({
         notas: '',
         gastoFijoId: gasto?.id,
         gastoFijoMes: gasto ? gasto.fecha.slice(0, 7) : undefined,
+        unidadNegocioId: unidad || undefined,
         pago:
           condicion === 'contado'
             ? { forma, cajaId: forma === 'efectivo' ? cajaId : undefined, cuentaId: forma === 'banco' ? cuentaId : undefined, referencia: referencia.trim() || undefined }
@@ -437,6 +439,7 @@ function NuevaFactura({
                 ))}
               </select>
             </label>
+            <SelectorLinea unidades={prep.unidadesNegocio} valor={unidad} setValor={setUnidad} />
           </div>
           {!ncf.trim() && <p className="text-xs text-gray-500">Sin NCF la factura no va al 606 ni se puede rebajar su ITBIS.</p>}
         </section>

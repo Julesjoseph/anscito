@@ -106,6 +106,16 @@ class Cuentas {
     return r.rows[0].cuenta_id;
   }
 
+  // Línea de negocio configurada (configuracion "lineas.…"); vacía = generales.
+  async unidad(clave: 'sol_cash' | 'envios'): Promise<string | null> {
+    const r = await this.c.query<{ id: string }>(
+      `SELECT u.id FROM configuracion k JOIN unidades_negocio u ON u.id::text = k.valor
+       WHERE k.clave = $1`,
+      [`lineas.unidad_${clave}`],
+    );
+    return r.rows[0]?.id ?? null;
+  }
+
   // Cuenta contable de una cuenta de banco o billetera.
   async banco(cuentaId: string): Promise<string> {
     const r = await this.c.query<{
@@ -425,10 +435,12 @@ async function compra(
     cuenta_gasto: string | null;
     tipo_gasto: string;
     lineas: string;
+    unidad: string | null;
   }>(
     `SELECT c.numero, to_char(c.fecha_comprobante, 'YYYY-MM-DD') AS fecha, c.ncf, c.proveedor_id,
             t.nombre AS proveedor, c.monto_bienes, c.monto_servicios, c.itbis, c.itbis_retenido,
             c.isr_retenido, c.a_pagar, tg.cuenta_contable_id AS cuenta_gasto, c.tipo_gasto,
+            c.unidad_negocio_id AS unidad,
             COALESCE((SELECT sum(subtotal) FROM compra_lineas WHERE compra_id = c.id), 0)::numeric(16,2) AS lineas
      FROM compras c JOIN terceros t ON t.id = c.proveedor_id
      JOIN tipos_gasto tg ON tg.codigo = c.tipo_gasto
@@ -450,7 +462,7 @@ async function compra(
       throw new ErrorContable(
         `El tipo de gasto ${x.tipo_gasto} no tiene cuenta contable`,
       );
-    p.debe(x.cuenta_gasto, resto);
+    p.debe(x.cuenta_gasto, resto, { unidadNegocioId: x.unidad });
   }
   p.debe(await cu.regla('itbis_compras'), centavos(x.itbis));
   p.haber(await cu.regla('itbis_retenido'), centavos(x.itbis_retenido), prov);
@@ -574,15 +586,16 @@ async function movCaja(
     fecha: string;
     cuenta_gasto: string | null;
     categoria: string | null;
+    unidad: string | null;
   }>(
     usd
       ? `SELECT m.tipo, m.monto_dop AS monto, m.clase, m.motivo,
                 to_char((m.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
-                NULL::uuid AS cuenta_gasto, NULL AS categoria
+                NULL::uuid AS cuenta_gasto, NULL AS categoria, NULL::uuid AS unidad
          FROM caja_movimientos_usd m WHERE m.id = $1`
       : `SELECT m.tipo, m.monto, m.clase, m.motivo,
                 to_char((m.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha,
-                g.cuenta_contable_id AS cuenta_gasto, g.nombre AS categoria
+                g.cuenta_contable_id AS cuenta_gasto, g.nombre AS categoria, m.unidad_negocio_id AS unidad
          FROM caja_movimientos m LEFT JOIN categorias_gasto g ON g.id = m.categoria_gasto_id
          WHERE m.id = $1`,
     [id, await zona(c)],
@@ -599,7 +612,10 @@ async function movCaja(
       throw new ErrorContable(
         `La categoría de gasto "${x.categoria}" no tiene cuenta contable`,
       );
-    p.debe(x.cuenta_gasto, monto, { descripcion });
+    p.debe(x.cuenta_gasto, monto, {
+      descripcion,
+      unidadNegocioId: x.unidad,
+    });
     p.haber(caja, monto);
   } else if (x.tipo === 'ingreso' || x.tipo === 'retiro') {
     const clave = x.clase ? CLASES[x.clase] : undefined;
@@ -727,11 +743,12 @@ async function movCuenta(
     reverso_de: string | null;
     cuenta_gasto: string | null;
     categoria: string | null;
+    unidad: string | null;
     de_otro: boolean;
   }>(
     `SELECT m.tipo, m.monto, m.monto_dop, m.clase, m.motivo, to_char(m.fecha, 'YYYY-MM-DD') AS fecha,
             m.cuenta_id, ct.nombre AS cuenta, mo.simbolo, m.reverso_de::text AS reverso_de,
-            g.cuenta_contable_id AS cuenta_gasto, g.nombre AS categoria,
+            g.cuenta_contable_id AS cuenta_gasto, g.nombre AS categoria, m.unidad_negocio_id AS unidad,
             (m.venta_id IS NOT NULL OR m.transferencia_id IS NOT NULL OR m.remesa_id IS NOT NULL
               OR m.remesa_entrega_id IS NOT NULL OR m.remesa_pago_id IS NOT NULL
               OR m.san_recibo_id IS NOT NULL OR m.san_entrega_id IS NOT NULL
@@ -778,7 +795,10 @@ async function movCuenta(
       throw new ErrorContable(
         `La categoría de gasto "${x.categoria}" no tiene cuenta contable`,
       );
-    p.debe(x.cuenta_gasto, monto, { descripcion });
+    p.debe(x.cuenta_gasto, monto, {
+      descripcion,
+      unidadNegocioId: x.unidad,
+    });
     p.haber(banco, monto);
     que = `Pago (${x.categoria})`;
   } else if (x.tipo === 'cargo') {
@@ -899,7 +919,10 @@ async function sanRecibo(
   const quien = { terceroId: x.tercero_id };
   const p = new Partida();
   p.haber(await cu.regla('sol_cash_cuotas'), centavos(x.cuotas), quien);
-  p.haber(await cu.regla('moras_sol_cash'), centavos(x.mora), quien);
+  p.haber(await cu.regla('moras_sol_cash'), centavos(x.mora), {
+    ...quien,
+    unidadNegocioId: await cu.unidad('sol_cash'),
+  });
   await patasDinero(
     c,
     cu,
@@ -953,12 +976,13 @@ async function sanEntrega(
   const p = new Partida();
   const cuotas = await cu.regla('sol_cash_cuotas');
   p.debe(cuotas, centavos(x.bruto), quien);
-  p.haber(await cu.regla('comision_sol_cash'), centavos(x.comision), quien);
+  const sol = { ...quien, unidadNegocioId: await cu.unidad('sol_cash') };
+  p.haber(await cu.regla('comision_sol_cash'), centavos(x.comision), sol);
   p.haber(cuotas, centavos(x.cuotas), {
     ...quien,
     descripcion: 'Cuotas descontadas de la mano',
   });
-  p.haber(await cu.regla('moras_sol_cash'), centavos(x.moras), quien);
+  p.haber(await cu.regla('moras_sol_cash'), centavos(x.moras), sol);
   await patasDinero(
     c,
     cu,
@@ -1010,7 +1034,9 @@ async function remesa(
   const agente = { descripcion: x.agente };
   const p = new Partida();
   p.debe(await cu.regla('agentes_envios'), centavos(x.total_pagar), agente);
-  p.haber(await cu.regla('comision_envios'), centavos(x.comision));
+  p.haber(await cu.regla('comision_envios'), centavos(x.comision), {
+    unidadNegocioId: await cu.unidad('envios'),
+  });
   await patasDinero(c, cu, p, 'remesa_id', [id], { entra: [], sale: [] }, [
     'remesa',
   ]);
@@ -1095,6 +1121,7 @@ async function remesaPago(
   const p = new Partida();
   p.debe(await cu.regla('comision_agentes'), centavos(x.monto), {
     descripcion: x.agente,
+    unidadNegocioId: await cu.unidad('envios'),
   });
   await patasDinero(
     c,

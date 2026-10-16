@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
+import { leerUnidad, SQL_UNIDADES } from '../comun/unidad';
 import { DatabaseService } from '../database/database.service';
 import {
   aPesos,
@@ -121,7 +122,7 @@ export class CajaService {
   }
 
   async preparar() {
-    const [cats, denom, denomUsd, tasa, cuentas] = await Promise.all([
+    const [cats, denom, denomUsd, tasa, cuentas, unidades] = await Promise.all([
       this.db.query(
         `SELECT id, codigo, nombre FROM categorias_gasto
          WHERE is_active ORDER BY orden, nombre`,
@@ -135,9 +136,11 @@ export class CajaService {
          FROM cuentas ct JOIN monedas mo ON mo.codigo = ct.moneda
          WHERE ct.is_active ORDER BY ct.tipo, lower(ct.nombre)`,
       ),
+      this.db.query(SQL_UNIDADES),
     ]);
     return {
       categoriasGasto: cats.rows,
+      unidadesNegocio: unidades.rows,
       denominaciones: denom.split(',').map((d) => d.trim()),
       denominacionesUsd: denomUsd.split(',').map((d) => d.trim()),
       tasaDolar: tasa,
@@ -405,6 +408,7 @@ export class CajaService {
       tipo?: unknown;
       monto?: unknown;
       categoriaGastoId?: unknown;
+      unidadNegocioId?: unknown;
       comprobante?: unknown;
       motivo?: unknown;
       clase?: unknown;
@@ -448,6 +452,8 @@ export class CajaService {
           throw new BadRequestException('La categoría de gasto no existe');
         categoriaNombre = cat.rows[0].nombre;
       }
+      const unidad =
+        tipo === 'gasto' ? await leerUnidad(c, datos.unidadNegocioId) : null;
       if (tipo !== 'ingreso') {
         // No puede salir más efectivo del que hay.
         const e = await c.query<{ esperado: string }>(SQL_ESPERADO, [sesionId]);
@@ -459,9 +465,20 @@ export class CajaService {
       }
       const mov = await c.query<{ id: string }>(
         `INSERT INTO caja_movimientos
-           (sesion_id, tipo, monto, categoria_gasto_id, comprobante, motivo, clase, usuario_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [sesionId, tipo, monto, categoria, comprobante, motivo, clase, actorId],
+           (sesion_id, tipo, monto, categoria_gasto_id, comprobante, motivo, clase, usuario_id,
+            unidad_negocio_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [
+          sesionId,
+          tipo,
+          monto,
+          categoria,
+          comprobante,
+          motivo,
+          clase,
+          actorId,
+          unidad?.id ?? null,
+        ],
       );
       await contabilizar(c, 'caja_mov', String(mov.rows[0].id), actorId);
       const e = await c.query<{ esperado: string }>(SQL_ESPERADO, [sesionId]);
@@ -477,6 +494,7 @@ export class CajaService {
           monto,
           clase,
           categoria: categoriaNombre,
+          unidad: unidad?.nombre ?? null,
           comprobante,
         },
         motivo,

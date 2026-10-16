@@ -30,6 +30,7 @@ const MIGRACIONES = [
   ['031', "SELECT COALESCE((SELECT data_type = 'character varying' FROM information_schema.columns WHERE table_name = 'asientos' AND column_name = 'origen_id'), false)"],
   ['032', "SELECT EXISTS (SELECT 1 FROM auditoria WHERE accion = 'migracion.032')"],
   ['033', "SELECT to_regclass('public.contabilidad_clasificaciones') IS NOT NULL"],
+  ['034', "SELECT EXISTS (SELECT 1 FROM configuracion WHERE clave = 'lineas.unidad_sol_cash')"],
   // Cada migración nueva se agrega aquí con su comprobación, al publicarla.
 ].filter(([n]) => fs.readdirSync(DATABASE).some((x) => x.startsWith(`${n}_`) && x.endsWith('.sql')));
 // (Solo cuentan las que vienen en esta versión del código: las que todavía no

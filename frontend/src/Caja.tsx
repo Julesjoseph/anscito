@@ -49,6 +49,7 @@ import {
   CAMPO,
   CajaError,
   Ventana,
+  SelectorLinea,
 } from './componentes'
 import { dolares, verTasa } from './dolar'
 import { dinero, mensajeDe } from './formato'
@@ -351,6 +352,7 @@ function FormMovimiento({
   const [tipo, setTipo] = useState<'gasto' | 'retiro' | 'ingreso'>('gasto')
   const [monto, setMonto] = useState('')
   const [categoria, setCategoria] = useState('')
+  const [unidad, setUnidad] = useState('')
   const [comprobante, setComprobante] = useState('')
   const [clase, setClase] = useState('')
   const [motivo, setMotivo] = useState('')
@@ -370,6 +372,7 @@ function FormMovimiento({
         tipo,
         monto: monto.trim(),
         categoriaGastoId: tipo === 'gasto' ? categoria : undefined,
+        unidadNegocioId: tipo === 'gasto' ? unidad || undefined : undefined,
         comprobante: tipo === 'gasto' ? comprobante.trim() || undefined : undefined,
         clase: tipo === 'gasto' ? undefined : clase,
         motivo,
@@ -433,6 +436,7 @@ function FormMovimiento({
               ))}
             </select>
           </label>
+          <SelectorLinea unidades={prep.unidadesNegocio} valor={unidad} setValor={setUnidad} />
           <label className="flex flex-col gap-1 text-sm text-gray-600">
             Comprobante (opcional)
             <input type="text" value={comprobante} onChange={(e) => setComprobante(e.target.value.toUpperCase())} placeholder="NCF o número de la factura" className={`${CAMPO} font-mono`} />

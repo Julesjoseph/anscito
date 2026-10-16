@@ -64,3 +64,28 @@ export function Ventana({
     </div>
   )
 }
+
+// Línea de negocio de un gasto (opcional): vacío = gastos generales.
+export function SelectorLinea({
+  unidades,
+  valor,
+  setValor,
+}: {
+  unidades: { id: string; nombre: string }[]
+  valor: string
+  setValor: (v: string) => void
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm text-gray-600">
+      ¿De qué línea de negocio es? (opcional)
+      <select value={valor} onChange={(e) => setValor(e.target.value)} className={CAMPO}>
+        <option value="">General (de todo el negocio)</option>
+        {unidades.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.nombre}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}

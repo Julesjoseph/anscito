@@ -9,6 +9,7 @@ import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
+import { leerUnidad, SQL_UNIDADES } from '../comun/unidad';
 import { DatabaseService } from '../database/database.service';
 import { esCero, esEntera, normalizarCantidad } from '../inventario/cantidades';
 import { SQL_EXISTENCIA } from '../inventario/sql';
@@ -93,7 +94,7 @@ export class ComprasService {
   // ---------- Datos para la pantalla ----------
 
   async preparar() {
-    const [tipos, cajas, cuentas, hoy] = await Promise.all([
+    const [tipos, cajas, cuentas, hoy, unidades] = await Promise.all([
       this.db.query(
         'SELECT codigo, nombre FROM tipos_gasto WHERE is_active ORDER BY orden',
       ),
@@ -106,9 +107,11 @@ export class ComprasService {
         `SELECT id, nombre FROM cuentas WHERE is_active AND moneda = 'DOP' ORDER BY lower(nombre)`,
       ),
       this.hoy(this.db),
+      this.db.query(SQL_UNIDADES),
     ]);
     return {
       tiposGasto: tipos.rows,
+      unidadesNegocio: unidades.rows,
       cajas: cajas.rows,
       cuentas: cuentas.rows,
       hoy,
@@ -424,6 +427,8 @@ export class ComprasService {
         );
         if (tg.rowCount === 0)
           throw new BadRequestException('Tipo de gasto inválido');
+        // De qué línea de negocio es el gasto (opcional: vacío = generales).
+        const unidad = await leerUnidad(c, datos.unidadNegocioId);
         if (gastoFijoId) {
           const gf = await c.query(
             'SELECT 1 FROM gastos_fijos WHERE id = $1 AND proveedor_id = $2',
@@ -531,8 +536,8 @@ export class ComprasService {
           `INSERT INTO compras (numero, proveedor_id, sucursal_id, ncf, fecha_comprobante, tipo_gasto,
                                 condicion, vencimiento, monto_bienes, monto_servicios, itbis,
                                 itbis_retenido, isr_retenido, total, a_pagar, descripcion, notas, created_by,
-                                gasto_fijo_id, gasto_fijo_mes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                                gasto_fijo_id, gasto_fijo_mes, unidad_negocio_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
            RETURNING id`,
           [
             n,
@@ -555,6 +560,7 @@ export class ComprasService {
             actorId,
             gastoFijoId,
             gastoFijoId ? `${(mesTexto || fecha).slice(0, 7)}-01` : null,
+            unidad?.id ?? null,
           ],
         );
         const compraId = r.rows[0].id;
@@ -671,6 +677,7 @@ export class ComprasService {
             itbis,
             total: texto2(total),
             a_pagar: texto2(aPagar),
+            unidad: unidad?.nombre ?? null,
             pagado_desde: dest?.nombre ?? null,
           },
           ip,

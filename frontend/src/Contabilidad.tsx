@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { AlertTriangle, Ban, BookOpen, CheckCircle2, Lock, Pencil, Plus, Power, RefreshCw, Search, Trash2, Unlock } from 'lucide-react'
 import {
@@ -6,6 +6,7 @@ import {
   anularAsientoContable,
   balanzaComprobacion,
   cambiarCuentaDe,
+  cambiarLineaContable,
   cambiarReglaContable,
   catalogoCuentas,
   cerrarMesContable,
@@ -17,6 +18,7 @@ import {
   editarCuentaContable,
   estadoCuentaContable,
   fijarFechaInicioContable,
+  gananciaPorLinea,
   listarAsientos,
   pendientesContables,
   periodosContables,
@@ -35,6 +37,7 @@ import type {
   FilaAsiento,
   LineaAsientoEntrada,
   PendienteContable,
+  PorLinea,
   PrepararContabilidad,
   ReglasContables,
   ResultadoContable,
@@ -134,7 +137,7 @@ function Campo({ etiqueta, children }: { etiqueta: string; children: ReactNode }
 }
 
 export default function Contabilidad({ token, permisos, onSesionVencida }: Props) {
-  const [pestana, setPestana] = useState<'catalogo' | 'asientos' | 'reglas' | 'pendientes' | 'meses' | 'balanza'>('catalogo')
+  const [pestana, setPestana] = useState<'catalogo' | 'asientos' | 'reglas' | 'pendientes' | 'lineas' | 'meses' | 'balanza'>('catalogo')
   const [prep, setPrep] = useState<PrepararContabilidad | null>(null)
   const [cuentas, setCuentas] = useState<CuentaContable[] | null>(null)
   const [error, setError] = useState('')
@@ -195,6 +198,7 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
             ['asientos', 'Asientos'],
             ['reglas', 'Reglas'],
             ['pendientes', 'Pendientes'],
+            ['lineas', 'Por línea de negocio'],
             ['meses', 'Meses'],
             ['balanza', 'Balanza'],
           ] as const
@@ -241,6 +245,8 @@ export default function Contabilidad({ token, permisos, onSesionVencida }: Props
           onCambio={() => void cargar()}
           onSesionVencida={onSesionVencida}
         />
+      ) : pestana === 'lineas' ? (
+        <PorLineaNegocio token={token} hoy={prep.hoy} onSesionVencida={onSesionVencida} />
       ) : pestana === 'meses' ? (
         <Meses token={token} puedeCerrar={permisos.includes('contabilidad.cerrar')} onSesionVencida={onSesionVencida} />
       ) : (
@@ -1316,6 +1322,7 @@ function Reglas({ token, cuentas, puedeEditar, onSesionVencida }: { token: strin
         una propuesta: su contador debe revisarlas. Un cambio vale para las operaciones nuevas; los asientos ya registrados no
         cambian.
       </div>
+      <LineasFijas token={token} datos={datos} puedeEditar={puedeEditar} onCambio={() => void cargar()} onSesionVencida={onSesionVencida} />
       <TablaCuentas
         titulo="Reglas generales"
         ayuda="Cada papel del dinero apunta a una cuenta del catálogo."
@@ -1660,5 +1667,158 @@ function FormPendiente({
         </div>
       </form>
     </Ventana>
+  )
+}
+
+// ---------- Ganancia por línea de negocio ----------
+
+function PorLineaNegocio({ token, hoy, onSesionVencida }: { token: string; hoy: string; onSesionVencida: () => void }) {
+  const [desde, setDesde] = useState(`${hoy.slice(0, 7)}-01`)
+  const [hasta, setHasta] = useState(hoy)
+  const [datos, setDatos] = useState<PorLinea | null>(null)
+  const [abierta, setAbierta] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const cargar = useCallback(async () => {
+    setError('')
+    try {
+      setDatos(await gananciaPorLinea(token, desde, hasta))
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    }
+  }, [token, desde, hasta, onSesionVencida])
+
+  useEffect(() => {
+    void cargar()
+  }, [cargar])
+
+  const negativo = (v: string) => v.startsWith('-')
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-gray-500">
+        Lo que gana cada línea: sus ingresos menos sus costos y sus gastos propios. Los gastos de todo el negocio (alquiler,
+        luz, sueldos…) no se reparten: aparecen aparte en “Gastos generales”. Sale de los asientos contables.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <Campo etiqueta="Desde">
+          <input type="date" className={CAMPO} value={desde} max={hasta} onChange={(e) => setDesde(e.target.value)} />
+        </Campo>
+        <Campo etiqueta="Hasta">
+          <input type="date" className={CAMPO} value={hasta} min={desde} onChange={(e) => setHasta(e.target.value)} />
+        </Campo>
+        <button type="button" className={BOTON_SECUNDARIO} onClick={() => void cargar()} aria-label="Actualizar">
+          <RefreshCw size={16} />
+        </button>
+      </div>
+      {error && <CajaError>{error}</CajaError>}
+      {!datos ? (
+        !error && <p className="text-sm text-gray-500">Cargando…</p>
+      ) : datos.lineas.length === 0 ? (
+        <p className="rounded-xl border border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">No hay asientos en esas fechas.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500">
+              <tr>
+                <th className="px-3 py-2">Línea de negocio</th>
+                <th className="px-3 py-2 text-right">Ingresos</th>
+                <th className="px-3 py-2 text-right">Costos</th>
+                <th className="px-3 py-2 text-right">Gastos</th>
+                <th className="px-3 py-2 text-right">Ganancia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datos.lineas.map((l) => {
+                const k = l.unidadId ?? 'generales'
+                return (
+                  <Fragment key={k}>
+                    <tr className={`cursor-pointer border-t border-gray-100 hover:bg-gray-50 ${l.unidadId ? '' : 'bg-gray-50/60'}`} onClick={() => setAbierta(abierta === k ? null : k)}>
+                      <td className="px-3 py-2 font-medium">
+                        <span className="mr-1 text-gray-400">{abierta === k ? '▾' : '▸'}</span>
+                        {l.unidad}
+                      </td>
+                      <td className="px-3 py-2 text-right">{dinero(l.ingresos)}</td>
+                      <td className="px-3 py-2 text-right">{dinero(l.costos)}</td>
+                      <td className="px-3 py-2 text-right">{dinero(l.gastos)}</td>
+                      <td className={`px-3 py-2 text-right font-medium ${negativo(l.resultado) ? 'text-red-700' : 'text-green-700'}`}>{dinero(l.resultado)}</td>
+                    </tr>
+                    {abierta === k &&
+                      l.cuentas.map((x) => (
+                        <tr key={`${k}-${x.codigo}`} className="text-xs text-gray-600">
+                          <td className="py-1 pr-3 pl-8">
+                            <span className="font-mono text-gray-400">{x.codigo}</span> {x.cuenta}
+                          </td>
+                          <td className="px-3 py-1 text-right">{x.tipo === 'ingreso' ? dinero(x.monto) : ''}</td>
+                          <td className="px-3 py-1 text-right">{x.tipo === 'costo' ? dinero(x.monto) : ''}</td>
+                          <td className="px-3 py-1 text-right">{x.tipo === 'gasto' ? dinero(x.monto) : ''}</td>
+                          <td />
+                        </tr>
+                      ))}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+            <tfoot className="border-t-2 border-gray-200 font-medium">
+              <tr>
+                <td className="px-3 py-2">Ganancia del negocio</td>
+                <td className="px-3 py-2 text-right">{dinero(datos.total.ingresos)}</td>
+                <td className="px-3 py-2 text-right">{dinero(datos.total.costos)}</td>
+                <td className="px-3 py-2 text-right">{dinero(datos.total.gastos)}</td>
+                <td className={`px-3 py-2 text-right ${negativo(datos.total.resultado) ? 'text-red-700' : 'text-green-700'}`}>{dinero(datos.total.resultado)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-gray-500">Toque una línea para ver sus cuentas. Las cifras dependen de las reglas contables, que su contador debe validar.</p>
+    </div>
+  )
+}
+
+function LineasFijas({ token, datos, puedeEditar, onCambio, onSesionVencida }: { token: string; datos: ReglasContables; puedeEditar: boolean; onCambio: () => void; onSesionVencida: () => void }) {
+  const [error, setError] = useState('')
+  async function cambiar(clave: string, unidadId: string) {
+    setError('')
+    try {
+      await cambiarLineaContable(token, clave, unidadId)
+      onCambio()
+    } catch (e) {
+      if (e instanceof SesionVencida) onSesionVencida()
+      else setError(mensajeDe(e))
+    }
+  }
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-100 px-4 py-3">
+        <h2 className="font-medium">Líneas de negocio de SOL CASH y SCITO TRANSFER</h2>
+        <p className="text-xs text-gray-500">A qué línea van sus comisiones y moras (y la comisión de los agentes).</p>
+      </div>
+      <ul className="divide-y divide-gray-100">
+        {datos.lineas.map((l) => (
+          <li key={l.clave} className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-medium">{l.nombre}</span>
+            {puedeEditar ? (
+              <select className={CAMPO} value={l.unidad_id ?? ''} onChange={(e) => void cambiar(l.clave, e.target.value)} aria-label={l.nombre}>
+                {!l.unidad_id && <option value="">Sin línea (va a generales)</option>}
+                {datos.unidades.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nombre}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span>{l.unidad ?? <span className="text-amber-700">Sin línea</span>}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <div className="px-4 pb-3">
+          <CajaError>{error}</CajaError>
+        </div>
+      )}
+    </section>
   )
 }

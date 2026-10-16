@@ -7,6 +7,7 @@ import {
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
+import { leerUnidad, SQL_UNIDADES } from '../comun/unidad';
 import { contabilizar, revertir } from '../contabilidad/motor';
 import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
@@ -178,7 +179,7 @@ export class BancosService {
   // ---------- Datos para las pantallas ----------
 
   async preparar() {
-    const [monedas, categorias, cuentas, cajas] = await Promise.all([
+    const [monedas, categorias, cuentas, cajas, unidades] = await Promise.all([
       this.db.query(
         'SELECT codigo, nombre, simbolo FROM monedas WHERE is_active ORDER BY orden',
       ),
@@ -196,10 +197,12 @@ export class BancosService {
          LEFT JOIN caja_sesiones s ON s.caja_id = c.id AND s.estado = 'abierta'
          WHERE c.is_active ORDER BY lower(c.nombre)`,
       ),
+      this.db.query(SQL_UNIDADES),
     ]);
     return {
       monedas: monedas.rows,
       categoriasGasto: categorias.rows,
+      unidadesNegocio: unidades.rows,
       cuentas: cuentas.rows,
       cajas: cajas.rows,
     };
@@ -524,6 +527,7 @@ export class BancosService {
       tasa?: unknown;
       fecha?: unknown;
       categoriaGastoId?: unknown;
+      unidadNegocioId?: unknown;
       clase?: unknown;
       beneficiario?: unknown;
       comprobante?: unknown;
@@ -574,6 +578,8 @@ export class BancosService {
           throw new BadRequestException('La categoría no existe');
         categoriaNombre = cat.rows[0].nombre;
       }
+      const unidad =
+        tipo === 'pago' ? await leerUnidad(c, datos.unidadNegocioId) : null;
       const signo = SIGNO[tipo];
       if (signo < 0) {
         const hay = await this.disponible(c, cuentaId);
@@ -586,9 +592,9 @@ export class BancosService {
       const r = await c.query<{ id: string; monto_dop: string }>(
         `INSERT INTO cuenta_movimientos
            (cuenta_id, tipo, signo, monto, tasa, monto_dop, fecha, categoria_gasto_id,
-            beneficiario, comprobante, referencia, motivo, usuario_id, clase)
+            beneficiario, comprobante, referencia, motivo, usuario_id, clase, unidad_negocio_id)
          VALUES ($1, $2, $3, $4, $5, round($4::numeric * $5::numeric, 2), $6, $7,
-                 $8, $9, $10, $11, $12, $13)
+                 $8, $9, $10, $11, $12, $13, $14)
          RETURNING id, monto_dop`,
         [
           cuentaId,
@@ -604,6 +610,7 @@ export class BancosService {
           motivo,
           actorId,
           clase,
+          unidad?.id ?? null,
         ],
       );
       await registrarAuditoria(c, {
@@ -620,6 +627,7 @@ export class BancosService {
           monto_dop: r.rows[0].monto_dop,
           fecha,
           categoria: categoriaNombre,
+          unidad: unidad?.nombre ?? null,
           clase,
           beneficiario,
           comprobante,

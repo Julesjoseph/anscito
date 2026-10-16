@@ -1240,6 +1240,7 @@ export type FilaCaja = {
 
 export type PrepararCaja = {
   categoriasGasto: { id: string; codigo: string; nombre: string }[]
+  unidadesNegocio: { id: string; nombre: string }[]
   denominaciones: string[]
   denominacionesUsd: string[]
   tasaDolar: TasaDolar | null
@@ -1416,6 +1417,7 @@ export const movimientoCaja = (
     tipo: 'gasto' | 'retiro' | 'ingreso'
     monto: string
     categoriaGastoId?: string
+    unidadNegocioId?: string // gasto: línea de negocio (vacío = general)
     comprobante?: string
     clase?: string // ingreso: aporte | prestamo | otro; retiro: retiro_dueno | otro
     motivo: string
@@ -1523,6 +1525,7 @@ export type CuentaOpcion = {
 export type PrepararBancos = {
   monedas: Moneda[]
   categoriasGasto: { id: string; codigo: string; nombre: string }[]
+  unidadesNegocio: { id: string; nombre: string }[]
   cuentas: CuentaOpcion[]
   cajas: { id: string; nombre: string; sesion_id: string | null }[]
 }
@@ -1600,6 +1603,7 @@ export type DatosMovimientoCuenta = {
   tasa?: string
   fecha?: string
   categoriaGastoId?: string
+  unidadNegocioId?: string // pago: línea de negocio (vacío = general)
   clase?: string // ingreso: aporte, prestamo u otro
   beneficiario?: string
   comprobante?: string
@@ -2595,6 +2599,7 @@ export const ticketSan = (token: string, tipo: 'recibos' | 'entregas', id: strin
 
 export type PrepararCompras = {
   tiposGasto: { codigo: string; nombre: string }[]
+  unidadesNegocio: { id: string; nombre: string }[]
   cajas: { id: string; nombre: string; sesion_id: string | null }[]
   cuentas: { id: string; nombre: string }[]
   hoy: string
@@ -2635,6 +2640,7 @@ export type DatosCompra = {
   pago?: { forma: 'efectivo' | 'banco'; cajaId?: string; cuentaId?: string; referencia?: string }
   gastoFijoId?: string
   gastoFijoMes?: string // YYYY-MM: mes al que corresponde la factura
+  unidadNegocioId?: string // línea de negocio del gasto (vacío = general)
 }
 
 export type FilaCompra = {
@@ -3064,6 +3070,8 @@ export type CuentaDe = {
 }
 
 export type ReglasContables = {
+  lineas: { clave: string; nombre: string; unidad_id: string | null; unidad: string | null }[]
+  unidades: { id: string; nombre: string }[]
   reglas: ReglaContable[]
   categorias: CuentaDe[]
   tiposGasto: CuentaDe[]
@@ -3227,3 +3235,26 @@ export const clasificarPendiente = (token: string, id: string, cuentaId: string,
 
 export const descartarPendiente = (token: string, id: string, nota: string) =>
   llamar<{ ok: boolean }>('POST', `/contabilidad/pendientes/${id}/descartar`, token, { nota })
+
+export type LineaNegocioResultado = {
+  unidadId: string | null
+  unidad: string
+  ingresos: string
+  costos: string
+  gastos: string
+  resultado: string
+  cuentas: { codigo: string; cuenta: string; tipo: 'ingreso' | 'costo' | 'gasto'; monto: string }[]
+}
+
+export type PorLinea = {
+  desde: string
+  hasta: string
+  lineas: LineaNegocioResultado[]
+  total: { ingresos: string; costos: string; gastos: string; resultado: string }
+}
+
+export const gananciaPorLinea = (token: string, desde: string, hasta: string) =>
+  llamar<PorLinea>('GET', `/contabilidad/por-linea?${new URLSearchParams({ desde, hasta }).toString()}`, token)
+
+export const cambiarLineaContable = (token: string, clave: string, unidadId: string) =>
+  llamar<{ ok: boolean }>('PUT', `/contabilidad/lineas/${encodeURIComponent(clave)}`, token, { unidadId })

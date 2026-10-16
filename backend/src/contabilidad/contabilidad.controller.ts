@@ -212,4 +212,22 @@ export class ContabilidadController {
   ) {
     return this.conta.descartar(req.usuario.id, id, req.ip, body ?? {});
   }
+
+  // ---------- Líneas de negocio ----------
+
+  @Get('por-linea')
+  @RequierePermiso('contabilidad.ver')
+  porLinea(@Query('desde') desde?: string, @Query('hasta') hasta?: string) {
+    return this.conta.porLinea({ desde, hasta });
+  }
+
+  @Put('lineas/:clave')
+  @RequierePermiso('contabilidad.catalogo')
+  cambiarLinea(
+    @Req() req: Peticion,
+    @Param('clave') clave: string,
+    @Body() body: Cuerpo,
+  ) {
+    return this.conta.cambiarLinea(req.usuario.id, clave, req.ip, body ?? {});
+  }
 }

@@ -122,6 +122,12 @@ const CUENTA_DE: Record<
   banco: { tabla: 'cuentas', llave: 'id', patron: UUID, que: 'Cuenta' },
 };
 
+// Operaciones que van a una línea de negocio fija (configurable en Reglas).
+const LINEAS_CONFIG: Record<string, string> = {
+  sol_cash: 'SOL CASH: comisiones y moras',
+  envios: 'SCITO TRANSFER: comisiones de envíos y de agentes',
+};
+
 // Saldo de cada cuenta de detalle (débitos − créditos de TODOS los asientos).
 const SQL_SALDOS = `SELECT l.cuenta_id, sum(l.debito)::numeric(16,2) AS debitos, sum(l.credito)::numeric(16,2) AS creditos
   FROM asiento_lineas l JOIN asientos a ON a.id = l.asiento_id`;
@@ -878,33 +884,51 @@ export class ContabilidadService {
   // ---------- Reglas (qué cuenta usa cada operación) ----------
 
   async reglas() {
-    const [reglas, categorias, tipos, bancos] = await Promise.all([
-      this.db.query(
-        `SELECT r.clave, r.nombre, r.descripcion, r.cuenta_id, c.codigo, c.nombre AS cuenta,
+    const [reglas, categorias, tipos, bancos, lineas, unidades] =
+      await Promise.all([
+        this.db.query(
+          `SELECT r.clave, r.nombre, r.descripcion, r.cuenta_id, c.codigo, c.nombre AS cuenta,
                 r.updated_at, u.username AS cambiada_por
          FROM contabilidad_reglas r JOIN cuentas_contables c ON c.id = r.cuenta_id
          LEFT JOIN usuarios u ON u.id = r.updated_by
          ORDER BY r.orden`,
-      ),
-      this.db.query(
-        `SELECT g.id, g.nombre, g.cuenta_contable_id AS cuenta_id, c.codigo, c.nombre AS cuenta
+        ),
+        this.db.query(
+          `SELECT g.id, g.nombre, g.cuenta_contable_id AS cuenta_id, c.codigo, c.nombre AS cuenta
          FROM categorias_gasto g LEFT JOIN cuentas_contables c ON c.id = g.cuenta_contable_id
          WHERE g.is_active ORDER BY g.orden, lower(g.nombre)`,
-      ),
-      this.db.query(
-        `SELECT t.codigo AS id, t.codigo || ' · ' || t.nombre AS nombre, t.cuenta_contable_id AS cuenta_id,
+        ),
+        this.db.query(
+          `SELECT t.codigo AS id, t.codigo || ' · ' || t.nombre AS nombre, t.cuenta_contable_id AS cuenta_id,
                 c.codigo, c.nombre AS cuenta
          FROM tipos_gasto t LEFT JOIN cuentas_contables c ON c.id = t.cuenta_contable_id
          WHERE t.is_active ORDER BY t.orden`,
-      ),
-      this.db.query(
-        `SELECT ct.id, ct.nombre || ' (' || ct.moneda || ')' AS nombre, ct.cuenta_contable_id AS cuenta_id,
+        ),
+        this.db.query(
+          `SELECT ct.id, ct.nombre || ' (' || ct.moneda || ')' AS nombre, ct.cuenta_contable_id AS cuenta_id,
                 c.codigo, c.nombre AS cuenta
          FROM cuentas ct LEFT JOIN cuentas_contables c ON c.id = ct.cuenta_contable_id
          WHERE ct.is_active ORDER BY lower(ct.nombre)`,
-      ),
-    ]);
+        ),
+        this.db.query<{
+          clave: string;
+          unidad_id: string | null;
+          unidad: string | null;
+        }>(
+          `SELECT substr(k.clave, 15) AS clave, un.id AS unidad_id, un.nombre AS unidad
+         FROM configuracion k LEFT JOIN unidades_negocio un ON un.id::text = k.valor
+         WHERE k.clave LIKE 'lineas.unidad_%' ORDER BY k.clave DESC`,
+        ),
+        this.db.query(
+          'SELECT id, nombre FROM unidades_negocio WHERE is_active ORDER BY lower(nombre)',
+        ),
+      ]);
     return {
+      lineas: lineas.rows.map((x) => ({
+        ...x,
+        nombre: LINEAS_CONFIG[x.clave] ?? x.clave,
+      })),
+      unidades: unidades.rows,
       reglas: reglas.rows,
       categorias: categorias.rows,
       tiposGasto: tipos.rows,
@@ -1192,6 +1216,158 @@ export class ContabilidadService {
         anterior: { documento: p.documento, error: p.error },
         nuevo: { estado: 'descartado' },
         motivo: nota,
+        ip,
+      });
+      return { ok: true };
+    });
+  }
+
+  // ---------- Ganancia por línea de negocio ----------
+
+  // Ingresos, costos y gastos de cada línea entre dos fechas (de los
+  // asientos). Lo que no tiene línea (alquiler, luz, sueldos…) va a
+  // "Gastos generales": no se reparte (decisión del dueño).
+  async porLinea(filtros: { desde?: string; hasta?: string }) {
+    const hoy = await hoyLocal(this.db);
+    const desde = texto(filtros.desde) || `${hoy.slice(0, 7)}-01`;
+    const hasta = texto(filtros.hasta) || hoy;
+    if (!fechaValida(desde) || !fechaValida(hasta))
+      throw new BadRequestException('Fecha inválida (AAAA-MM-DD)');
+    if (desde > hasta)
+      throw new BadRequestException('La fecha "desde" es después de "hasta"');
+    const r = await this.db.query<{
+      unidad_id: string | null;
+      unidad: string | null;
+      tipo: 'ingreso' | 'costo' | 'gasto';
+      codigo: string;
+      cuenta: string;
+      debitos: string;
+      creditos: string;
+    }>(
+      `SELECT l.unidad_negocio_id AS unidad_id, un.nombre AS unidad, c.tipo, c.codigo, c.nombre AS cuenta,
+              sum(l.debito)::numeric(16,2) AS debitos, sum(l.credito)::numeric(16,2) AS creditos
+       FROM asiento_lineas l JOIN asientos a ON a.id = l.asiento_id
+       JOIN cuentas_contables c ON c.id = l.cuenta_id
+       LEFT JOIN unidades_negocio un ON un.id = l.unidad_negocio_id
+       WHERE c.tipo IN ('ingreso', 'costo', 'gasto') AND a.fecha BETWEEN $1::date AND $2::date
+       GROUP BY l.unidad_negocio_id, un.nombre, c.id
+       ORDER BY c.codigo`,
+      [desde, hasta],
+    );
+    type Grupo = {
+      unidadId: string | null;
+      unidad: string;
+      ingresos: bigint;
+      costos: bigint;
+      gastos: bigint;
+      cuentas: {
+        codigo: string;
+        cuenta: string;
+        tipo: string;
+        monto: string;
+      }[];
+    };
+    const grupos = new Map<string, Grupo>();
+    const total = { ingresos: 0n, costos: 0n, gastos: 0n };
+    for (const x of r.rows) {
+      const k = x.unidad_id ?? '';
+      const g = grupos.get(k) ?? {
+        unidadId: x.unidad_id,
+        unidad: x.unidad ?? 'Gastos generales (sin línea)',
+        ingresos: 0n,
+        costos: 0n,
+        gastos: 0n,
+        cuentas: [],
+      };
+      const d = centavos(x.debitos) - centavos(x.creditos);
+      const monto = x.tipo === 'ingreso' ? -d : d;
+      if (monto === 0n) continue;
+      if (x.tipo === 'ingreso') g.ingresos += monto;
+      else if (x.tipo === 'costo') g.costos += monto;
+      else g.gastos += monto;
+      total[
+        x.tipo === 'ingreso'
+          ? 'ingresos'
+          : x.tipo === 'costo'
+            ? 'costos'
+            : 'gastos'
+      ] += monto;
+      g.cuentas.push({
+        codigo: x.codigo,
+        cuenta: x.cuenta,
+        tipo: x.tipo,
+        monto: texto2(monto),
+      });
+      grupos.set(k, g);
+    }
+    const lineas = [...grupos.values()]
+      .sort((a, b) =>
+        a.unidadId === null
+          ? 1
+          : b.unidadId === null
+            ? -1
+            : a.unidad.localeCompare(b.unidad, 'es'),
+      )
+      .map((g) => ({
+        unidadId: g.unidadId,
+        unidad: g.unidad,
+        ingresos: texto2(g.ingresos),
+        costos: texto2(g.costos),
+        gastos: texto2(g.gastos),
+        resultado: texto2(g.ingresos - g.costos - g.gastos),
+        cuentas: g.cuentas,
+      }));
+    return {
+      desde,
+      hasta,
+      lineas,
+      total: {
+        ingresos: texto2(total.ingresos),
+        costos: texto2(total.costos),
+        gastos: texto2(total.gastos),
+        resultado: texto2(total.ingresos - total.costos - total.gastos),
+      },
+    };
+  }
+
+  // Línea de negocio de SOL CASH y de los envíos (se cambia en Reglas).
+  async cambiarLinea(
+    actorId: string,
+    clave: string,
+    ip: string | undefined,
+    datos: { unidadId?: unknown },
+  ) {
+    if (!Object.hasOwn(LINEAS_CONFIG, clave))
+      throw new NotFoundException('No encontrado');
+    const unidadId = texto(datos.unidadId).toLowerCase();
+    if (!UUID.test(unidadId))
+      throw new BadRequestException('Escoja la línea de negocio');
+    return this.db.transaccion(async (c) => {
+      const u = await c.query<{ nombre: string }>(
+        'SELECT nombre FROM unidades_negocio WHERE id = $1 AND is_active',
+        [unidadId],
+      );
+      if (u.rowCount === 0)
+        throw new BadRequestException('La línea de negocio no existe');
+      const antes = await c.query<{ unidad: string | null }>(
+        `SELECT un.nombre AS unidad FROM configuracion k
+         LEFT JOIN unidades_negocio un ON un.id::text = k.valor
+         WHERE k.clave = $1 FOR UPDATE OF k`,
+        [`lineas.unidad_${clave}`],
+      );
+      if (antes.rowCount === 0)
+        throw new NotFoundException('Falta la configuración (migración 034)');
+      await c.query(
+        `UPDATE configuracion SET valor = $2, updated_by = $3, updated_at = now() WHERE clave = $1`,
+        [`lineas.unidad_${clave}`, unidadId, actorId],
+      );
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'contabilidad.linea',
+        entidad: 'configuracion',
+        entidadId: `lineas.unidad_${clave}`,
+        anterior: { [clave]: antes.rows[0].unidad },
+        nuevo: { [clave]: u.rows[0].nombre },
         ip,
       });
       return { ok: true };
