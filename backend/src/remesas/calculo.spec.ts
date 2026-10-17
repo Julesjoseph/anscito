@@ -1,4 +1,10 @@
-import { calcularEnvio, esEntero, numeroEnvio, telefonoHaiti } from './calculo';
+import {
+  calcularEnvio,
+  calcularEnvioDesdeHtg,
+  esEntero,
+  numeroEnvio,
+  telefonoHaiti,
+} from './calculo';
 
 const tarifa = {
   tasa: '2.050000',
@@ -57,6 +63,43 @@ describe('calcularEnvio (pesos y gourdes enteros)', () => {
   it('esEntero', () => {
     expect(esEntero('1000.00')).toBe(true);
     expect(esEntero('1000.50')).toBe(false);
+  });
+});
+
+describe('calcularEnvioDesdeHtg (el cliente dice las gourdes)', () => {
+  const tarifa = {
+    tasa: '2.050000',
+    comision_pct: '10.00',
+    comision_agente_pct: '50.00',
+  };
+  it('sube los pesos al entero y entrega exactamente las gourdes', () => {
+    // 1000 / 2.05 = 487.80… → RD$488; reciben 1000 HTG (no 1000.40).
+    const k = calcularEnvioDesdeHtg('1000.00', tarifa, false);
+    expect([
+      k.monto_enviado,
+      k.monto_recibir,
+      k.comision,
+      k.total_pagar,
+      k.comision_agente,
+    ]).toEqual(['488.00', '1000.00', '49.00', '537.00', '25.00']);
+  });
+  it('si da exacto, no sube', () => {
+    // 2050 / 2.05 = 1000 exacto.
+    const k = calcularEnvioDesdeHtg('2050.00', tarifa, true);
+    expect([k.monto_enviado, k.monto_recibir, k.comision_agente]).toEqual([
+      '1000.00',
+      '2050.00',
+      '0.00',
+    ]);
+  });
+  it('con la misma cantidad de pesos, igual que escribirlos en RD$', () => {
+    const desdeRd = calcularEnvio('1000.00', tarifa, false);
+    const desdeHtg = calcularEnvioDesdeHtg(
+      desdeRd.monto_recibir,
+      tarifa,
+      false,
+    );
+    expect(desdeHtg).toEqual(desdeRd);
   });
 });
 

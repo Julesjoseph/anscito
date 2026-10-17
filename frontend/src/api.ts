@@ -1804,7 +1804,8 @@ export type DatosEnvio = {
   parentesco: string
   motivoEnvioId: string
   cuentaId: string
-  montoEnviado: string
+  montoEnviado?: string // en pesos…
+  montoRecibir?: string // …o en gourdes que recibe (los pesos se suben al entero)
   notas?: string
 }
 
@@ -1904,7 +1905,7 @@ export type FilaTarifa = TarifaEnvio & {
 export const prepararEnvios = (token: string) =>
   llamar<PrepararEnvios>('GET', '/remesas/preparar', token)
 
-export const calcularEnvio = (token: string, datos: { agenteId: string; montoEnviado: string }) =>
+export const calcularEnvio = (token: string, datos: { agenteId: string; montoEnviado?: string; montoRecibir?: string }) =>
   llamar<CalculoEnvio>('POST', '/remesas/calcular', token, datos)
 
 export const registrarEnvio = (token: string, datos: DatosEnvio) =>

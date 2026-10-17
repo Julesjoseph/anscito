@@ -12,7 +12,14 @@ import { contabilizar } from '../contabilidad/motor';
 import { DatabaseService } from '../database/database.service';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { enmascarar } from '../terceros/documentos';
-import { calcularEnvio, esEntero, numeroEnvio, telefonoHaiti } from './calculo';
+import {
+  calcularEnvio,
+  calcularEnvioDesdeHtg,
+  esEntero,
+  numeroEnvio,
+  telefonoHaiti,
+} from './calculo';
+import type { CalculoEnvio } from './calculo';
 import { generarReciboEnvio, ticketEnvio } from './recibo-envio-pdf';
 import type { DatosReciboEnvio } from './recibo-envio-pdf';
 import type { Formato } from '../ventas/recibo-pdf';
@@ -61,6 +68,35 @@ function montoEntero(v: unknown): string {
       'El monto enviado va en pesos enteros, sin centavos (ej: 1500)',
     );
   return m;
+}
+
+// Monto del envío: en pesos (montoEnviado) o, si viene, en gourdes que
+// recibe el beneficiario (montoRecibir). Siempre enteros.
+type MontoEnvio = { en: 'DOP' | 'HTG'; valor: string };
+
+function leerMonto(datos: {
+  montoEnviado?: unknown;
+  montoRecibir?: unknown;
+}): MontoEnvio {
+  if (texto(datos.montoRecibir)) {
+    const m = montoPositivo(datos.montoRecibir, 'Monto que recibe (HTG)');
+    if (!esEntero(m))
+      throw new BadRequestException(
+        'Las gourdes van enteras, sin centavos (ej: 1000)',
+      );
+    return { en: 'HTG', valor: m };
+  }
+  return { en: 'DOP', valor: montoEntero(datos.montoEnviado) };
+}
+
+function calcularMonto(
+  m: MontoEnvio,
+  tarifa: Tarifa,
+  propio: boolean,
+): CalculoEnvio {
+  return m.en === 'HTG'
+    ? calcularEnvioDesdeHtg(m.valor, tarifa, propio)
+    : calcularEnvio(m.valor, tarifa, propio);
 }
 
 function motivoObligatorio(v: unknown, que = 'el motivo'): string {
@@ -198,8 +234,12 @@ export class RemesasService {
   }
 
   // Vista previa de los montos con la tarifa vigente.
-  async calcular(datos: { agenteId?: unknown; montoEnviado?: unknown }) {
-    const monto = montoEntero(datos.montoEnviado);
+  async calcular(datos: {
+    agenteId?: unknown;
+    montoEnviado?: unknown;
+    montoRecibir?: unknown;
+  }) {
+    const monto = leerMonto(datos);
     const agenteId = texto(datos.agenteId).toLowerCase();
     let propio = false;
     if (UUID.test(agenteId)) {
@@ -209,7 +249,7 @@ export class RemesasService {
       );
       propio = a.rows[0]?.tipo === 'propio';
     }
-    return calcularEnvio(monto, await this.tarifa(this.db), propio);
+    return calcularMonto(monto, await this.tarifa(this.db), propio);
   }
 
   // ---------- Tarifas (tasa y comisiones) ----------
@@ -524,6 +564,7 @@ export class RemesasService {
       motivoEnvioId?: unknown;
       cuentaId?: unknown;
       montoEnviado?: unknown;
+      montoRecibir?: unknown; // en vez de montoEnviado: gourdes que recibe
       notas?: unknown;
     },
   ) {
@@ -541,7 +582,7 @@ export class RemesasService {
     const motivoId = texto(datos.motivoEnvioId).toLowerCase();
     if (!UUID.test(motivoId))
       throw new BadRequestException('Seleccione el motivo del envío');
-    const monto = montoEntero(datos.montoEnviado);
+    const monto = leerMonto(datos);
     const parentesco = opcional(datos.parentesco, 40, 'Parentesco');
     if (!parentesco)
       throw new BadRequestException(
@@ -571,10 +612,16 @@ export class RemesasService {
           'El remitente no existe o está desactivado',
         );
       // Documento obligatorio a partir del monto configurado (0 = siempre).
+      // (Se compara en pesos, aunque el monto se haya escrito en gourdes.)
       const desde = await this.config(c, 'remesas.documento_desde');
+      const pesos = calcularMonto(
+        monto,
+        await this.tarifa(c),
+        false,
+      ).monto_enviado;
       const exige = await c.query<{ ok: boolean }>(
         'SELECT $1::numeric >= $2::numeric AS ok',
-        [monto, desde],
+        [pesos, desde],
       );
       if (exige.rows[0].ok && !rem.rows[0].numero_documento) {
         throw new BadRequestException(
@@ -620,7 +667,7 @@ export class RemesasService {
           'La billetera no existe, está desactivada o no es en gourdes',
         );
 
-      const k = calcularEnvio(
+      const k = calcularMonto(
         monto,
         await this.tarifa(c),
         agente.tipo === 'propio',

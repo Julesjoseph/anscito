@@ -51,10 +51,33 @@ export function calcularEnvio(
 ): CalculoEnvio {
   const enviado = escalar(montoEnviado, 0); // pesos enteros
   const tasa = escalar(tarifa.tasa, 6);
+  const recibir = dividir(enviado * tasa, 1_000_000n); // gourdes enteras
+  return armar(enviado, recibir, tarifa, propio);
+}
+
+// El cliente dice cuántas gourdes deben recibir (decisión del dueño): los
+// pesos se suben al peso entero (la diferencia queda a favor del negocio) y
+// el beneficiario recibe exactamente las gourdes escritas. La comisión se
+// calcula sobre esos pesos.
+export function calcularEnvioDesdeHtg(
+  montoRecibir: string,
+  tarifa: Tarifa,
+  propio: boolean,
+): CalculoEnvio {
+  const recibir = escalar(montoRecibir, 0); // gourdes enteras
+  const tasa = escalar(tarifa.tasa, 6);
+  const enviado = (recibir * 1_000_000n + tasa - 1n) / tasa; // hacia arriba
+  return armar(enviado, recibir, tarifa, propio);
+}
+
+function armar(
+  enviado: bigint,
+  recibir: bigint,
+  tarifa: Tarifa,
+  propio: boolean,
+): CalculoEnvio {
   const pct = escalar(tarifa.comision_pct, 2); // 10.00 -> 1000
   const pctAgente = propio ? 0n : escalar(tarifa.comision_agente_pct, 2);
-
-  const recibir = dividir(enviado * tasa, 1_000_000n); // gourdes enteras
   const comision = dividir(enviado * pct, 10_000n); // pesos enteros
   const comisionAgente = dividir(comision * pctAgente, 10_000n);
   return {

@@ -297,6 +297,8 @@ function NuevoEnvio({
     return prep.billeteras.some((b) => b.id === g) ? g : (prep.billeteras[0]?.id ?? '')
   })
   const [monto, setMonto] = useState('')
+  // El monto se escribe en pesos (lo que envía) o en gourdes (lo que recibe).
+  const [montoEn, setMontoEn] = useState<'DOP' | 'HTG'>('DOP')
   const [notas, setNotas] = useState('')
   const [calculo, setCalculo] = useState<CalculoEnvio | null>(null)
   const [hecho, setHecho] = useState<(CalculoEnvio & { id: string; numero: string }) | null>(null)
@@ -305,7 +307,7 @@ function NuevoEnvio({
   const agente = activos.find((a) => a.id === agenteId)
 
   // Vista previa de los montos (con la tarifa vigente del servidor).
-  // Los envíos van en pesos enteros (decisión del dueño).
+  // Los envíos van en pesos y gourdes enteros (decisión del dueño).
   const montoOk = /^\d{1,12}$/.test(monto.trim()) && Number(monto.trim()) > 0
 
   useEffect(() => {
@@ -314,12 +316,12 @@ function NuevoEnvio({
       return () => clearTimeout(t)
     }
     const t = setTimeout(() => {
-      calcularEnvio(token, { agenteId, montoEnviado: monto.trim() })
+      calcularEnvio(token, montoEn === 'HTG' ? { agenteId, montoRecibir: monto.trim() } : { agenteId, montoEnviado: monto.trim() })
         .then(setCalculo)
         .catch(() => setCalculo(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [token, agenteId, monto, montoOk])
+  }, [token, agenteId, monto, montoOk, montoEn])
 
   async function buscarRemitente(e: FormEvent) {
     e.preventDefault()
@@ -368,7 +370,12 @@ function NuevoEnvio({
   if (benNuevo && !telBenNuevo) faltan.push('El teléfono del beneficiario debe ser de Haití: 509 + 8 dígitos (ej: 509-37-38-2382).')
   if (!parentesco.trim()) faltan.push('Escriba el parentesco (paso 3).')
   if (!cuentaId) faltan.push('Elija la billetera (paso 4).')
-  if (!montoOk) faltan.push('Escriba el monto que envía en pesos enteros, sin centavos (paso 4).')
+  if (!montoOk)
+    faltan.push(
+      montoEn === 'HTG'
+        ? 'Escriba las gourdes que recibe, enteras, sin centavos (paso 4).'
+        : 'Escriba el monto que envía en pesos enteros, sin centavos (paso 4).',
+    )
   else if (!calculo) faltan.push('Calculando el monto…')
   const listo = faltan.length === 0
 
@@ -384,7 +391,7 @@ function NuevoEnvio({
         parentesco,
         motivoEnvioId: motivoId,
         cuentaId,
-        montoEnviado: monto.trim(),
+        ...(montoEn === 'HTG' ? { montoRecibir: monto.trim() } : { montoEnviado: monto.trim() }),
         notas: notas.trim() || undefined,
       })
       setHecho(r)
@@ -620,12 +627,34 @@ function NuevoEnvio({
             ))}
           </select>
         </label>
+        <div className="flex gap-2 text-sm">
+          {(
+            [
+              ['DOP', 'Escribir en pesos (RD$)'],
+              ['HTG', 'Escribir en gourdes (HTG)'],
+            ] as const
+          ).map(([id, nombre]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setMontoEn(id)
+                setMonto('')
+              }}
+              className={`flex-1 rounded-lg border px-2 py-1.5 ${montoEn === id ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]' : 'border-gray-300 hover:bg-gray-50'}`}
+            >
+              {nombre}
+            </button>
+          ))}
+        </div>
         <label className="flex flex-col gap-1 text-gray-600">
-          Monto que envía (RD$)
+          {montoEn === 'HTG' ? 'Gourdes que recibe en Haití (HTG)' : 'Monto que envía (RD$)'}
           <input type="text" inputMode="numeric" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[,\s]/g, ''))} placeholder="0" className={`${CAMPO} text-lg`} />
+          {montoEn === 'HTG' && <span className="text-xs text-gray-400">Los pesos se calculan con la tasa y se suben al peso entero.</span>}
         </label>
         <dl className="flex flex-col gap-1 border-y border-gray-100 py-3">
           <div className="flex justify-between"><dt className="text-gray-500">Tasa</dt><dd>1 RD$ = {prep.tarifa.tasa.replace(/\.?0+$/, '')} HTG</dd></div>
+          {montoEn === 'HTG' && <div className="flex justify-between text-base font-medium"><dt>Envía (RD$)</dt><dd>{dinero(calculo?.monto_enviado)}</dd></div>}
           <div className="flex justify-between text-base font-medium"><dt>Recibe en Haití</dt><dd>{gourdes(calculo?.monto_recibir)}</dd></div>
           <div className="flex justify-between"><dt className="text-gray-500">Comisión ({prep.tarifa.comision_pct.replace(/\.?0+$/, '')}%)</dt><dd>{dinero(calculo?.comision)}</dd></div>
           <div className="mt-1 flex justify-between text-xl font-medium"><dt>Total a pagar</dt><dd>{dinero(calculo?.total_pagar)}</dd></div>
