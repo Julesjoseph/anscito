@@ -33,6 +33,20 @@ export class SanesController {
     return this.sanes.preparar();
   }
 
+  // Formulario de solicitud de número (PDF rellenable, español y kreyòl).
+  @Get('formulario')
+  @RequierePermiso('sanes.ver')
+  async formulario(@Res() res: Response) {
+    const pdf = await this.sanes.formularioPdf();
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition':
+        'attachment; filename="SOL-CASH-solicitud-de-numero.pdf"',
+      'Cache-Control': 'no-store',
+    });
+    res.send(pdf);
+  }
+
   @Patch('configuracion')
   @RequierePermiso('sanes.gestionar')
   configurar(@Req() req: Peticion, @Body() body: Cuerpo) {

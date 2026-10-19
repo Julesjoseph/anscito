@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardList,
+  FileDown,
   FileSignature,
   HandCoins,
   Pencil,
@@ -28,6 +29,7 @@ import {
   configurarSanes,
   crearSan,
   cuentaSan,
+  descargarSan,
   detalleSan,
   editarSan,
   entregarSan,
@@ -380,11 +382,34 @@ export default function Sanes({ token, permisos, onSesionVencida }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-medium">SOL CASH</h1>
-        <p className="text-sm text-gray-500">
-          Cobro de cuotas en la oficina, números, turnos y entrega de la mano.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-medium">SOL CASH</h1>
+          <p className="text-sm text-gray-500">
+            Cobro de cuotas en la oficina, números, turnos y entrega de la mano.
+          </p>
+        </div>
+        <button
+          type="button"
+          className={`${BOTON_SECUNDARIO} flex items-center gap-2`}
+          title="Formulario de solicitud de número para llenar en el celular, la computadora o a mano (español y kreyòl)"
+          onClick={async () => {
+            try {
+              const archivo = await descargarSan(token, '/sanes/formulario')
+              const url = URL.createObjectURL(archivo)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = 'SOL-CASH-solicitud-de-numero.pdf'
+              a.click()
+              setTimeout(() => URL.revokeObjectURL(url), 60_000)
+            } catch (e) {
+              if (e instanceof SesionVencida) onSesionVencida()
+              else setError(mensajeDe(e))
+            }
+          }}
+        >
+          <FileDown size={16} /> Descargar formulario
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2 border-b border-gray-200">

@@ -25,6 +25,7 @@ import type { Frecuencia } from './calendario';
 import { faltantesFicha } from './ficha-requisitos';
 import { encabezado } from '../comun/ticket';
 import type { Ticket } from '../comun/ticket';
+import { generarFormularioSan } from './formulario-pdf';
 import { generarReciboSan } from './recibo-san-pdf';
 import type { FilaRecibo } from './recibo-san-pdf';
 import { dinero } from '../ventas/recibo-pdf';
@@ -1327,6 +1328,25 @@ export class SanesService {
     if (f !== '80' && f !== '58' && f !== 'carta')
       throw new BadRequestException('Formato inválido: use 80, 58 o carta');
     return f;
+  }
+
+  // Formulario PDF rellenable de solicitud de número, con el nombre y el
+  // logo de la empresa.
+  async formularioPdf(): Promise<Buffer> {
+    const e = (
+      await this.db.query<{
+        nombre: string;
+        logo: Buffer | null;
+        logo_tipo: string | null;
+      }>(
+        'SELECT nombre_comercial AS nombre, logo, logo_tipo FROM empresa WHERE id = 1',
+      )
+    ).rows[0];
+    return generarFormularioSan({
+      empresa: e?.nombre ?? 'SCITO ENTREPRISE',
+      logo: e?.logo ?? null,
+      logoTipo: e?.logo_tipo ?? null,
+    });
   }
 
   private async empresa() {
