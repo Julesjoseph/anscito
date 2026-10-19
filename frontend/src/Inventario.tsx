@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   AlertTriangle,
@@ -573,6 +573,10 @@ function Acciones({
   onAbrir: (m: Modal) => void
 }) {
   const [abierto, setAbierto] = useState(false)
+  // Posición del menú en la ventana (fixed): así no lo corta el contenedor
+  // de la tabla. Abre hacia abajo o, si no cabe, hacia arriba.
+  const [pos, setPos] = useState<{ right: number; top?: number; bottom?: number } | null>(null)
+  const boton = useRef<HTMLButtonElement>(null)
   const activo = fila.is_active
   const entradas = activo && permisos.includes('inventario.entradas')
   const salidas = activo && permisos.includes('inventario.salidas')
@@ -584,6 +588,37 @@ function Acciones({
     setAbierto(false)
     onAbrir(m)
   }
+
+  function abrirMenu() {
+    if (abierto) {
+      setAbierto(false)
+      return
+    }
+    const r = boton.current?.getBoundingClientRect()
+    if (!r) return
+    const opciones = 1 + [ajustar, corregir, puedeEditar, estado].filter(Boolean).length
+    const alto = opciones * 36 + 10
+    const right = Math.max(8, window.innerWidth - r.right)
+    setPos(
+      window.innerHeight - r.bottom >= alto + 8 || r.top < alto + 8
+        ? { right, top: r.bottom + 4 }
+        : { right, bottom: window.innerHeight - r.top + 4 },
+    )
+    setAbierto(true)
+  }
+
+  // Al desplazar la página o cambiar el tamaño, el menú se cierra (si no,
+  // quedaría flotando lejos de su botón).
+  useEffect(() => {
+    if (!abierto) return
+    const cerrar = () => setAbierto(false)
+    window.addEventListener('scroll', cerrar, true)
+    window.addEventListener('resize', cerrar)
+    return () => {
+      window.removeEventListener('scroll', cerrar, true)
+      window.removeEventListener('resize', cerrar)
+    }
+  }, [abierto])
 
   const opcion =
     'flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50'
@@ -612,23 +647,29 @@ function Acciones({
         </button>
       )}
       <button
+        ref={boton}
         type="button"
-        onClick={() => setAbierto(!abierto)}
+        onClick={abrirMenu}
         className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
         aria-label={`Más acciones de ${fila.codigo}`}
+        aria-expanded={abierto}
       >
         <MoreHorizontal size={18} />
       </button>
-      {abierto && (
+      {abierto && pos && (
         <>
           {/* Capa invisible: un clic fuera cierra el menú. */}
           <button
             type="button"
             aria-label="Cerrar menú"
-            className="fixed inset-0 z-10 cursor-default"
+            className="fixed inset-0 z-40 cursor-default"
             onClick={() => setAbierto(false)}
           />
-          <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+          <div
+            role="menu"
+            style={{ right: pos.right, top: pos.top, bottom: pos.bottom }}
+            className="fixed z-50 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg"
+          >
             <button type="button" className={opcion} onClick={() => elegir({ tipo: 'kardex', fila })}>
               <History size={14} /> Ver kárdex (historial)
             </button>
