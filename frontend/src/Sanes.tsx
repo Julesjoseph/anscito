@@ -1635,7 +1635,8 @@ function FormAsignar({
           </label>
         </div>
         <p className="text-xs text-gray-500">
-          Para entrar necesita: documento, teléfono, ficha, foto del documento, fiador confirmado y al menos una referencia confirmada.
+          Para entrar necesita: teléfono o WhatsApp, ficha (ocupación y dirección), fiador confirmado y al menos una referencia
+          confirmada. El documento y su foto son opcionales.
         </p>
         {error && <CajaError>{error}</CajaError>}
         <div className="flex justify-end gap-2">

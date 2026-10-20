@@ -52,6 +52,7 @@ import type {
   ResumenCreditoVenta,
   TipoDocumento,
 } from './api'
+import { normalizarBusqueda } from './busqueda'
 import { cajaDeEstaComputadora, guardarCajaDeEstaComputadora } from './cajaLocal'
 import { dolares, dolaresArriba, dolaresDe, pesosDe, verTasa } from './dolar'
 import { ANCHOS_TICKET, htmlTicket, imprimirHtml } from './ticket'
@@ -699,7 +700,18 @@ function NuevaVenta({
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
-                if (resultados[0]) agregar(resultados[0])
+                // El lector de código de barras escribe muy rápido y manda
+                // Enter: se busca otra vez el texto completo y se agrega el
+                // artículo con ese código (o el primero que aparezca).
+                const t = normalizarBusqueda(buscar)
+                if (!t) return
+                buscarArticulos(token, t)
+                  .then((r) => {
+                    const elegido = r.find((a) => a.codigo.toUpperCase() === t.toUpperCase()) ?? r[0]
+                    if (elegido) agregar(elegido)
+                    else setResultados([])
+                  })
+                  .catch(manejar)
               }
             }}
             placeholder="Buscar producto o servicio por código o nombre (Enter agrega el primero)"

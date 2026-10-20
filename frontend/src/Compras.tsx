@@ -200,7 +200,31 @@ function Buscador<T extends { id: string }>({
   return (
     <div className="relative">
       <Search size={16} className="absolute top-3 left-3 text-gray-400" />
-      <input className={`${CAMPO} w-full pl-9`} value={texto} placeholder={placeholder} onChange={(e) => setTexto(e.target.value)} />
+      <input
+        className={`${CAMPO} w-full pl-9`}
+        value={texto}
+        placeholder={placeholder}
+        onChange={(e) => setTexto(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter (lo manda el lector de código de barras al final) elige el
+          // primero que aparezca, en vez de enviar el formulario de la factura.
+          if (e.key !== 'Enter') return
+          e.preventDefault()
+          const t = texto.trim()
+          if (t.length < 2) return
+          buscar(t)
+            .then((r) => {
+              if (r[0]) {
+                onElegir(r[0])
+                setTexto('')
+                setLista([])
+              } else setLista([])
+            })
+            .catch((err) => {
+              if (err instanceof SesionVencida) onSesionVencida()
+            })
+        }}
+      />
       {lista.length > 0 && (
         <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow">
           {lista.map((x) => {

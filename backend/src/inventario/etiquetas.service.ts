@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { calcularItbis } from '../servicios/calculo-itbis';
-import { CARTA, ROLLO, generarEtiquetas, moduloPara } from './etiquetas-pdf';
+import {
+  CARTA,
+  anchoUtil,
+  generarEtiquetas,
+  moduloPara,
+} from './etiquetas-pdf';
 import type { Etiqueta, Formato } from './etiquetas-pdf';
 import { SQL_TASA_VIGENTE } from './sql';
 
@@ -40,7 +45,9 @@ export class EtiquetasService {
       throw new BadRequestException('Escoja el papel: hoja carta o rollo');
     const inicio = formato === 'carta' ? (entero(datos.inicio ?? 1) ?? 0) : 1;
     if (inicio < 1 || inicio > CARTA.columnas * CARTA.filas)
-      throw new BadRequestException('Posición inicial: de 1 a 30');
+      throw new BadRequestException(
+        `Posición inicial: de 1 a ${CARTA.columnas * CARTA.filas}`,
+      );
     if (!Array.isArray(datos.productos) || datos.productos.length === 0)
       throw new BadRequestException('Marque al menos un producto');
     if (datos.productos.length > 300)
@@ -90,7 +97,7 @@ export class EtiquetasService {
       [p.productos.map((x) => x.productoId)],
     );
     const porId = new Map(r.rows.map((x) => [x.id, x]));
-    const ancho = (p.formato === 'carta' ? CARTA.ancho : ROLLO.ancho) - 8;
+    const ancho = anchoUtil(p.formato);
     const listos: (Etiqueta & { id: string; cantidad: number })[] = [];
     const noSeImprimen: {
       id: string;

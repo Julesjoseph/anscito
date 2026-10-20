@@ -1,5 +1,6 @@
 // La dirección del servidor se configura al arrancar (ver entorno.ts).
 import { API_URL } from './entorno'
+import { normalizarBusqueda } from './busqueda'
 import type { DatosTicket, TicketFilas } from './ticket'
 export { API_URL }
 
@@ -510,7 +511,7 @@ export type DatosProducto = {
 
 export const listarProductos = (token: string, f: FiltrosProductos) => {
   const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
-  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.texto.trim()) q.set('texto', normalizarBusqueda(f.texto))
   if (f.categoriaId) q.set('categoriaId', f.categoriaId)
   if (f.soloAlertas) q.set('alerta', 'si')
   return llamar<PaginaProductos>('GET', `/productos?${q.toString()}`, token)
@@ -1059,7 +1060,7 @@ export const prepararVenta = (token: string) =>
 export const buscarArticulos = (token: string, texto: string) =>
   llamar<ArticuloVenta[]>(
     'GET',
-    `/ventas/catalogo?${new URLSearchParams({ texto }).toString()}`,
+    `/ventas/catalogo?${new URLSearchParams({ texto: normalizarBusqueda(texto) }).toString()}`,
     token,
   )
 
@@ -2707,7 +2708,7 @@ export const buscarProveedoresCompra = (token: string, texto: string) =>
   llamar<ProveedorCompra[]>('GET', `/compras/proveedores?${new URLSearchParams({ texto }).toString()}`, token)
 
 export const buscarProductosCompra = (token: string, texto: string) =>
-  llamar<ProductoCompra[]>('GET', `/compras/productos?${new URLSearchParams({ texto }).toString()}`, token)
+  llamar<ProductoCompra[]>('GET', `/compras/productos?${new URLSearchParams({ texto: normalizarBusqueda(texto) }).toString()}`, token)
 
 export const listarCompras = (
   token: string,

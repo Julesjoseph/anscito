@@ -36,6 +36,7 @@ const MIGRACIONES = [
   ['037', "SELECT NOT EXISTS (SELECT 1 FROM categorias WHERE prefijo IS NULL)"],
   ['038', "SELECT EXISTS (SELECT 1 FROM configuracion WHERE clave = 'contabilidad.cierre_fiscal')"],
   ['039', "SELECT to_regclass('public.conciliaciones') IS NOT NULL"],
+  ['040', "SELECT NOT EXISTS (SELECT 1 FROM cuentas ct LEFT JOIN cuentas_contables cc ON cc.id = ct.cuenta_contable_id WHERE ct.cuenta_contable_id IS NULL OR cc.codigo IN ('110104', '110105', '110106', '110107'))"],
   // Cada migración nueva se agrega aquí con su comprobación, al publicarla.
 ].filter(([n]) => fs.readdirSync(DATABASE).some((x) => x.startsWith(`${n}_`) && x.endsWith('.sql')));
 // (Solo cuentan las que vienen en esta versión del código: las que todavía no

@@ -10,6 +10,7 @@ import { registrarAuditoria } from '../auditoria/auditoria';
 import { SQL_DISPONIBLE } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
 import { leerUnidad, SQL_UNIDADES } from '../comun/unidad';
+import { normalizarBusqueda } from '../comun/busqueda';
 import { DatabaseService } from '../database/database.service';
 import { esCero, esEntera, normalizarCantidad } from '../inventario/cantidades';
 import { SQL_EXISTENCIA } from '../inventario/sql';
@@ -138,7 +139,7 @@ export class ComprasService {
   }
 
   async productos(textoBuscado: unknown) {
-    const t = texto(textoBuscado);
+    const t = normalizarBusqueda(texto(textoBuscado));
     if (t.length < 2) return [];
     const r = await this.db.query(
       `SELECT p.id, p.codigo, p.nombre, p.costo, um.nombre AS unidad, um.permite_decimales

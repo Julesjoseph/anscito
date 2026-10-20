@@ -303,10 +303,17 @@ export class BancosService {
         );
         if (mo.rowCount === 0)
           throw new BadRequestException('Moneda inválida: DOP, USD o HTG');
+        const contable = await this.cuentaContableNueva(
+          c,
+          d.tipo,
+          d.nombre,
+          d.moneda,
+          actorId,
+        );
         const r = await c.query<{ id: string }>(
           `INSERT INTO cuentas (codigo, tipo, entidad, nombre, tipo_cuenta, moneda,
-                                ultimos_digitos, recibe_ventas, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+                                ultimos_digitos, recibe_ventas, created_by, cuenta_contable_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
           [
             d.codigo,
             d.tipo,
@@ -317,6 +324,7 @@ export class BancosService {
             d.digitos,
             d.recibeVentas,
             actorId,
+            contable?.id ?? null,
           ],
         );
         await registrarAuditoria(c, {
@@ -333,10 +341,11 @@ export class BancosService {
             moneda: d.moneda,
             ultimos_digitos: d.digitos,
             recibe_ventas: d.recibeVentas,
+            cuenta_contable: contable?.codigo ?? null,
           },
           ip,
         });
-        return { id: r.rows[0].id };
+        return { id: r.rows[0].id, cuentaContable: contable?.codigo ?? null };
       });
     } catch (e) {
       if ((e as { code?: string }).code === '23505')
@@ -345,6 +354,48 @@ export class BancosService {
         );
       throw e;
     }
+  }
+
+  // Cuenta contable propia de una cuenta nueva (decisión del dueño): el
+  // siguiente código libre bajo 1101 (110109, 110110…). Sin catálogo (sin la
+  // cuenta 1101), no se crea: la contabilidad usa la regla general.
+  private async cuentaContableNueva(
+    c: Pick<PoolClient, 'query'>,
+    tipo: string,
+    nombre: string,
+    moneda: string,
+    actorId: string,
+  ): Promise<{ id: string; codigo: string } | null> {
+    const padre = await c.query<{ id: string }>(
+      `SELECT id FROM cuentas_contables WHERE codigo = '1101' FOR UPDATE`,
+    );
+    if (padre.rowCount === 0) return null;
+    const sig = await c.query<{ codigo: string }>(
+      `SELECT (GREATEST(COALESCE(max(codigo::bigint), 110108), 110108) + 1)::text AS codigo
+       FROM cuentas_contables WHERE padre_id = $1 AND codigo ~ '^1101[0-9]{2}$'`,
+      [padre.rows[0].id],
+    );
+    const codigo = sig.rows[0].codigo;
+    if (Number(codigo) > 110199)
+      throw new BadRequestException(
+        'No quedan códigos libres bajo 1101: pida al contador que asigne la cuenta contable',
+      );
+    const nueva = await c.query<{ id: string }>(
+      `INSERT INTO cuentas_contables (codigo, nombre, tipo, naturaleza, padre_id, nivel,
+                                      acepta_movimientos, notas, created_by)
+       VALUES ($1, $2, 'activo', 'deudora', $3, 4, true, $4, $5) RETURNING id`,
+      [
+        codigo,
+        `${tipo === 'billetera' ? 'Billetera' : 'Banco'}: ${nombre} (${moneda})`.slice(
+          0,
+          150,
+        ),
+        padre.rows[0].id,
+        `Creada para la cuenta "${nombre}" de Bancos`,
+        actorId,
+      ],
+    );
+    return { id: nueva.rows[0].id, codigo };
   }
 
   // El código, el tipo y la moneda no se cambian (ya tiene movimientos).

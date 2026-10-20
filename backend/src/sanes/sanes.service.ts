@@ -472,7 +472,8 @@ export class SanesService {
           throw new BadRequestException(
             'El cliente no existe o está desactivado',
           );
-        // Ficha completa: datos, foto del documento, fiador y referencia confirmados.
+        // Ficha completa (faltantesFicha): teléfono, ficha, fiador y referencia
+        // confirmados. El documento y su foto son opcionales (026).
         const falta = await faltantesFicha(c, terceroId);
         if (falta.length)
           throw new BadRequestException(

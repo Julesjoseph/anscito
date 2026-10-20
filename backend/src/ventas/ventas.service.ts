@@ -9,6 +9,7 @@ import { SQL_DISPONIBLE, SQL_MOVS_CON_ESTADO } from '../bancos/sql';
 import { numeroSesion, SQL_ESPERADO } from '../caja/sql';
 import { contabilizar, revertir } from '../contabilidad/motor';
 import { registrarCredito } from '../cxc/estado';
+import { normalizarBusqueda } from '../comun/busqueda';
 import { DatabaseService } from '../database/database.service';
 import {
   anularEcfDeVenta,
@@ -260,7 +261,7 @@ export class VentasService {
 
   // Productos y servicios que se pueden vender (activos, con precio y tasa).
   async catalogo(textoBuscar?: string) {
-    const buscar = texto(textoBuscar);
+    const buscar = normalizarBusqueda(texto(textoBuscar));
     const patron = `%${buscar.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
     const r = await this.db.query(
       `SELECT * FROM (

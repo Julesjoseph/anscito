@@ -334,7 +334,8 @@ export function FormPersona({
           <CamposGarante d={fiador} fiador tipos={tipos} poner={(k, v) => setFiador({ ...fiador, [k]: v })} />
         </Seccion>
         <p className="text-xs text-gray-500">
-          Después de guardar: suba la foto del documento y confirme por teléfono el fiador y al menos una referencia.
+          Después de guardar: confirme por teléfono el fiador y al menos una referencia. La foto del documento es opcional (se
+          recomienda si la persona tiene documento).
         </p>
         {error && <CajaError>{error}</CajaError>}
         <div className="flex justify-end gap-2">
@@ -605,7 +606,7 @@ function Foto({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="font-medium">{tipo === 'documento_frente' ? 'Frente (obligatorio)' : 'Dorso (opcional)'}</span>
+      <span className="font-medium">{tipo === 'documento_frente' ? 'Frente (opcional, recomendado)' : 'Dorso (opcional)'}</span>
       {actual ? (
         vista ? (
           <button type="button" onClick={() => void abrirArchivo(token, `/sanes/archivos/${actual.id}`, onSesionVencida, setError)}>

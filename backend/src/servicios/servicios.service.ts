@@ -7,6 +7,7 @@ import {
 import type { PoolClient } from 'pg';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { siguienteCodigo } from '../comun/codigos';
+import { normalizarBusqueda } from '../comun/busqueda';
 import { DatabaseService } from '../database/database.service';
 import { calcularItbis, normalizarMonto } from './calculo-itbis';
 
@@ -190,7 +191,7 @@ export class ServiciosService {
     const condiciones: string[] = [];
     const params: unknown[] = [];
 
-    const buscar = texto(filtros.texto);
+    const buscar = normalizarBusqueda(texto(filtros.texto));
     if (buscar) {
       params.push(`%${buscar.replace(/[\\%_]/g, (c) => '\\' + c)}%`);
       condiciones.push(

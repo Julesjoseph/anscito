@@ -16,6 +16,9 @@ type Props = {
   onSesionVencida: () => void
 }
 
+// Hoja carta: 80 etiquetas (4 columnas × 20 filas), igual que el servidor.
+const POR_HOJA = 80
+
 type Marcado = { id: string; codigo: string; nombre: string; precio: string | null; cantidad: string }
 
 export default function Etiquetas({ token, onSesionVencida }: Props) {
@@ -58,7 +61,7 @@ export default function Etiquetas({ token, onSesionVencida }: Props) {
   }
 
   const cantidadValida = (c: string) => /^\d{1,3}$/.test(c.trim()) && Number(c) >= 1 && Number(c) <= 500
-  const inicioValido = formato === 'rollo' || (/^\d{1,2}$/.test(inicio.trim()) && Number(inicio) >= 1 && Number(inicio) <= 30)
+  const inicioValido = formato === 'rollo' || (/^\d{1,2}$/.test(inicio.trim()) && Number(inicio) >= 1 && Number(inicio) <= POR_HOJA)
   const listo = marcados.length > 0 && marcados.every((m) => cantidadValida(m.cantidad)) && inicioValido
   const totalEtiquetas = marcados.reduce((a, m) => a + (cantidadValida(m.cantidad) ? Number(m.cantidad) : 0), 0)
 
@@ -186,13 +189,13 @@ export default function Etiquetas({ token, onSesionVencida }: Props) {
             <label className="flex flex-col gap-1 text-sm text-gray-600">
               Papel
               <select className={CAMPO} value={formato} onChange={(e) => setFormato(e.target.value as 'carta' | 'rollo')}>
-                <option value="carta">Hoja carta adhesiva (30 por hoja, tipo Avery 5160)</option>
+                <option value="carta">Hoja carta adhesiva (80 por hoja, tipo Avery 5167, 1¾ × ½ pulgada)</option>
                 <option value="rollo">Rollo de impresora de etiquetas (50 × 25 mm)</option>
               </select>
             </label>
             {formato === 'carta' && (
               <label className="flex flex-col gap-1 text-sm text-gray-600">
-                Empezar en la etiqueta n.º (1 a 30)
+                Empezar en la etiqueta n.º (1 a {POR_HOJA})
                 <input className={`${CAMPO} ${inicioValido ? '' : 'border-red-400'}`} inputMode="numeric" value={inicio} onChange={(e) => setInicio(e.target.value.replace(/\D/g, ''))} />
                 <span className="text-xs text-gray-400">Para usar una hoja ya empezada: cuente de izquierda a derecha, fila por fila.</span>
               </label>
