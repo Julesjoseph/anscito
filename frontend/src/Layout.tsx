@@ -43,6 +43,7 @@ import CuentasCobrar from './CuentasCobrar'
 import CuentasPagar from './CuentasPagar'
 import Contabilidad from './Contabilidad'
 import Inventario from './Inventario'
+import Nomina from './Nomina'
 import Roles from './Roles'
 import Sanes from './Sanes'
 import Servicios from './Servicios'
@@ -166,7 +167,13 @@ const MODULOS: Modulo[] = [
     listo: true,
     permiso: 'fiscal.ver',
   },
-  { id: 'nomina', nombre: 'Nómina', Icono: Briefcase, listo: false },
+  {
+    id: 'nomina',
+    nombre: 'Nómina',
+    Icono: Briefcase,
+    listo: true,
+    permiso: 'nomina.ver',
+  },
   {
     id: 'reportes',
     nombre: 'Reportes',
@@ -406,6 +413,12 @@ export default function Layout({
             onSesionVencida={onSalir}
             gastoFijo={gastoFijo}
             onGastoFijoUsado={() => setGastoFijo(null)}
+          />
+        ) : pagina === 'nomina' ? (
+          <Nomina
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
           />
         ) : pagina === 'caja' ? (
           <Caja

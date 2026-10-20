@@ -32,6 +32,8 @@ export type Origen =
   | 'remesa'
   | 'remesa_entrega'
   | 'remesa_pago'
+  | 'nomina'
+  | 'adelanto'
   | 'no_llego';
 
 // Tabla de cada origen (lo que queda en asientos.origen_tabla).
@@ -51,6 +53,8 @@ export const TABLA_ORIGEN: Record<Origen, string> = {
   remesa: 'remesas',
   remesa_entrega: 'remesa_entregas',
   remesa_pago: 'remesa_pagos_comision',
+  nomina: 'nominas',
+  adelanto: 'empleado_adelantos',
   no_llego: 'cuenta_confirmaciones',
 };
 
@@ -240,7 +244,9 @@ async function patasDinero(
     | 'san_entrega_id'
     | 'remesa_id'
     | 'remesa_entrega_id'
-    | 'remesa_pago_id',
+    | 'remesa_pago_id'
+    | 'nomina_id'
+    | 'adelanto_id',
   ids: string[],
   tiposCaja: { entra: string[]; sale: string[] },
   tiposCuenta: string[],
@@ -754,7 +760,8 @@ async function movCuenta(
             (m.venta_id IS NOT NULL OR m.transferencia_id IS NOT NULL OR m.remesa_id IS NOT NULL
               OR m.remesa_entrega_id IS NOT NULL OR m.remesa_pago_id IS NOT NULL
               OR m.san_recibo_id IS NOT NULL OR m.san_entrega_id IS NOT NULL
-              OR m.compra_pago_id IS NOT NULL OR m.cxc_abono_id IS NOT NULL) AS de_otro
+              OR m.compra_pago_id IS NOT NULL OR m.cxc_abono_id IS NOT NULL
+              OR m.nomina_id IS NOT NULL OR m.adelanto_id IS NOT NULL) AS de_otro
      FROM cuenta_movimientos m JOIN cuentas ct ON ct.id = m.cuenta_id
      JOIN monedas mo ON mo.codigo = ct.moneda
      LEFT JOIN categorias_gasto g ON g.id = m.categoria_gasto_id
@@ -1143,6 +1150,131 @@ async function remesaPago(
   };
 }
 
+// ---------- Nómina ----------
+
+// Pago de una nómina: el gasto de cada parte (sueldo y horas extra,
+// comisiones y bonos, regalía o vacaciones), lo que se descuenta de los
+// adelantos (el empleado debe menos) y el dinero que salió. Los "otros
+// descuentos" rebajan el gasto del sueldo.
+async function nomina(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    numero: string;
+    tipo: 'regular' | 'regalia' | 'vacaciones';
+    fecha: string | null;
+    desde: string;
+    hasta: string;
+    sueldo: string;
+    extra: string;
+    bonos: string;
+    adelantos: string;
+    otros: string;
+    empleados: number;
+  }>(
+    `SELECT n.numero, n.tipo, to_char(n.fecha_pago, 'YYYY-MM-DD') AS fecha,
+            to_char(n.desde, 'YYYY-MM-DD') AS desde, to_char(n.hasta, 'YYYY-MM-DD') AS hasta,
+            COALESCE(sum(l.sueldo), 0)::numeric(14,2) AS sueldo,
+            COALESCE(sum(l.monto_extra), 0)::numeric(14,2) AS extra,
+            COALESCE(sum(l.comisiones + l.bonos), 0)::numeric(14,2) AS bonos,
+            COALESCE(sum(l.adelantos), 0)::numeric(14,2) AS adelantos,
+            COALESCE(sum(l.otros_descuentos), 0)::numeric(14,2) AS otros,
+            count(l.id)::int AS empleados
+     FROM nominas n LEFT JOIN nomina_lineas l ON l.nomina_id = n.id
+     WHERE n.id = $1 GROUP BY n.id`,
+    [id],
+  );
+  if (r.rowCount === 0) throw new ErrorContable('Nómina no encontrada');
+  const x = r.rows[0];
+  if (!x.fecha) return null;
+  const codigo = `NOM-${String(x.numero).padStart(6, '0')}`;
+  const p = new Partida();
+  const clave =
+    x.tipo === 'regalia'
+      ? 'regalia'
+      : x.tipo === 'vacaciones'
+        ? 'vacaciones'
+        : 'sueldos';
+  const principal = await cu.regla(clave);
+  const sueldos = await cu.regla('sueldos');
+  const otros = centavos(x.otros);
+  // Los otros descuentos rebajan la cuenta principal (sin dejarla negativa).
+  const base = centavos(x.sueldo) - otros;
+  if (base > 0n) p.debe(principal, base);
+  else if (base < 0n) p.haber(principal, -base);
+  if (centavos(x.extra) > 0n) p.debe(sueldos, centavos(x.extra));
+  if (centavos(x.bonos) > 0n)
+    p.debe(await cu.regla('bonificaciones'), centavos(x.bonos));
+  if (centavos(x.adelantos) > 0n)
+    p.haber(await cu.regla('adelantos_empleados'), centavos(x.adelantos));
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'nomina_id',
+    [id],
+    { entra: [], sale: ['nomina'] },
+    ['nomina'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  const que =
+    x.tipo === 'regalia'
+      ? 'Regalía pascual'
+      : x.tipo === 'vacaciones'
+        ? 'Vacaciones'
+        : 'Nómina';
+  return {
+    fecha: x.fecha,
+    concepto: `${que} ${codigo} (${x.desde} a ${x.hasta}, ${x.empleados} empleado${x.empleados === 1 ? '' : 's'})`,
+    documento: codigo,
+    lineas: p.juntas(),
+  };
+}
+
+// Adelanto o préstamo a un empleado: no es gasto, el empleado lo debe.
+async function adelanto(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    numero: string;
+    fecha: string;
+    monto: string;
+    empleado: string;
+    motivo: string;
+  }>(
+    `SELECT a.numero, to_char(a.fecha, 'YYYY-MM-DD') AS fecha, a.monto, e.nombre AS empleado, a.motivo
+     FROM empleado_adelantos a JOIN empleados e ON e.id = a.empleado_id WHERE a.id = $1`,
+    [id],
+  );
+  if (r.rowCount === 0) throw new ErrorContable('Adelanto no encontrado');
+  const x = r.rows[0];
+  const codigo = `ADL-${String(x.numero).padStart(6, '0')}`;
+  const p = new Partida();
+  p.debe(await cu.regla('adelantos_empleados'), centavos(x.monto), {
+    descripcion: x.empleado,
+  });
+  await patasDinero(
+    c,
+    cu,
+    p,
+    'adelanto_id',
+    [id],
+    { entra: [], sale: ['nomina'] },
+    ['nomina'],
+  );
+  await cerrarRedondeo(p, cu, 0n);
+  return {
+    fecha: x.fecha,
+    concepto: `Adelanto ${codigo} a ${x.empleado}: ${x.motivo}`.slice(0, 300),
+    documento: codigo,
+    lineas: p.juntas(),
+  };
+}
+
 // ---------- Dinero que no llegó al banco ----------
 
 // Un movimiento "por confirmar" (cobro por transferencia, depósito de la caja,
@@ -1273,6 +1405,10 @@ async function armar(
       return remesaEntrega(c, cu, id);
     case 'remesa_pago':
       return remesaPago(c, cu, id);
+    case 'nomina':
+      return nomina(c, cu, id);
+    case 'adelanto':
+      return adelanto(c, cu, id);
     case 'no_llego':
       return noLlego(c, cu, id);
   }

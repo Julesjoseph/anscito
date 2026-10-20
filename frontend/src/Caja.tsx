@@ -78,6 +78,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   abono_anulado: 'Abono anulado (devuelto)',
   cambio: 'Devuelta en RD$ (pago en US$)',
   cambio_reverso: 'Devuelta en RD$ devuelta (venta anulada)',
+  nomina: 'Pago a empleado (nómina o adelanto)',
+  nomina_reverso: 'Pago a empleado anulado (devuelto)',
 }
 
 const NOMBRE_TIPO_USD: Record<string, string> = {

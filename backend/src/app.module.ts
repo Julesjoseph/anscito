@@ -11,6 +11,7 @@ import { FacturacionModule } from './facturacion/facturacion.module';
 import { ComprasModule } from './compras/compras.module';
 import { CxcModule } from './cxc/cxc.module';
 import { CxpModule } from './cxp/cxp.module';
+import { NominaModule } from './nomina/nomina.module';
 import { ContabilidadModule } from './contabilidad/contabilidad.module';
 import { FiscalModule } from './fiscal/fiscal.module';
 import { CategoriasModule } from './categorias/categorias.module';
@@ -45,6 +46,7 @@ import { VentasModule } from './ventas/ventas.module';
     ComprasModule,
     CxcModule,
     CxpModule,
+    NominaModule,
     ContabilidadModule,
     FiscalModule,
   ],

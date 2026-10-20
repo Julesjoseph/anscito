@@ -271,6 +271,23 @@ function FormCliente({
 
 type Remitente = { id: string; nombre: string; documento: string | null; telefono: string | null }
 
+// Agentes que coinciden con la búsqueda por código, nombre o teléfono
+// (el teléfono se compara solo con los números).
+function filtrarAgentes<T extends { codigo: string; nombre: string; telefono: string | null }>(
+  agentes: T[],
+  texto: string,
+): T[] {
+  const q = texto.trim().toLowerCase()
+  if (!q) return agentes
+  const digitos = q.replace(/\D/g, '')
+  return agentes.filter(
+    (a) =>
+      a.codigo.toLowerCase().includes(q) ||
+      a.nombre.toLowerCase().includes(q) ||
+      (digitos !== '' && (a.telefono ?? '').replace(/\D/g, '').includes(digitos)),
+  )
+}
+
 function NuevoEnvio({
   token,
   permisos,
@@ -307,6 +324,16 @@ function NuevoEnvio({
   const { error, setError, guardando, enviar } = useEnviar(onSesionVencida)
 
   const agente = activos.find((a) => a.id === agenteId)
+  const [buscarAgente, setBuscarAgente] = useState('')
+  // El agente elegido sigue en la lista aunque no coincida con la búsqueda.
+  const agentesVisibles = activos.filter(
+    (a) => a.id === agenteId || filtrarAgentes([a], buscarAgente).length > 0,
+  )
+
+  function elegirAgente(id: string) {
+    setAgenteId(id)
+    guardar('anscito.agenteEnvio', id)
+  }
 
   // Vista previa de los montos (con la tarifa vigente del servidor).
   // Los envíos van en pesos y gourdes enteros (decisión del dueño).
@@ -427,16 +454,29 @@ function NuevoEnvio({
       <div className="flex flex-col gap-4 xl:col-span-2">
         <section className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 text-sm">
           <h2 className="font-medium">1. Agente que pide el envío</h2>
-          <select
-            value={agenteId}
-            onChange={(e) => {
-              setAgenteId(e.target.value)
-              guardar('anscito.agenteEnvio', e.target.value)
-            }}
-            className={CAMPO}
-          >
-            <option value="">Seleccione el agente…</option>
-            {activos.map((a) => (
+          <div className="relative">
+            <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-gray-400" />
+            <input
+              type="search"
+              value={buscarAgente}
+              onChange={(e) => {
+                const texto = e.target.value
+                setBuscarAgente(texto)
+                // Si la búsqueda deja un solo agente, se elige solo.
+                const quedan = filtrarAgentes(activos, texto)
+                if (texto.trim() && quedan.length === 1) elegirAgente(quedan[0].id)
+              }}
+              placeholder="Buscar agente por código, nombre o teléfono"
+              className={`${CAMPO} w-full pl-9`}
+            />
+          </div>
+          <select value={agenteId} onChange={(e) => elegirAgente(e.target.value)} className={CAMPO}>
+            <option value="">
+              {buscarAgente.trim() && agentesVisibles.length === 0
+                ? 'Ningún agente coincide con la búsqueda'
+                : `Seleccione el agente… (${agentesVisibles.length})`}
+            </option>
+            {agentesVisibles.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.codigo} · {a.nombre}
                 {a.tipo === 'propio' ? ' (punto propio)' : ''}

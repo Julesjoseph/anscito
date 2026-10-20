@@ -58,6 +58,8 @@ export type DatosCuadre = {
       abonos_anulados: string;
       cambios?: string;
       cambios_devueltos?: string;
+      nomina?: string;
+      nomina_devuelta?: string;
       cantidad_ventas: number;
     };
     movimientos: {
@@ -184,6 +186,8 @@ const NOMBRE_TIPO: Record<string, string> = {
   abono_anulado: 'Abono anulado (devuelto)',
   cambio: 'Devuelta en RD$ (pago en US$)',
   cambio_reverso: 'Devuelta en RD$ devuelta',
+  nomina: 'Pago a empleado',
+  nomina_reverso: 'Pago a empleado anulado (devuelto)',
 };
 
 function fecha(iso: string, zona: string): string {
@@ -294,6 +298,13 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
       '+ Devueltas en RD$ que volvieron',
       dinero(s.totales.cambios_devueltos),
     );
+  if (s.totales.nomina && s.totales.nomina !== '0.00')
+    fila('- Pagos a empleados (nómina y adelantos)', menos(s.totales.nomina));
+  if (s.totales.nomina_devuelta && s.totales.nomina_devuelta !== '0.00')
+    fila(
+      '+ Pagos a empleados anulados (devuelto)',
+      dinero(s.totales.nomina_devuelta),
+    );
   doc.moveDown(0.2);
   fila('Debería haber', dinero(s.esperado), true, m.letra + 1);
 
@@ -361,7 +372,8 @@ function dibujar(doc: PDFKit.PDFDocument, d: DatosCuadre, f: Formato): number {
         x.tipo === 'san_cuota' ||
         x.tipo === 'compra_reverso' ||
         x.tipo === 'abono_credito' ||
-        x.tipo === 'cambio_reverso'
+        x.tipo === 'cambio_reverso' ||
+        x.tipo === 'nomina_reverso'
           ? ''
           : '-';
       fila(
@@ -468,6 +480,15 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
     el.push(
       fila('+ Devueltas en RD$ que volvieron', dinero(t.cambios_devueltos)),
     );
+  if (t.nomina && t.nomina !== '0.00')
+    el.push(fila('- Pagos a empleados (nómina y adelantos)', menos(t.nomina)));
+  if (t.nomina_devuelta && t.nomina_devuelta !== '0.00')
+    el.push(
+      fila(
+        '+ Pagos a empleados anulados (devuelto)',
+        dinero(t.nomina_devuelta),
+      ),
+    );
   el.push(fila('Debería haber', dinero(s.esperado), true));
   if (s.contado !== null && s.diferencia !== null) {
     const dif = s.diferencia;
@@ -524,7 +545,8 @@ export function ticketCuadre(d: DatosCuadre): Ticket {
         x.tipo === 'san_cuota' ||
         x.tipo === 'compra_reverso' ||
         x.tipo === 'abono_credito' ||
-        x.tipo === 'cambio_reverso'
+        x.tipo === 'cambio_reverso' ||
+        x.tipo === 'nomina_reverso'
           ? ''
           : '-';
       el.push(

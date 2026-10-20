@@ -33,6 +33,7 @@ const NOMBRE_TIPO: Record<string, string> = {
   remesa: 'Envío',
   san_cuota: 'Cuota SOL CASH',
   san_mano: 'Mano SOL CASH',
+  nomina: 'Pago a empleado',
 }
 
 function fechaCorta(dia: string | null | undefined): string {

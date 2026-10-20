@@ -66,6 +66,8 @@ const QUE_ES: Record<string, string> = {
   remesas: 'Envío (SCITO TRANSFER)',
   remesa_entregas: 'Entrega de un agente',
   remesa_pagos_comision: 'Comisión de un agente',
+  nominas: 'Nómina',
+  empleado_adelantos: 'Adelanto a un empleado',
   cuenta_confirmaciones: 'Dinero que no llegó al banco',
 };
 

@@ -201,7 +201,7 @@ export class RemesasService {
           'SELECT id, codigo, nombre FROM motivos_envio WHERE is_active ORDER BY orden',
         ),
         this.db.query(
-          `SELECT id, codigo, nombre, tipo FROM remesa_agentes
+          `SELECT id, codigo, nombre, tipo, telefono FROM remesa_agentes
            WHERE is_active ORDER BY codigo`,
         ),
         // Billeteras en gourdes de donde salen los envíos.

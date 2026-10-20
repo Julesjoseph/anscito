@@ -77,6 +77,7 @@ const NOMBRE_TIPO: Record<string, string> = {
   san_mano: 'Mano de SOL CASH entregada',
   compra: 'Pago de compra',
   abono_credito: 'Abono de crédito',
+  nomina: 'Pago a empleado',
 }
 
 const CAMBIADO_POR: [string, string][] = [

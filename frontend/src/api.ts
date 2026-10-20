@@ -1749,7 +1749,7 @@ export const transferirDinero = (token: string, datos: DatosTransferencia) =>
 
 export type TarifaEnvio = { tasa: string; comision_pct: string; comision_agente_pct: string }
 
-export type AgenteOpcion = { id: string; codigo: string; nombre: string; tipo: 'propio' | 'autorizado' }
+export type AgenteOpcion = { id: string; codigo: string; nombre: string; tipo: 'propio' | 'autorizado'; telefono: string | null }
 
 export type PrepararEnvios = {
   tarifa: TarifaEnvio
