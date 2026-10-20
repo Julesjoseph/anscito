@@ -1305,6 +1305,8 @@ export type TipoMovimientoCaja =
   | 'abono_anulado'
   | 'cambio'
   | 'cambio_reverso'
+  | 'nomina'
+  | 'nomina_reverso'
 
 export type MovimientoCaja = {
   id: string
@@ -1337,6 +1339,8 @@ export type TotalesCaja = {
   abonos_anulados: string
   cambios: string // devuelta en RD$ de pagos en US$
   cambios_devueltos: string
+  nomina?: string
+  nomina_devuelta?: string
   cantidad_ventas: number
 }
 

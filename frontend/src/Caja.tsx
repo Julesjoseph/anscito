@@ -853,6 +853,8 @@ function VerSesion({
         {t.abonos_anulados !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Abonos anulados (devuelto)</dt><dd>{dinero(t.abonos_anulados)}</dd></div>}
         {t.cambios !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Devuelta en RD$ de pagos en US$</dt><dd>{dinero(t.cambios)}</dd></div>}
         {t.cambios_devueltos !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Devueltas en RD$ que volvieron</dt><dd>{dinero(t.cambios_devueltos)}</dd></div>}
+        {t.nomina && t.nomina !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">− Pagos a empleados (nómina y adelantos)</dt><dd>{dinero(t.nomina)}</dd></div>}
+        {t.nomina_devuelta && t.nomina_devuelta !== '0.00' && <div className="flex justify-between"><dt className="text-gray-500">+ Pagos a empleados anulados (devuelto)</dt><dd>{dinero(t.nomina_devuelta)}</dd></div>}
       </dl>
       <div className="flex flex-col gap-1 rounded-lg bg-gray-50 p-3">
         <div className="flex justify-between text-base font-medium"><span>Debería haber</span><span>{dinero(s.esperado)}</span></div>
@@ -937,7 +939,7 @@ function VerSesion({
               </thead>
               <tbody>
                 {s.movimientos.map((m) => {
-                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota' || m.tipo === 'compra_reverso' || m.tipo === 'abono_credito' || m.tipo === 'cambio_reverso'
+                  const suma = m.tipo === 'venta' || m.tipo === 'ingreso' || m.tipo === 'desde_cuenta' || m.tipo === 'san_cuota' || m.tipo === 'compra_reverso' || m.tipo === 'abono_credito' || m.tipo === 'cambio_reverso' || m.tipo === 'nomina_reverso'
                   return (
                     <tr key={m.id} className="border-t border-gray-100 align-top">
                       <td className="py-1.5 pr-2 whitespace-nowrap text-gray-500">{new Date(m.fecha).toLocaleTimeString('es-DO', { hour: 'numeric', minute: '2-digit' })}</td>
