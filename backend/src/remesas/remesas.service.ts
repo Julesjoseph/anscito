@@ -10,6 +10,7 @@ import { SQL_DISPONIBLE } from '../bancos/sql';
 import { SQL_ESPERADO } from '../caja/sql';
 import { contabilizar } from '../contabilidad/motor';
 import { DatabaseService } from '../database/database.service';
+import { exportarLista } from '../reportes/exportar';
 import { normalizarMonto } from '../servicios/calculo-itbis';
 import { enmascarar } from '../terceros/documentos';
 import {
@@ -313,6 +314,90 @@ export class RemesasService {
        FROM remesa_agentes ORDER BY is_active DESC, codigo`,
     );
     return r.rows;
+  }
+
+  // Descarga de la lista de agentes (con la búsqueda de la pantalla: código,
+  // nombre o teléfono) en Excel o PDF. Queda en la auditoría quién la bajó.
+  async exportarAgentes(
+    actorId: string,
+    filtros: { texto?: unknown; inactivos?: unknown },
+    formato: string,
+    ip?: string,
+  ) {
+    if (formato !== 'xlsx' && formato !== 'pdf')
+      throw new BadRequestException('Formato inválido: xlsx o pdf');
+    const buscar = texto(filtros.texto);
+    const conInactivos = texto(filtros.inactivos) === 'si';
+    const digitos = buscar.replace(/\D/g, '');
+    const r = await this.db.query(
+      `SELECT codigo, nombre, telefono, grupo_whatsapp,
+              CASE tipo WHEN 'propio' THEN 'Punto propio' ELSE 'Autorizado' END AS tipo,
+              frecuencia_pago, notas,
+              CASE WHEN is_active THEN 'Activo' ELSE 'Inactivo' END AS estado
+       FROM remesa_agentes
+       WHERE ($1 OR is_active)
+         AND ($2 = '' OR codigo ILIKE $3 OR nombre ILIKE $3
+              OR ($4 <> '' AND regexp_replace(coalesce(telefono, ''), '\\D', '', 'g') LIKE $5))
+       ORDER BY is_active DESC, codigo`,
+      [
+        conInactivos,
+        buscar,
+        `%${buscar.replace(/[%_\\]/g, '')}%`,
+        digitos,
+        `%${digitos}%`,
+      ],
+    );
+    const lista = await exportarLista(
+      this.db,
+      {
+        codigo: 'agentes',
+        titulo: 'Lista de agentes (SCITO TRANSFER)',
+        detalle: [
+          conInactivos ? 'Activos e inactivos' : 'Activos',
+          buscar ? `Búsqueda: "${buscar}"` : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        columnas: [
+          { clave: 'codigo', titulo: 'Código', tipo: 'texto' },
+          { clave: 'nombre', titulo: 'Nombre', tipo: 'texto' },
+          { clave: 'telefono', titulo: 'Teléfono', tipo: 'texto' },
+          {
+            clave: 'grupo_whatsapp',
+            titulo: 'Grupo de WhatsApp',
+            tipo: 'texto',
+          },
+          { clave: 'tipo', titulo: 'Tipo', tipo: 'texto' },
+          {
+            clave: 'frecuencia_pago',
+            titulo: 'Pago de comisión',
+            tipo: 'texto',
+          },
+          { clave: 'notas', titulo: 'Notas', tipo: 'texto' },
+          ...(conInactivos
+            ? [{ clave: 'estado', titulo: 'Estado', tipo: 'texto' as const }]
+            : []),
+        ],
+        filas: r.rows,
+        notas: [`${r.rows.length} agente(s).`],
+      },
+      formato,
+    );
+    await this.db.transaccion(async (c) => {
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: 'agentes.exportar',
+        entidad: 'remesa_agentes',
+        nuevo: {
+          formato,
+          filas: r.rows.length,
+          inactivos: conInactivos,
+          busqueda: buscar || null,
+        },
+        ip,
+      });
+    });
+    return lista;
   }
 
   private datosAgente(datos: Record<string, unknown>) {

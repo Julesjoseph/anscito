@@ -709,6 +709,39 @@ export const listarTerceros = (
   return llamar<PaginaTerceros>('GET', `/${rol}?${q.toString()}`, token)
 }
 
+// Descarga un archivo (Excel o PDF) y lo guarda con el nombre que da el servidor.
+export async function bajarArchivo(token: string, ruta: string, porDefecto: string): Promise<void> {
+  const res = await fetch(`${API_URL}${ruta}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (res.status === 401) throw new SesionVencida('Sesión vencida')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.message ?? 'No se pudo generar el archivo')
+  }
+  const nombre = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? porDefecto
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombre
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+// Lista de clientes o proveedores (con la búsqueda de la pantalla) en Excel o PDF.
+export function descargarTerceros(rol: RolTercero, token: string, f: FiltrosTerceros, formato: 'xlsx' | 'pdf') {
+  const q = new URLSearchParams({ estado: f.estado })
+  if (f.texto.trim()) q.set('texto', f.texto.trim())
+  if (f.soloContribuyentes) q.set('contribuyente', 'si')
+  return bajarArchivo(token, `/${rol}/exportar/${formato}?${q.toString()}`, `${rol}.${formato}`)
+}
+
+// Lista de agentes de SCITO TRANSFER en Excel o PDF.
+export function descargarAgentes(token: string, texto: string, inactivos: boolean, formato: 'xlsx' | 'pdf') {
+  const q = new URLSearchParams()
+  if (texto.trim()) q.set('texto', texto.trim())
+  if (inactivos) q.set('inactivos', 'si')
+  return bajarArchivo(token, `/remesas/agentes/exportar/${formato}?${q.toString()}`, `agentes.${formato}`)
+}
+
 export const tiposDocumento = (rol: RolTercero, token: string) =>
   llamar<TipoDocumento[]>('GET', `/${rol}/tipos-documento`, token)
 

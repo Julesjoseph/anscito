@@ -18,6 +18,7 @@ import {
 import {
   SesionVencida,
   crearTercero,
+  descargarTerceros,
   editarTercero,
   estadoTercero,
   listarTerceros,
@@ -35,6 +36,7 @@ import {
   BOTON_PELIGRO,
   BOTON_PRINCIPAL,
   BOTON_SECUNDARIO,
+  BotonesDescarga,
   CAMPO,
   CajaError,
   Ventana,
@@ -525,6 +527,7 @@ export default function Terceros({ rol, token, permisos, onSesionVencida }: Prop
           />
           Solo contribuyentes
         </label>
+        <BotonesDescarga bajar={(formato) => descargarTerceros(rol, token, filtros, formato)} onError={manejar} />
         {puedeCrear && (
           <button type="button" onClick={() => abrir({ tipo: 'crear' })} className={BOTON_PRINCIPAL}>
             <Plus size={16} />

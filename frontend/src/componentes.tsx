@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { X } from 'lucide-react'
+import { FileSpreadsheet, FileText, X } from 'lucide-react'
 
 // Piezas visuales compartidas por las pantallas nuevas.
 
@@ -87,5 +88,49 @@ export function SelectorLinea({
         ))}
       </select>
     </label>
+  )
+}
+
+// Botones "Excel" y "PDF" para descargar una lista. "bajar" hace la descarga;
+// si falla, el error se pasa a "onError".
+export function BotonesDescarga({
+  bajar,
+  onError,
+}: {
+  bajar: (formato: 'xlsx' | 'pdf') => Promise<void>
+  onError: (e: unknown) => void
+}) {
+  const [bajando, setBajando] = useState<'' | 'xlsx' | 'pdf'>('')
+  async function descargar(formato: 'xlsx' | 'pdf') {
+    setBajando(formato)
+    try {
+      await bajar(formato)
+    } catch (e) {
+      onError(e)
+    } finally {
+      setBajando('')
+    }
+  }
+  return (
+    <div className="flex gap-2">
+      <button
+        type="button"
+        onClick={() => void descargar('xlsx')}
+        disabled={bajando !== ''}
+        title="Descargar la lista en Excel"
+        className="inline-flex h-10 items-center gap-2 rounded-lg border border-green-700 bg-white px-3 text-sm font-medium text-green-800 hover:bg-green-50 disabled:opacity-50"
+      >
+        <FileSpreadsheet size={16} /> {bajando === 'xlsx' ? 'Preparando…' : 'Excel'}
+      </button>
+      <button
+        type="button"
+        onClick={() => void descargar('pdf')}
+        disabled={bajando !== ''}
+        title="Descargar la lista en PDF"
+        className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#C8102E] bg-white px-3 text-sm font-medium text-[#C8102E] hover:bg-red-50 disabled:opacity-50"
+      >
+        <FileText size={16} /> {bajando === 'pdf' ? 'Preparando…' : 'PDF'}
+      </button>
+    </div>
   )
 }

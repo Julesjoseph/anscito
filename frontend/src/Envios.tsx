@@ -24,6 +24,7 @@ import {
   crearAgente,
   crearTercero,
   cuentasAgentes,
+  descargarAgentes,
   detalleEnvio,
   editarAgente,
   estadoAgente,
@@ -65,6 +66,7 @@ import {
   BOTON_PELIGRO,
   BOTON_PRINCIPAL,
   BOTON_SECUNDARIO,
+  BotonesDescarga,
   CAMPO,
   CajaError,
   Ventana,
@@ -1466,6 +1468,7 @@ function Configuracion({ token, permisos, prep, version, onCambio, onSesionVenci
   const [error, setError] = useState('')
   const [modal, setModal] = useState<{ tipo: 'tarifa' } | { tipo: 'agente'; agente: FilaAgente | null } | { tipo: 'estado'; agente: FilaAgente } | null>(null)
   const [verInactivos, setVerInactivos] = useState(false)
+  const [buscar, setBuscar] = useState('')
   const gestionar = permisos.includes('remesas.gestionar')
 
   const cargar = useCallback(async () => {
@@ -1490,7 +1493,17 @@ function Configuracion({ token, permisos, prep, version, onCambio, onSesionVenci
     onCambio()
   }
   const inactivos = agentes.filter((a) => !a.is_active).length
-  const visibles = verInactivos ? agentes : agentes.filter((a) => a.is_active)
+  // Búsqueda por código, nombre o teléfono (el teléfono, solo con los números).
+  const q = buscar.trim().toLowerCase()
+  const digitos = q.replace(/\D/g, '')
+  const visibles = agentes.filter(
+    (a) =>
+      (verInactivos || a.is_active) &&
+      (!q ||
+        a.codigo.toLowerCase().includes(q) ||
+        a.nombre.toLowerCase().includes(q) ||
+        (digitos !== '' && (a.telefono ?? '').replace(/\D/g, '').includes(digitos))),
+  )
   const t = prep.tarifa
 
   return (
@@ -1532,6 +1545,10 @@ function Configuracion({ token, permisos, prep, version, onCambio, onSesionVenci
                 {verInactivos ? 'Ocultar inactivos' : `Mostrar inactivos (${inactivos})`}
               </button>
             )}
+            <BotonesDescarga
+              bajar={(formato) => descargarAgentes(token, buscar, verInactivos, formato)}
+              onError={(e) => (e instanceof SesionVencida ? onSesionVencida() : setError(mensajeDe(e)))}
+            />
             {gestionar && (
               <button type="button" onClick={() => setModal({ tipo: 'agente', agente: null })} className={BOTON_SECUNDARIO}>
                 <span className="inline-flex items-center gap-2"><Plus size={16} /> Nuevo agente</span>
@@ -1539,6 +1556,17 @@ function Configuracion({ token, permisos, prep, version, onCambio, onSesionVenci
             )}
           </div>
         </div>
+        <div className="relative mb-3">
+          <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-gray-400" />
+          <input
+            type="search"
+            value={buscar}
+            onChange={(e) => setBuscar(e.target.value)}
+            placeholder="Buscar agente por código, nombre o teléfono"
+            className={`${CAMPO} w-full pl-9`}
+          />
+        </div>
+        {visibles.length === 0 && <p className="py-2 text-gray-500">{q ? 'Ningún agente coincide con la búsqueda.' : 'No hay agentes.'}</p>}
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="text-xs text-gray-500">

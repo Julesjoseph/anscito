@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import type { Columna, Fila, Reporte } from './tipos';
@@ -322,4 +323,61 @@ export function aPdf(r: Reporte, enc: Encabezado): Promise<Buffer> {
     doc.on('error', mal);
     doc.end();
   });
+}
+
+// ---------- Listas (clientes, proveedores, agentes) ----------
+
+type Consulta = {
+  query<T extends Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }>;
+};
+
+// Nombre y RNC de la empresa y la fecha y hora de hoy, para el encabezado.
+export async function encabezadoEmpresa(
+  db: Consulta,
+): Promise<Encabezado & { hoy: string }> {
+  const e = (
+    await db.query<{ nombre_comercial: string; rnc: string | null }>(
+      'SELECT nombre_comercial, rnc FROM empresa WHERE id = 1',
+    )
+  ).rows[0];
+  const zona = (
+    await db.query<{ valor: string }>(
+      `SELECT valor FROM configuracion WHERE clave = 'empresa.zona_horaria'`,
+    )
+  ).rows[0].valor;
+  const ahora = new Date();
+  return {
+    empresa: e.nombre_comercial,
+    rnc: e.rnc,
+    generado: new Intl.DateTimeFormat('es-DO', {
+      timeZone: zona,
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(ahora),
+    hoy: new Intl.DateTimeFormat('en-CA', { timeZone: zona }).format(ahora),
+  };
+}
+
+// Una lista ya armada como reporte, en Excel o PDF, con su nombre de archivo
+// (por ejemplo "clientes_2026-10-20.xlsx").
+export async function exportarLista(
+  db: Consulta,
+  r: Omit<Reporte, 'periodo' | 'totales'>,
+  formato: unknown,
+): Promise<{ archivo: Buffer; nombre: string }> {
+  if (formato !== 'xlsx' && formato !== 'pdf')
+    throw new BadRequestException('Formato inválido: xlsx o pdf');
+  const enc = await encabezadoEmpresa(db);
+  const [a, m, d] = enc.hoy.split('-');
+  const reporte: Reporte = {
+    ...r,
+    periodo: `Al ${d}/${m}/${a}`,
+    totales: null,
+  };
+  const archivo =
+    formato === 'xlsx' ? await aExcel(reporte, enc) : await aPdf(reporte, enc);
+  return { archivo, nombre: `${r.codigo}_${enc.hoy}.${formato}` };
 }

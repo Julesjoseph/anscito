@@ -7,8 +7,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UsuarioActual } from '../auth/jwt-auth.guard';
 import { PermisosGuard } from '../auth/permisos.guard';
@@ -20,6 +22,20 @@ type Peticion = { usuario: UsuarioActual; ip?: string };
 type DatosEstado = { is_active?: unknown; motivo?: unknown };
 
 // Dos listas separadas con sus propios permisos; la lógica es la misma.
+
+export function enviarArchivo(
+  res: Response,
+  { archivo, nombre }: { archivo: Buffer; nombre: string },
+) {
+  res.set({
+    'Content-Type': nombre.endsWith('.xlsx')
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'application/pdf',
+    'Content-Disposition': `attachment; filename="${nombre}"`,
+    'Cache-Control': 'no-store',
+  });
+  res.send(archivo);
+}
 
 @UseGuards(JwtAuthGuard, PermisosGuard)
 @Controller('clientes')
@@ -47,6 +63,29 @@ export class ClientesController {
   @RequierePermiso('clientes.ver')
   tipos() {
     return this.terceros.tiposDocumento();
+  }
+
+  // Descarga de la lista (con la búsqueda de la pantalla): xlsx o pdf.
+  @Get('exportar/:formato')
+  @RequierePermiso('clientes.ver')
+  async exportar(
+    @Req() req: Peticion,
+    @Param('formato') formato: string,
+    @Query('texto') texto: string | undefined,
+    @Query('estado') estado: string | undefined,
+    @Query('contribuyente') contribuyente: string | undefined,
+    @Res() res: Response,
+  ) {
+    enviarArchivo(
+      res,
+      await this.terceros.exportar(
+        'cliente',
+        req.usuario.id,
+        { texto, estado, contribuyente },
+        formato,
+        req.ip,
+      ),
+    );
   }
 
   @Post()
@@ -115,6 +154,29 @@ export class ProveedoresController {
   @RequierePermiso('proveedores.ver')
   tipos() {
     return this.terceros.tiposDocumento();
+  }
+
+  // Descarga de la lista (con la búsqueda de la pantalla): xlsx o pdf.
+  @Get('exportar/:formato')
+  @RequierePermiso('proveedores.ver')
+  async exportar(
+    @Req() req: Peticion,
+    @Param('formato') formato: string,
+    @Query('texto') texto: string | undefined,
+    @Query('estado') estado: string | undefined,
+    @Query('contribuyente') contribuyente: string | undefined,
+    @Res() res: Response,
+  ) {
+    enviarArchivo(
+      res,
+      await this.terceros.exportar(
+        'proveedor',
+        req.usuario.id,
+        { texto, estado, contribuyente },
+        formato,
+        req.ip,
+      ),
+    );
   }
 
   @Post()

@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UsuarioActual } from '../auth/jwt-auth.guard';
 import { PermisosGuard } from '../auth/permisos.guard';
 import { RequierePermiso } from '../auth/permisos.decorator';
+import { enviarArchivo } from '../terceros/terceros.controller';
 import { RemesasService } from './remesas.service';
 
 type Peticion = { usuario: UsuarioActual; ip?: string };
@@ -59,6 +60,27 @@ export class RemesasController {
   @RequierePermiso('remesas.ver')
   agentes() {
     return this.remesas.agentes();
+  }
+
+  // Descarga de la lista de agentes: xlsx o pdf.
+  @Get('agentes/exportar/:formato')
+  @RequierePermiso('remesas.ver')
+  async exportarAgentes(
+    @Req() req: Peticion,
+    @Param('formato') formato: string,
+    @Query('texto') texto: string | undefined,
+    @Query('inactivos') inactivos: string | undefined,
+    @Res() res: Response,
+  ) {
+    enviarArchivo(
+      res,
+      await this.remesas.exportarAgentes(
+        req.usuario.id,
+        { texto, inactivos },
+        formato,
+        req.ip,
+      ),
+    );
   }
 
   @Post('agentes')

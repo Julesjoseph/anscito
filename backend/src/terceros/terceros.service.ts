@@ -8,6 +8,8 @@ import type { PoolClient } from 'pg';
 import { errorCodigoCliente } from './codigo-cliente';
 import { registrarAuditoria } from '../auditoria/auditoria';
 import { DatabaseService } from '../database/database.service';
+import { exportarLista } from '../reportes/exportar';
+import type { Columna } from '../reportes/tipos';
 import {
   correoValido,
   enmascarar,
@@ -245,7 +247,8 @@ export class TercerosService {
     }
   }
 
-  async listar(rol: Rol, actorId: string, filtros: FiltrosTerceros) {
+  // Condiciones de la búsqueda (las mismas en la lista y en la descarga).
+  private filtrar(rol: Rol, filtros: FiltrosTerceros) {
     const params: unknown[] = [rol];
     const condiciones = ['t.rol = $1'];
 
@@ -270,7 +273,11 @@ export class TercerosService {
       throw new BadRequestException('Estado inválido');
     if (texto(filtros.contribuyente) === 'si')
       condiciones.push('t.es_contribuyente = true');
+    return { params, condiciones, buscar, estado };
+  }
 
+  async listar(rol: Rol, actorId: string, filtros: FiltrosTerceros) {
+    const { params, condiciones } = this.filtrar(rol, filtros);
     const pagina = Math.max(
       1,
       Number.parseInt(texto(filtros.pagina) || '1', 10) || 1,
@@ -321,6 +328,133 @@ export class TercerosService {
       porPagina,
       verDocumento,
     };
+  }
+
+  // Descarga de la lista completa (con la misma búsqueda de la pantalla) en
+  // Excel o PDF. El documento sale enmascarado sin terceros.ver_documento.
+  // Queda en la auditoría quién la descargó (sin los datos).
+  async exportar(
+    rol: Rol,
+    actorId: string,
+    filtros: FiltrosTerceros,
+    formato: string,
+    ip?: string,
+  ) {
+    if (formato !== 'xlsx' && formato !== 'pdf')
+      throw new BadRequestException('Formato inválido: xlsx o pdf');
+    const { params, condiciones, buscar, estado } = this.filtrar(rol, filtros);
+    const r = await this.db.query<{
+      codigo: string | null;
+      nombre: string;
+      nombre_comercial: string | null;
+      tipo_documento: string | null;
+      numero_documento: string | null;
+      telefono: string | null;
+      whatsapp: string | null;
+      correo: string | null;
+      direccion: string | null;
+      es_contribuyente: boolean;
+      is_active: boolean;
+    }>(
+      `SELECT t.codigo, t.nombre, t.nombre_comercial, td.nombre AS tipo_documento,
+              t.numero_documento, t.telefono, t.whatsapp, t.correo, t.direccion,
+              t.es_contribuyente, t.is_active
+       FROM terceros t
+       LEFT JOIN tipos_documento td ON td.id = t.tipo_documento_id
+       WHERE ${condiciones.join(' AND ')} AND NOT t.es_protegido
+       ORDER BY lower(t.nombre)
+       LIMIT 20000`,
+      params,
+    );
+    const verDocumento = await this.tienePermiso(
+      actorId,
+      'terceros.ver_documento',
+    );
+    const esCliente = rol === 'cliente';
+    const filas = r.rows.map((f) => ({
+      codigo: f.codigo,
+      nombre: f.nombre,
+      nombre_comercial: f.nombre_comercial,
+      documento: f.numero_documento
+        ? `${f.tipo_documento ? `${f.tipo_documento} ` : ''}${
+            verDocumento ? f.numero_documento : enmascarar(f.numero_documento)
+          }`
+        : null,
+      telefono: f.telefono,
+      whatsapp: f.whatsapp,
+      correo: f.correo,
+      direccion: f.direccion,
+      credito_fiscal: f.es_contribuyente ? 'Sí' : 'No',
+      estado: f.is_active ? 'Activo' : 'Inactivo',
+    }));
+    const columnas: Columna[] = [
+      ...(esCliente
+        ? [{ clave: 'codigo', titulo: 'Código', tipo: 'texto' } as Columna]
+        : []),
+      { clave: 'nombre', titulo: 'Nombre', tipo: 'texto' },
+      { clave: 'nombre_comercial', titulo: 'Nombre comercial', tipo: 'texto' },
+      { clave: 'documento', titulo: 'Documento', tipo: 'texto' },
+      { clave: 'telefono', titulo: 'Teléfono', tipo: 'texto' },
+      { clave: 'whatsapp', titulo: 'WhatsApp', tipo: 'texto' },
+      { clave: 'correo', titulo: 'Correo', tipo: 'texto' },
+      { clave: 'direccion', titulo: 'Dirección', tipo: 'texto' },
+      ...(esCliente
+        ? [
+            {
+              clave: 'credito_fiscal',
+              titulo: 'Crédito Fiscal',
+              tipo: 'texto',
+            } as Columna,
+          ]
+        : []),
+      ...(estado === 'activos'
+        ? []
+        : [{ clave: 'estado', titulo: 'Estado', tipo: 'texto' } as Columna]),
+    ];
+    const nombreEstado: Record<string, string> = {
+      activos: 'Activos',
+      inactivos: 'Inactivos',
+      todos: 'Activos e inactivos',
+    };
+    const lista = await exportarLista(
+      this.db,
+      {
+        codigo: esCliente ? 'clientes' : 'proveedores',
+        titulo: esCliente ? 'Lista de clientes' : 'Lista de proveedores',
+        detalle: [
+          nombreEstado[estado],
+          buscar ? `Búsqueda: "${buscar}"` : '',
+          texto(filtros.contribuyente) === 'si' ? 'Solo Crédito Fiscal' : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        columnas,
+        filas,
+        notas: [
+          `${filas.length} ${esCliente ? 'cliente(s)' : 'proveedor(es)'}.`,
+          ...(esCliente ? ['No incluye "Consumidor final".'] : []),
+          ...(verDocumento
+            ? []
+            : ['Documentos enmascarados (sin permiso para verlos completos).']),
+        ],
+      },
+      formato,
+    );
+    await this.db.transaccion(async (c) => {
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion: `${esCliente ? 'clientes' : 'proveedores'}.exportar`,
+        entidad: 'terceros',
+        nuevo: {
+          formato,
+          filas: filas.length,
+          estado,
+          busqueda: buscar || null,
+        },
+        ip,
+      });
+    });
+    return lista;
   }
 
   // Datos para la auditoría: sin valores personales, documento enmascarado.
