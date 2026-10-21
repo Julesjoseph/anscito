@@ -18,6 +18,7 @@ import {
 import {
   SesionVencida,
   confirmarMovimiento,
+  confirmarRecarga,
   crearCuenta,
   editarCuenta,
   estadoCuenta,
@@ -39,6 +40,7 @@ import type {
   PaginaMovimientosCuenta,
   PrepararBancos,
   Ambito,
+  RecargaPendiente,
 } from './api'
 import {
   AREA,
@@ -83,13 +85,6 @@ const NOMBRE_TIPO: Record<string, string> = {
   abono_credito: 'Abono de crédito',
   nomina: 'Pago a empleado',
 }
-
-const CAMBIADO_POR: [string, string][] = [
-  ['casa_cambio', 'Casa de cambio'],
-  ['agente', 'Agente o MonCash/NatCash'],
-  ['banco', 'El banco'],
-  ['otro', 'Otro'],
-]
 
 // "1234.5" en la moneda de la cuenta: RD$1,234.50, US$1,234.50, HTG 1,234.50.
 function enMoneda(simbolo: string, monto: string | null | undefined): string {
@@ -596,6 +591,101 @@ function FormConfirmar({
   )
 }
 
+// Recarga de una billetera: llegó (con cuánto) o no llegó.
+function FormRecarga({
+  token,
+  recarga,
+  onListo,
+  onSesionVencida,
+}: {
+  token: string
+  recarga: RecargaPendiente
+  onListo: (mensaje: string) => void
+  onSesionVencida: () => void
+}) {
+  const [resultado, setResultado] = useState<'llego' | 'no_llego'>('llego')
+  const [monto, setMonto] = useState('')
+  const [dia, setDia] = useState(hoy())
+  const [motivo, setMotivo] = useState('')
+  const { error, guardando, enviar } = useEnviar(onSesionVencida)
+  const unidad = recarga.simbolo_entra === 'HTG' ? 'gourdes' : recarga.simbolo_entra
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        void enviar(async () => {
+          const r = await confirmarRecarga(token, recarga.id, {
+            resultado,
+            montoEntra: resultado === 'llego' ? monto.trim() : undefined,
+            fechaBanco: resultado === 'llego' ? dia : undefined,
+            motivo: motivo.trim() || undefined,
+          })
+          onListo(
+            resultado === 'llego'
+              ? `Recarga ${r.numero} confirmada${r.tasa ? `: ${r.tasa} ${unidad} por cada ${recarga.simbolo_sale}1` : ''}.`
+              : `Recarga ${r.numero} marcada "No llegó".`,
+          )
+        }, () => undefined)
+      }}
+      className="flex flex-col gap-3 text-sm"
+    >
+      <div className="rounded-lg bg-gray-50 p-3">
+        <div className="font-medium">
+          Recarga {recarga.numero}: {enMoneda(recarga.simbolo_sale, recarga.monto_sale)}
+        </div>
+        <div className="text-gray-500">
+          {recarga.origen} → {recarga.destino}
+          {recarga.fecha && ` · ${fecha(recarga.fecha)}`}
+        </div>
+        {(recarga.referencia || recarga.motivo) && (
+          <div className="text-gray-500">{[recarga.referencia, recarga.motivo].filter(Boolean).join(' · ')}</div>
+        )}
+      </div>
+      <p className="text-gray-600">¿Llegó a la billetera?</p>
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setResultado('llego')} className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 ${resultado === 'llego' ? 'border-green-600 bg-green-50 font-medium text-green-800' : 'border-gray-300 hover:bg-gray-50'}`}>
+          <CheckCircle2 size={16} /> Sí, llegó
+        </button>
+        <button type="button" onClick={() => setResultado('no_llego')} className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 ${resultado === 'no_llego' ? 'border-red-600 bg-red-50 font-medium text-red-800' : 'border-gray-300 hover:bg-gray-50'}`}>
+          <XCircle size={16} /> No llegó
+        </button>
+      </div>
+      {resultado === 'llego' ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-gray-600">
+            Monto que entró ({recarga.simbolo_entra})
+            <input type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[,\s]/g, ''))} placeholder="0.00" className={`${CAMPO} text-lg`} autoFocus />
+          </label>
+          <label className="flex flex-col gap-1 text-gray-600">
+            Fecha en que llegó
+            <input type="date" value={dia} min={recarga.fecha ?? undefined} max={hoy()} onChange={(e) => setDia(e.target.value)} className={CAMPO} />
+          </label>
+          <p className="text-xs text-gray-500 sm:col-span-2">Escriba las {unidad} que se ven en la billetera. El sistema calcula la tasa.</p>
+        </div>
+      ) : (
+        <>
+          <label className="flex flex-col gap-1 text-gray-600">
+            Motivo (obligatorio)
+            <input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej: el agente no hizo la recarga" className={CAMPO} />
+          </label>
+          <p className="flex gap-2 text-xs text-red-700">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            No se puede deshacer. El contador decide a qué cuenta va el dinero que salió.
+          </p>
+        </>
+      )}
+      {error && <CajaError>{error}</CajaError>}
+      <button
+        type="submit"
+        disabled={guardando || (resultado === 'llego' ? !positivo(monto) : motivo.trim().length < 5)}
+        className={resultado === 'llego' ? BOTON_PRINCIPAL : BOTON_PELIGRO}
+      >
+        {guardando ? 'Guardando…' : resultado === 'llego' ? 'Confirmar' : 'Marcar "No llegó"'}
+      </button>
+    </form>
+  )
+}
+
 function FormReversar({
   token,
   mov,
@@ -809,7 +899,7 @@ function FormTransferencia({
 }: {
   token: string
   prep: PrepararBancos
-  onListo: (numero: string) => void
+  onListo: (numero: string, porConfirmar: boolean) => void
   onSesionVencida: () => void
 }) {
   const ambito = useContext(AmbitoCtx)
@@ -818,7 +908,6 @@ function FormTransferencia({
   const [montoSale, setMontoSale] = useState('')
   const [montoEntra, setMontoEntra] = useState('')
   const [tasa, setTasa] = useState('')
-  const [cambiadoPor, setCambiadoPor] = useState('')
   const [referencia, setReferencia] = useState('')
   const [motivo, setMotivo] = useState('')
   const [dia, setDia] = useState(hoy())
@@ -828,17 +917,20 @@ function FormTransferencia({
   const lado = (v: string) => {
     if (v.startsWith('c:')) {
       const c = prep.cuentas.find((x) => x.id === v.slice(2))
-      return c ? { moneda: c.moneda, simbolo: c.simbolo, nombre: c.nombre } : null
+      return c ? { moneda: c.moneda, simbolo: c.simbolo, nombre: c.nombre, tipo: c.tipo } : null
     }
     if (v.startsWith('k:')) {
       const c = cajas.find((x) => x.id === v.slice(2))
-      return c ? { moneda: 'DOP', simbolo: 'RD$', nombre: c.nombre } : null
+      return c ? { moneda: 'DOP', simbolo: 'RD$', nombre: c.nombre, tipo: 'caja' } : null
     }
     return null
   }
   const o = lado(origen)
   const d = lado(destino)
   const cambia = o !== null && d !== null && o.moneda !== d.moneda
+  // Recarga de una billetera en otra moneda (decisión del dueño): solo se
+  // escribe lo que sale; lo que llegó se escribe al confirmarla.
+  const recarga = cambia && d?.tipo === 'billetera'
   const pideTasa = cambia && o?.moneda !== 'DOP' && d?.moneda !== 'DOP'
   const valido =
     o !== null &&
@@ -846,7 +938,7 @@ function FormTransferencia({
     origen !== destino &&
     !(origen.startsWith('k:') && destino.startsWith('k:')) &&
     positivo(montoSale) &&
-    (!cambia || (positivo(montoEntra) && cambiadoPor !== '')) &&
+    (!cambia || recarga || positivo(montoEntra)) &&
     (!pideTasa || TASA.test(tasa.trim()))
 
   const opciones = (
@@ -880,18 +972,17 @@ function FormTransferencia({
         destinoCuentaId: destino.startsWith('c:') ? destino.slice(2) : undefined,
         destinoCajaId: destino.startsWith('k:') ? destino.slice(2) : undefined,
         montoSale: montoSale.trim(),
-        montoEntra: cambia ? montoEntra.trim() : undefined,
+        montoEntra: cambia && !recarga ? montoEntra.trim() : undefined,
         tasa: pideTasa ? tasa.trim() : undefined,
-        cambiadoPor: cambia ? cambiadoPor : undefined,
         referencia: referencia.trim() || undefined,
         motivo: motivo.trim() || undefined,
-        fecha: dia,
+        fecha: recarga ? undefined : dia,
       }, ambito)
       setMontoSale('')
       setMontoEntra('')
       setReferencia('')
       setMotivo('')
-      onListo(r.numero)
+      onListo(r.numero, r.porConfirmar === true)
     }, () => undefined)
   }
 
@@ -914,30 +1005,19 @@ function FormTransferencia({
           Monto que sale {o && `(${o.simbolo})`}
           <input type="text" inputMode="decimal" value={montoSale} onChange={(e) => setMontoSale(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
         </label>
-        {cambia && (
+        {cambia && !recarga && (
           <label className="flex flex-col gap-1 text-gray-600">
             Monto que entra ({d?.simbolo})
             <input type="text" inputMode="decimal" value={montoEntra} onChange={(e) => setMontoEntra(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
           </label>
         )}
-        {cambia && (
+        {pideTasa && o && <CampoTasa moneda={o.moneda} tasa={tasa} setTasa={setTasa} />}
+        {!recarga && (
           <label className="flex flex-col gap-1 text-gray-600">
-            ¿Quién hizo el cambio de moneda?
-            <select value={cambiadoPor} onChange={(e) => setCambiadoPor(e.target.value)} className={CAMPO}>
-              <option value="">Seleccione…</option>
-              {CAMBIADO_POR.map(([id, texto]) => (
-                <option key={id} value={id}>
-                  {texto}
-                </option>
-              ))}
-            </select>
+            Fecha
+            <input type="date" value={dia} max={hoy()} onChange={(e) => setDia(e.target.value)} className={CAMPO} />
           </label>
         )}
-        {pideTasa && o && <CampoTasa moneda={o.moneda} tasa={tasa} setTasa={setTasa} />}
-        <label className="flex flex-col gap-1 text-gray-600">
-          Fecha
-          <input type="date" value={dia} max={hoy()} onChange={(e) => setDia(e.target.value)} className={CAMPO} />
-        </label>
         <label className="flex flex-col gap-1 text-gray-600">
           Referencia (opcional)
           <input type="text" value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Boleta o número de la transferencia" className={CAMPO} />
@@ -947,7 +1027,12 @@ function FormTransferencia({
         Nota (opcional)
         <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={2} placeholder="Ej: recarga MonCash para envíos" className={AREA} />
       </label>
-      {cambia && (
+      {recarga ? (
+        <p className="text-xs text-gray-500">
+          La recarga queda en “Por confirmar”. Cuando la vea en la billetera, confírmela y escriba cuántas{' '}
+          {d?.simbolo === 'HTG' ? 'gourdes' : d?.simbolo} llegaron: el sistema calcula la tasa.
+        </p>
+      ) : cambia && (
         <p className="text-xs text-gray-500">
           Si la casa de cambio o el agente cobró comisión aparte, regístrela como un pago con la categoría
           “Comisión de cambio de moneda”. Lo que entra con cambio de moneda queda por confirmar.
@@ -986,10 +1071,11 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
   const [seccion, setSeccion] = useState<'cuentas' | 'pendientes' | 'transferir' | 'conciliacion'>('cuentas')
   const [prep, setPrep] = useState<PrepararBancos | null>(null)
   const [cuentas, setCuentas] = useState<FilaCuenta[] | null>(null)
-  const [pendientes, setPendientes] = useState<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[] } | null>(null)
+  const [pendientes, setPendientes] = useState<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[]; recargas: RecargaPendiente[] } | null>(null)
   const [error, setError] = useState('')
   const [modal, setModal] = useState<Modal | null>(null)
   const [accion, setAccion] = useState<{ tipo: 'confirmar' | 'reversar'; mov: MovimientoCuenta } | null>(null)
+  const [recarga, setRecarga] = useState<RecargaPendiente | null>(null)
   const [version, setVersion] = useState(0)
   const [aviso, setAviso] = useState('')
   const gestionar = permisos.includes(permisoDe(ambito, 'gestionar'))
@@ -1024,7 +1110,7 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
   const activas = cuentas.filter((c) => c.is_active)
   const inactivas = cuentas.length - activas.length
   const visibles = gestionar && verInactivas ? cuentas : activas
-  const nPendientes = pendientes?.porConfirmar.length ?? 0
+  const nPendientes = (pendientes?.porConfirmar.length ?? 0) + (pendientes?.recargas.length ?? 0)
 
   // Totales por moneda (cuentas activas).
   const porMoneda = prep.monedas
@@ -1177,6 +1263,46 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
             <p className="mb-3 text-sm text-gray-500">Compare con el estado de cuenta del banco o de MonCash y confirme lo que aparece.</p>
             <TablaMovimientos filas={pendientes.porConfirmar} mostrarCuenta permisos={permisos} onConfirmar={(mov) => setAccion({ tipo: 'confirmar', mov })} onReversar={() => undefined} />
           </section>
+          {pendientes.recargas.length > 0 && (
+            <section className="rounded-xl border border-gray-200 bg-white p-4">
+              <h2 className="mb-1 font-medium">Recargas por confirmar</h2>
+              <p className="mb-3 text-sm text-gray-500">Cuando vea la recarga en la billetera, confírmela y escriba cuánto entró.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs text-gray-500">
+                    <tr>
+                      <th className="py-1 pr-2 font-medium">Recarga</th>
+                      <th className="py-1 pr-2 font-medium">De → a</th>
+                      <th className="py-1 pr-2 text-right font-medium">Salió</th>
+                      <th className="py-1" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendientes.recargas.map((r) => (
+                      <tr key={r.id} className="border-t border-gray-100 align-top">
+                        <td className="py-1.5 pr-2">
+                          <span className="font-mono text-xs">{r.numero}</span>
+                          <span className="block text-xs text-gray-500">{r.fecha ? fecha(r.fecha) : ''} · {r.usuario}</span>
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          {r.origen} → {r.destino}
+                          {(r.referencia || r.motivo) && <span className="block text-xs text-gray-500">{[r.referencia, r.motivo].filter(Boolean).join(' · ')}</span>}
+                        </td>
+                        <td className="py-1.5 pr-2 text-right whitespace-nowrap">{enMoneda(r.simbolo_sale, r.monto_sale)}</td>
+                        <td className="py-1.5 text-right">
+                          {permisos.includes(permisoDe(ambito, 'confirmar')) && (
+                            <button type="button" onClick={() => setRecarga(r)} className="rounded-lg border border-gray-300 px-3 py-1 text-sm hover:bg-gray-50">
+                              Confirmar
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
           {pendientes.noLlegaron.length > 0 && (
             <section className="rounded-xl border border-red-200 bg-white p-4">
               <h2 className="mb-1 flex items-center gap-2 font-medium text-red-800"><AlertTriangle size={16} /> No llegaron</h2>
@@ -1202,9 +1328,13 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
           token={token}
           prep={prep}
           onSesionVencida={onSesionVencida}
-          onListo={(numero) => {
-            setAviso(`Transferencia ${numero} registrada.`)
-            setTimeout(() => setAviso(''), 6000)
+          onListo={(numero, porConfirmar) => {
+            setAviso(
+              porConfirmar
+                ? `Recarga ${numero} registrada. Cuando llegue a la billetera, confírmela en “Por confirmar”.`
+                : `Transferencia ${numero} registrada.`,
+            )
+            setTimeout(() => setAviso(''), porConfirmar ? 10000 : 6000)
             cambio()
           }}
         />
@@ -1233,6 +1363,21 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
       {modal?.tipo === 'ver' && (
         <Ventana titulo={`${modal.cuenta.nombre} · movimientos`} ancho="max-w-4xl" onCerrar={() => setModal(null)}>
           <VerCuenta token={token} id={modal.cuenta.id} permisos={permisos} version={version} onAccion={setAccion} onSesionVencida={onSesionVencida} />
+        </Ventana>
+      )}
+      {recarga && (
+        <Ventana titulo="Confirmar recarga" onCerrar={() => setRecarga(null)}>
+          <FormRecarga
+            token={token}
+            recarga={recarga}
+            onSesionVencida={onSesionVencida}
+            onListo={(mensaje) => {
+              setRecarga(null)
+              setAviso(mensaje)
+              setTimeout(() => setAviso(''), 8000)
+              cambio()
+            }}
+          />
         </Ventana>
       )}
       {accion && (

@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { MODO_DEMO } from './entorno'
+import { aplicarTema, leerTema } from './tema'
+
+// El modo día/noche guardado se pone antes de dibujar (sin parpadeo).
+aplicarTema(leerTema())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

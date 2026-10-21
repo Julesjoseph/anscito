@@ -34,6 +34,7 @@ export type Origen =
   | 'remesa_pago'
   | 'nomina'
   | 'adelanto'
+  | 'llegada'
   | 'no_llego';
 
 // Tabla de cada origen (lo que queda en asientos.origen_tabla).
@@ -55,6 +56,7 @@ export const TABLA_ORIGEN: Record<Origen, string> = {
   remesa_pago: 'remesa_pagos_comision',
   nomina: 'nominas',
   adelanto: 'empleado_adelantos',
+  llegada: 'transferencia_llegadas',
   no_llego: 'cuenta_confirmaciones',
 };
 
@@ -883,6 +885,21 @@ async function transferencia(
     { entra: ['desde_cuenta'], sale: ['deposito'] },
     ['transferencia_entrada', 'transferencia_salida'],
   );
+  // Recarga de una billetera todavía sin confirmar (o que no llegó): su
+  // valor en RD$ ya se conoce y entra a la billetera; las gourdes se anotan
+  // al confirmarla. Si no llegó, el asiento de la llegada lo saca.
+  const pendiente = await c.query<{ cuenta_id: string; monto_dop: string }>(
+    `SELECT t.destino_cuenta_id AS cuenta_id, t.monto_dop FROM transferencias t
+     WHERE t.id = $1 AND t.monto_entra IS NULL AND t.destino_cuenta_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM cuenta_movimientos m
+                       WHERE m.transferencia_id = t.id AND m.tipo = 'transferencia_entrada')`,
+    [id],
+  );
+  if (pendiente.rowCount)
+    p.debe(
+      await cu.banco(pendiente.rows[0].cuenta_id),
+      centavos(pendiente.rows[0].monto_dop),
+    );
   await cerrarRedondeo(p, cu, 0n);
   const documento = numeroTransferencia(x.numero);
   return {
@@ -892,6 +909,59 @@ async function transferencia(
         0,
         300,
       ),
+    documento,
+    lineas: p.juntas(),
+  };
+}
+
+// Una recarga de billetera que no llegó: su valor ya entró a la billetera
+// con la recarga; sale de ahí y el contador escoge la cuenta (una pérdida,
+// algo que se debe cobrar…). Si la recarga no tiene asiento, nada que hacer.
+async function llegada(
+  c: Consulta,
+  cu: Cuentas,
+  id: string,
+): Promise<Borrador | null> {
+  const r = await c.query<{
+    fecha: string;
+    resultado: string;
+    transferencia_id: string;
+    numero: string;
+    cuenta_id: string;
+    cuenta: string;
+    monto_dop: string;
+    motivo: string | null;
+  }>(
+    `SELECT to_char((l.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS fecha, l.resultado,
+            t.id AS transferencia_id, t.numero, t.destino_cuenta_id AS cuenta_id, ct.nombre AS cuenta,
+            t.monto_dop, l.motivo
+     FROM transferencia_llegadas l JOIN transferencias t ON t.id = l.transferencia_id
+     JOIN cuentas ct ON ct.id = t.destino_cuenta_id
+     WHERE l.id = $1`,
+    [id, await zona(c)],
+  );
+  if (r.rowCount === 0) throw new ErrorContable('Llegada no encontrada');
+  const x = r.rows[0];
+  if (x.resultado !== 'no_llego') return null;
+  const asentado = await c.query(
+    `SELECT 1 FROM asientos WHERE origen_tabla = 'transferencias' AND origen_id = $1
+       AND reverso_de IS NULL AND estado = 'activo'`,
+    [x.transferencia_id],
+  );
+  if (!asentado.rowCount) return null;
+  const documento = numeroTransferencia(x.numero);
+  const contra = await cu.clasificada(
+    TABLA_ORIGEN.llegada,
+    id,
+    `La recarga ${documento} no llegó a ${x.cuenta} (RD$${x.monto_dop}): ${PIDE_CUENTA}`,
+  );
+  const monto = centavos(x.monto_dop);
+  const p = new Partida();
+  p.debe(contra, monto, { descripcion: x.motivo?.slice(0, 300) ?? null });
+  p.haber(await cu.banco(x.cuenta_id), monto);
+  return {
+    fecha: x.fecha,
+    concepto: `Recarga ${documento} que no llegó a ${x.cuenta}`,
     documento,
     lineas: p.juntas(),
   };
@@ -1409,6 +1479,8 @@ async function armar(
       return nomina(c, cu, id);
     case 'adelanto':
       return adelanto(c, cu, id);
+    case 'llegada':
+      return llegada(c, cu, id);
     case 'no_llego':
       return noLlego(c, cu, id);
   }

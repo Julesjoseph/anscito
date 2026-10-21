@@ -132,7 +132,7 @@ export class CajaService {
       tasaVigente(this.db),
       // Para depositar o traer efectivo (solo nombre y moneda, sin saldos).
       this.db.query(
-        `SELECT ct.id, ct.nombre, ct.moneda, mo.simbolo
+        `SELECT ct.id, ct.nombre, ct.moneda, mo.simbolo, ct.tipo
          FROM cuentas ct JOIN monedas mo ON mo.codigo = ct.moneda
          WHERE ct.is_active ORDER BY ct.tipo, lower(ct.nombre)`,
       ),

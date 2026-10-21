@@ -470,13 +470,6 @@ function FormMovimiento({
 
 // ---------- Depositar en una cuenta o traer efectivo ----------
 
-const CAMBIADO_POR: [string, string][] = [
-  ['casa_cambio', 'Casa de cambio'],
-  ['agente', 'Agente o MonCash/NatCash'],
-  ['banco', 'El banco'],
-  ['otro', 'Otro'],
-]
-
 function FormCuenta({
   token,
   cajaId,
@@ -497,7 +490,6 @@ function FormCuenta({
   const [cuentaId, setCuentaId] = useState('')
   const [monto, setMonto] = useState('')
   const [montoEntra, setMontoEntra] = useState('')
-  const [cambiadoPor, setCambiadoPor] = useState('')
   const [referencia, setReferencia] = useState('')
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
@@ -505,6 +497,9 @@ function FormCuenta({
 
   const cuenta = prep.cuentas.find((x) => x.id === cuentaId)
   const cambia = cuenta !== undefined && cuenta.moneda !== 'DOP'
+  // Recargar una billetera: lo que llegó se escribe al confirmarla en
+  // Billeteras (decisión del dueño).
+  const recarga = sentido === 'depositar' && cambia && cuenta?.tipo === 'billetera'
   // Al depositar sale RD$ de la caja; al traer sale de la cuenta.
   const simboloSale = sentido === 'depositar' ? 'RD$' : (cuenta?.simbolo ?? '')
   const simboloEntra = sentido === 'depositar' ? (cuenta?.simbolo ?? '') : 'RD$'
@@ -514,7 +509,7 @@ function FormCuenta({
     cuenta !== undefined &&
     valido &&
     !pasa &&
-    (!cambia || (MONTO.test(montoEntra.trim()) && centavos(montoEntra.trim()) > 0n && cambiadoPor !== ''))
+    (!cambia || recarga || (MONTO.test(montoEntra.trim()) && centavos(montoEntra.trim()) > 0n))
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -523,8 +518,7 @@ function FormCuenta({
     const datos = {
       cuentaId,
       monto: monto.trim(),
-      montoEntra: cambia ? montoEntra.trim() : undefined,
-      cambiadoPor: cambia ? cambiadoPor : undefined,
+      montoEntra: cambia && !recarga ? montoEntra.trim() : undefined,
       referencia: referencia.trim() || undefined,
       motivo: motivo.trim() || undefined,
     }
@@ -564,24 +558,16 @@ function FormCuenta({
         <input type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
         {pasa && <span className="text-xs text-red-600">Es más de lo que hay en la caja ({dinero(esperado)}).</span>}
       </label>
-      {cambia && (
-        <>
-          <label className="flex flex-col gap-1 text-gray-600">
-            Monto que entra ({simboloEntra})
-            <input type="text" inputMode="decimal" value={montoEntra} onChange={(e) => setMontoEntra(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
-          </label>
-          <label className="flex flex-col gap-1 text-gray-600">
-            ¿Quién hizo el cambio de moneda?
-            <select value={cambiadoPor} onChange={(e) => setCambiadoPor(e.target.value)} className={CAMPO}>
-              <option value="">Seleccione…</option>
-              {CAMBIADO_POR.map(([id, t]) => (
-                <option key={id} value={id}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-        </>
+      {cambia && !recarga && (
+        <label className="flex flex-col gap-1 text-gray-600">
+          Monto que entra ({simboloEntra})
+          <input type="text" inputMode="decimal" value={montoEntra} onChange={(e) => setMontoEntra(e.target.value)} placeholder="0.00" className={`${CAMPO} text-lg`} />
+        </label>
+      )}
+      {recarga && (
+        <p className="text-xs text-gray-500">
+          La recarga queda en Billeteras → “Por confirmar”: cuando llegue, confírmela y escriba cuánto entró.
+        </p>
       )}
       <label className="flex flex-col gap-1 text-gray-600">
         Referencia (opcional)

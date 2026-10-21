@@ -128,6 +128,25 @@ export async function revisarMes(
     });
   else correctos.push('No hay dinero por confirmar en los bancos');
 
+  // 4b) Recargas de billeteras que salieron y no se han confirmado.
+  const recargas = await c.query<{ cuenta: string; n: number }>(
+    `SELECT ct.nombre AS cuenta, count(*)::int AS n
+     FROM transferencias t JOIN cuentas ct ON ct.id = t.destino_cuenta_id
+     WHERE t.monto_entra IS NULL
+       AND NOT EXISTS (SELECT 1 FROM transferencia_llegadas l WHERE l.transferencia_id = t.id)
+       AND (t.created_at AT TIME ZONE (SELECT valor FROM configuracion WHERE clave = 'empresa.zona_horaria'))::date <= $1::date
+     GROUP BY ct.nombre ORDER BY ct.nombre`,
+    [hasta],
+  );
+  if (recargas.rowCount)
+    avisos.push({
+      clave: 'recargas',
+      titulo: 'Recargas de billeteras sin confirmar',
+      detalle: recargas.rows.map((x) => `${x.cuenta}: ${x.n}`).join(', '),
+      cantidad: recargas.rows.reduce((a, x) => a + x.n, 0),
+      donde: 'Billeteras → Por confirmar',
+    });
+
   // 5) Cuentas con movimientos en el mes sin conciliación cerrada al fin del mes.
   const sinConciliar = await c.query<{ cuenta: string }>(
     `SELECT DISTINCT ct.nombre AS cuenta FROM cuenta_movimientos m JOIN cuentas ct ON ct.id = m.cuenta_id

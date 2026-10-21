@@ -90,6 +90,7 @@ type CuentaBloqueada = {
   moneda: string;
   simbolo: string;
   is_active: boolean;
+  tipo: string;
 };
 
 // Un lado de una transferencia: una cuenta o la caja abierta.
@@ -209,7 +210,7 @@ export class BancosService {
   private async bloquearCuenta(c: PoolClient, id: string) {
     if (!UUID.test(id)) throw new NotFoundException('Cuenta no encontrada');
     const r = await c.query<CuentaBloqueada>(
-      `SELECT ct.id, ct.nombre, ct.moneda, mo.simbolo, ct.is_active
+      `SELECT ct.id, ct.nombre, ct.moneda, mo.simbolo, ct.is_active, ct.tipo
        FROM cuentas ct JOIN monedas mo ON mo.codigo = ct.moneda
        WHERE ct.id = $1 FOR UPDATE OF ct`,
       [id],
@@ -1130,8 +1131,17 @@ export class BancosService {
       const mDestino =
         destino.tipo === 'cuenta' ? destino.cuenta.moneda : 'DOP';
       const mismaMoneda = mOrigen === mDestino;
+      // Recarga de una billetera en otra moneda (decisión del dueño): solo se
+      // escribe lo que sale; las gourdes que llegaron se escriben al
+      // confirmarla (confirmarRecarga).
+      const recarga =
+        !mismaMoneda &&
+        destino.tipo === 'cuenta' &&
+        destino.cuenta.tipo === 'billetera';
 
-      let montoEntra = montoSale;
+      let montoEntra: string | null = montoSale;
+      // "Quién hizo el cambio" ya no se pregunta (decisión del dueño); si
+      // llega, se guarda.
       let cambiadoPor: string | null = null;
       if (mismaMoneda) {
         const e = texto(datos.montoEntra);
@@ -1141,18 +1151,20 @@ export class BancosService {
           );
         }
       } else {
-        montoEntra = montoPositivo(datos.montoEntra, 'Monto que entra');
-        cambiadoPor = texto(datos.cambiadoPor);
-        if (!CAMBIADO_POR.includes(cambiadoPor)) {
+        montoEntra = recarga
+          ? null
+          : montoPositivo(datos.montoEntra, 'Monto que entra');
+        const quien = texto(datos.cambiadoPor);
+        if (quien && !CAMBIADO_POR.includes(quien))
           throw new BadRequestException(
-            'Indique quién hizo el cambio de moneda: casa de cambio, agente, banco u otro',
+            'Quién hizo el cambio: casa de cambio, agente, banco u otro',
           );
-        }
+        cambiadoPor = quien || null;
       }
       // Valor en RD$: el lado en pesos manda; si ninguno es en pesos, la tasa.
       let montoDop: string;
       if (mOrigen === 'DOP') montoDop = montoSale;
-      else if (mDestino === 'DOP') montoDop = montoEntra;
+      else if (mDestino === 'DOP' && montoEntra !== null) montoDop = montoEntra;
       else {
         const tasa = normalizarTasa(datos.tasa);
         if (tasa === null) {
@@ -1242,8 +1254,11 @@ export class BancosService {
         );
       }
       // Entrada. El efectivo depositado y lo cambiado de moneda se confirman
-      // al verlo en el estado de cuenta.
-      if (destino.tipo === 'cuenta') {
+      // al verlo en el estado de cuenta. La recarga de una billetera entra al
+      // confirmarla, con las gourdes que llegaron (queda en "Por confirmar").
+      if (recarga) {
+        // Sin movimiento de entrada todavía.
+      } else if (destino.tipo === 'cuenta') {
         const porConfirmar = origen.tipo === 'caja' || !mismaMoneda;
         await c.query(
           `INSERT INTO cuenta_movimientos
@@ -1290,7 +1305,10 @@ export class BancosService {
           origen: nombre(origen),
           destino: nombre(destino),
           monto_sale: `${mOrigen} ${montoSale}`,
-          monto_entra: `${mDestino} ${montoEntra}`,
+          monto_entra:
+            montoEntra === null
+              ? `${mDestino}: se escribe al confirmar la recarga`
+              : `${mDestino} ${montoEntra}`,
           monto_dop: montoDop,
           cambiado_por: cambiadoPor,
           referencia,
@@ -1300,7 +1318,171 @@ export class BancosService {
         ip,
       });
       await contabilizar(c, 'transferencia', tId, actorId);
-      return { id: tId, numero: numeroTransferencia(n), montoDop };
+      return {
+        id: tId,
+        numero: numeroTransferencia(n),
+        montoDop,
+        porConfirmar: recarga,
+      };
+    });
+  }
+
+  // ---------- Recargas de billeteras por confirmar ----------
+
+  // Recargas que salieron y todavía no se confirmaron (sin su llegada).
+  async recargasPendientes() {
+    const r = await this.db.query(
+      `SELECT t.id, 'T-' || lpad(t.numero::text, 6, '0') AS numero, t.monto_sale, t.monto_dop,
+              COALESCE(mo_o.simbolo, 'RD$') AS simbolo_sale,
+              COALESCE(co.nombre, cj.nombre) AS origen,
+              cd.id AS cuenta_id, cd.nombre AS destino, cd.moneda AS moneda_entra, mo_d.simbolo AS simbolo_entra,
+              t.referencia, t.motivo, u.username AS usuario, t.created_at,
+              (SELECT to_char(m.fecha, 'YYYY-MM-DD') FROM cuenta_movimientos m
+                WHERE m.transferencia_id = t.id AND m.tipo = 'transferencia_salida' LIMIT 1) AS fecha
+       FROM transferencias t
+       JOIN cuentas cd ON cd.id = t.destino_cuenta_id
+       JOIN monedas mo_d ON mo_d.codigo = cd.moneda
+       LEFT JOIN cuentas co ON co.id = t.origen_cuenta_id
+       LEFT JOIN monedas mo_o ON mo_o.codigo = co.moneda
+       LEFT JOIN caja_sesiones s ON s.id = t.origen_sesion_id
+       LEFT JOIN cajas cj ON cj.id = s.caja_id
+       JOIN usuarios u ON u.id = t.usuario_id
+       WHERE t.monto_entra IS NULL
+         AND NOT EXISTS (SELECT 1 FROM transferencia_llegadas l WHERE l.transferencia_id = t.id)
+       ORDER BY t.created_at`,
+    );
+    return r.rows;
+  }
+
+  // Confirma una recarga: llegó (con lo que entró; se calcula la tasa) o no
+  // llegó (el contador escoge a qué cuenta va la pérdida).
+  async confirmarRecarga(
+    actorId: string,
+    transferenciaId: string,
+    ip: string | undefined,
+    datos: {
+      resultado?: unknown;
+      montoEntra?: unknown;
+      fechaBanco?: unknown;
+      motivo?: unknown;
+    },
+  ) {
+    if (!UUID.test(transferenciaId))
+      throw new NotFoundException('Recarga no encontrada');
+    const resultado = texto(datos.resultado);
+    if (resultado !== 'llego' && resultado !== 'no_llego')
+      throw new BadRequestException('Resultado inválido: llego o no_llego');
+    const montoEntra =
+      resultado === 'llego'
+        ? montoPositivo(datos.montoEntra, 'Monto que llegó')
+        : null;
+    const motivo =
+      resultado === 'no_llego'
+        ? motivoObligatorio(datos.motivo)
+        : opcional(datos.motivo, 500, 'Nota');
+    return this.db.transaccion(async (c) => {
+      const t0 = await c.query<{ destino_cuenta_id: string | null }>(
+        'SELECT destino_cuenta_id FROM transferencias WHERE id = $1',
+        [transferenciaId],
+      );
+      if (t0.rowCount === 0 || !t0.rows[0].destino_cuenta_id)
+        throw new NotFoundException('Recarga no encontrada');
+      const cuenta = await this.bloquearCuenta(c, t0.rows[0].destino_cuenta_id);
+      const r = await c.query<{
+        numero: string;
+        monto_entra: string | null;
+        monto_sale: string;
+        monto_dop: string;
+        referencia: string | null;
+        fecha: string;
+        llegada: boolean;
+      }>(
+        `SELECT t.numero, t.monto_entra, t.monto_sale, t.monto_dop, t.referencia,
+                COALESCE((SELECT to_char(m.fecha, 'YYYY-MM-DD') FROM cuenta_movimientos m
+                           WHERE m.transferencia_id = t.id AND m.tipo = 'transferencia_salida' LIMIT 1),
+                         to_char(t.created_at, 'YYYY-MM-DD')) AS fecha,
+                EXISTS (SELECT 1 FROM transferencia_llegadas l WHERE l.transferencia_id = t.id) AS llegada
+         FROM transferencias t WHERE t.id = $1`,
+        [transferenciaId],
+      );
+      const t = r.rows[0];
+      if (t.monto_entra !== null || t.llegada)
+        throw new BadRequestException('Esa recarga ya está confirmada');
+      const numero = numeroTransferencia(t.numero);
+      let movimientoId: string | null = null;
+      let fecha: string | null = null;
+      if (resultado === 'llego') {
+        fecha = await this.fecha(c, datos.fechaBanco);
+        if (fecha < t.fecha)
+          throw new BadRequestException(
+            'La fecha en que llegó no puede ser antes de la recarga',
+          );
+        const m = await c.query<{ id: string }>(
+          `INSERT INTO cuenta_movimientos
+             (cuenta_id, tipo, signo, monto, tasa, monto_dop, fecha, por_confirmar,
+              transferencia_id, referencia, motivo, usuario_id)
+           VALUES ($1, 'transferencia_entrada', 1, $2, round($3::numeric / $2::numeric, 8),
+                   $3, $4, false, $5, $6, $7, $8) RETURNING id::text AS id`,
+          [
+            cuenta.id,
+            montoEntra,
+            t.monto_dop,
+            fecha,
+            transferenciaId,
+            t.referencia,
+            motivo,
+            actorId,
+          ],
+        );
+        movimientoId = m.rows[0].id;
+      }
+      const l = await c.query<{ id: string }>(
+        `INSERT INTO transferencia_llegadas
+           (transferencia_id, resultado, monto_entra, fecha, movimiento_id, motivo, usuario_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [
+          transferenciaId,
+          resultado,
+          montoEntra,
+          fecha,
+          movimientoId,
+          motivo,
+          actorId,
+        ],
+      );
+      // Cuántas unidades de la billetera entraron por cada una que salió.
+      const tasa =
+        montoEntra === null
+          ? null
+          : (
+              await c.query<{ v: string }>(
+                'SELECT round($1::numeric / $2::numeric, 4)::text AS v',
+                [montoEntra, t.monto_sale],
+              )
+            ).rows[0].v;
+      await registrarAuditoria(c, {
+        usuarioId: actorId,
+        accion:
+          resultado === 'llego' ? 'recarga.confirmar' : 'recarga.no_llego',
+        entidad: 'transferencias',
+        entidadId: transferenciaId,
+        nuevo: {
+          recarga: numero,
+          billetera: cuenta.nombre,
+          salio: t.monto_sale,
+          llego: montoEntra === null ? null : `${cuenta.simbolo}${montoEntra}`,
+          tasa,
+          fecha,
+        },
+        motivo: motivo ?? undefined,
+        ip,
+      });
+      // El valor en RD$ ya está en la contabilidad desde la recarga (si quedó
+      // pendiente, se reintenta). Si no llegó, el contador escoge la cuenta.
+      if (resultado === 'llego')
+        await contabilizar(c, 'transferencia', transferenciaId, actorId);
+      else await contabilizar(c, 'llegada', l.rows[0].id, actorId);
+      return { ok: true, numero, tasa };
     });
   }
 }

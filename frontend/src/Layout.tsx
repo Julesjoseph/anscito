@@ -13,11 +13,13 @@ import {
   Landmark,
   LayoutDashboard,
   LogOut,
+  Moon,
   Package,
   PackagePlus,
   Receipt,
   ShieldCheck,
   ShoppingCart,
+  Sun,
   Smartphone,
   Tags,
   Truck,
@@ -35,6 +37,8 @@ import Fiscal from './Fiscal'
 import Panel from './Panel'
 import Reportes from './Reportes'
 import { LogoMarca } from './marca'
+import { aplicarTema, leerTema } from './tema'
+import type { Tema } from './tema'
 import Bancos from './Bancos'
 import Caja from './Caja'
 import Calculadora from './Calculadora'
@@ -251,6 +255,12 @@ export default function Layout({
   onSalir,
 }: Props) {
   const [pagina, setPagina] = useState('panel')
+  const [tema, setTema] = useState<Tema>(leerTema)
+  function cambiarTema() {
+    const nuevo = tema === 'noche' ? 'dia' : 'noche'
+    aplicarTema(nuevo)
+    setTema(nuevo)
+  }
   // Gasto fijo que se va a registrar en "Reg. Facturas de Compras y Gastos".
   const [gastoFijo, setGastoFijo] = useState<AvisoGastoFijo | null>(null)
 
@@ -272,6 +282,15 @@ export default function Layout({
         </div>
 
         <nav className="flex-1 px-2 py-2 flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={cambiarTema}
+            title="Se recuerda en este equipo"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 border-transparent text-gray-600 hover:bg-gray-50"
+          >
+            {tema === 'noche' ? <Sun size={18} /> : <Moon size={18} />}
+            {tema === 'noche' ? 'Modo día' : 'Modo noche'}
+          </button>
           {visibles.map(({ id, nombre, Icono, listo }) => {
             const activo = pagina === id
             return (

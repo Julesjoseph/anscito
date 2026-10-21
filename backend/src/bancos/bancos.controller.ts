@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -125,7 +126,35 @@ function controladorCuentas(ruta: string, ambito: Ambito, p: string) {
       return {
         porConfirmar: r.porConfirmar.filter(delModulo),
         noLlegaron: r.noLlegaron.filter(delModulo),
+        // Recargas de billeteras que esperan las gourdes que llegaron.
+        recargas:
+          ambito === 'billetera' ? await this.bancos.recargasPendientes() : [],
       };
+    }
+
+    @Post('recargas/:id/confirmar')
+    @RequierePermiso(`${p}.confirmar`)
+    confirmarRecarga(
+      @Req() req: Peticion,
+      @Param('id') id: string,
+      @Body()
+      body: {
+        resultado?: unknown;
+        montoEntra?: unknown;
+        fechaBanco?: unknown;
+        motivo?: unknown;
+      },
+    ) {
+      if (ambito !== 'billetera')
+        throw new ForbiddenException(
+          'Las recargas se confirman en el módulo Billeteras',
+        );
+      return this.bancos.confirmarRecarga(
+        req.usuario.id,
+        id,
+        req.ip,
+        body ?? {},
+      );
     }
 
     @Post('movimientos/:id/confirmar')

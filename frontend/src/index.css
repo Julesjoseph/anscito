@@ -1,1 +1,105 @@
 @import "tailwindcss";
+
+/* "dark:" de Tailwind sigue a la clase .dark (modo noche elegido por el usuario). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  Modo noche (tema.ts pone la clase "dark" en <html>).
+  En vez de cambiar cada pantalla, se cambia la paleta que usan todas:
+  - "white" es el fondo de las tarjetas y los grises van al revés
+    (los claros son fondos oscuros y los oscuros, letras claras);
+  - los fondos de avisos (rojo, verde, ámbar, azul 50 a 200) se oscurecen
+    y sus letras (600 a 900) se aclaran, para que se lean sobre fondo oscuro.
+  El color de la marca (#C8102E) no cambia. Al imprimir se usa siempre el
+  modo día (solo aplica en pantalla).
+*/
+@media screen {
+  .dark {
+    color-scheme: dark;
+
+    --color-white: #1c212b;
+    --color-gray-50: #242a36;
+    --color-gray-100: #12151c;
+    --color-gray-200: #2f3644;
+    --color-gray-300: #434b5a;
+    --color-gray-400: #7d8798;
+    --color-gray-500: #9aa3b2;
+    --color-gray-600: #b8c0cc;
+    --color-gray-700: #d0d5de;
+    --color-gray-800: #e2e6ec;
+    --color-gray-900: #f1f3f6;
+    --color-gray-950: #f8f9fb;
+
+    --color-red-50: #3a1418;
+    --color-red-100: #4a1a1f;
+    --color-red-200: #6b2329;
+    --color-red-300: #8c2c33;
+    --color-red-400: #b8434b;
+    --color-red-600: #f38a8a;
+    --color-red-700: #f6a3a3;
+    --color-red-800: #f9c0c0;
+    --color-red-900: #fbd5d5;
+
+    --color-green-50: #10291c;
+    --color-green-100: #143522;
+    --color-green-200: #1d4a31;
+    --color-green-600: #6fd39a;
+    --color-green-700: #86dcab;
+    --color-green-800: #a5e6c0;
+    --color-green-900: #c3efd5;
+
+    --color-amber-50: #2e230c;
+    --color-amber-100: #3b2d0f;
+    --color-amber-200: #574213;
+    --color-amber-300: #6f5517;
+    --color-amber-600: #f2c25c;
+    --color-amber-700: #f5cd75;
+    --color-amber-800: #f8d991;
+    --color-amber-900: #fae4ad;
+    --color-amber-950: #fdf0d0;
+
+    --color-blue-50: #11233d;
+    --color-blue-100: #16304f;
+    --color-blue-700: #9cc3f5;
+    --color-blue-800: #b8d4f8;
+
+    background-color: var(--color-gray-100);
+    color: var(--color-gray-900);
+  }
+
+  /* "text-white" va sobre botones de color (marca, verde): sigue blanco. */
+  .dark .text-white {
+    color: #ffffff;
+  }
+  /* Letras y bordes con el rojo de la marca: más claros para que se lean
+     sobre fondo oscuro (pestañas, enlaces y botones elegidos). */
+  .dark .text-\[\#C8102E\] {
+    color: #ff8f99;
+  }
+  .dark .border-\[\#C8102E\] {
+    border-color: #e0475a;
+  }
+  /* Botones verdes llenos (con letra blanca): siguen verde oscuro. */
+  .dark .bg-green-700 {
+    background-color: #15803d;
+  }
+  .dark .hover\:bg-green-800:hover {
+    background-color: #166534;
+  }
+  /* Listas desplegables: las opciones con fondo oscuro y letra clara. */
+  .dark select option,
+  .dark select optgroup {
+    background-color: var(--color-white);
+    color: var(--color-gray-900);
+  }
+  .dark select option:checked {
+    background-color: var(--color-gray-300);
+  }
+  .dark select option:disabled {
+    color: var(--color-gray-400);
+  }
+  /* El aviso de DEMO (ámbar fuerte) mantiene su letra oscura. */
+  .dark .bg-amber-400 {
+    color: #3b2a05;
+  }
+}

@@ -1286,7 +1286,7 @@ export type PrepararCaja = {
   denominaciones: string[]
   denominacionesUsd: string[]
   tasaDolar: TasaDolar | null
-  cuentas: { id: string; nombre: string; moneda: string; simbolo: string }[]
+  cuentas: { id: string; nombre: string; moneda: string; simbolo: string; tipo: 'banco' | 'billetera' }[]
 }
 
 export type TipoMovimientoCaja =
@@ -1732,8 +1732,26 @@ export const registrarMovimientoCuenta = (
     datos,
   )
 
+// Recarga de una billetera que espera las gourdes que llegaron.
+export type RecargaPendiente = {
+  id: string
+  numero: string
+  monto_sale: string
+  monto_dop: string
+  simbolo_sale: string
+  origen: string
+  cuenta_id: string
+  destino: string
+  moneda_entra: string
+  simbolo_entra: string
+  referencia: string | null
+  motivo: string | null
+  usuario: string
+  fecha: string | null
+}
+
 export const pendientesBancos = (token: string, ambito: Ambito = 'banco') =>
-  llamar<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[] }>(
+  llamar<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[]; recargas: RecargaPendiente[] }>(
     'GET',
     `${rutaCuentas(ambito)}/pendientes`,
     token,
@@ -1749,8 +1767,14 @@ export const confirmarMovimiento = (
 export const reversarMovimiento = (token: string, id: string, motivo: string, ambito: Ambito = 'banco') =>
   llamar<{ id: string }>('POST', `${rutaCuentas(ambito)}/movimientos/${id}/reversar`, token, { motivo })
 
+export const confirmarRecarga = (
+  token: string,
+  id: string,
+  datos: { resultado: 'llego' | 'no_llego'; montoEntra?: string; fechaBanco?: string; motivo?: string },
+) => llamar<{ ok: boolean; numero: string; tasa: string | null }>('POST', `/billeteras/recargas/${id}/confirmar`, token, datos)
+
 export const transferirDinero = (token: string, datos: DatosTransferencia, ambito: Ambito = 'banco') =>
-  llamar<{ id: string; numero: string; montoDop: string }>(
+  llamar<{ id: string; numero: string; montoDop: string; porConfirmar?: boolean }>(
     'POST',
     `${rutaCuentas(ambito)}/transferencias`,
     token,
