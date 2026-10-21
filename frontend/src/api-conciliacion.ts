@@ -1,5 +1,6 @@
-// Conciliación bancaria (Bancos).
+// Conciliación de las cuentas de banco (Bancos) y de las billeteras (Billeteras).
 import { llamar } from './api'
+import type { Ambito } from './api'
 
 export type FilaConciliacion = {
   id: string
@@ -49,23 +50,28 @@ export type DetalleConciliacion = {
   contable: { cuenta: string; saldoContable: string; saldoSistemaDop: string; diferencia: string } | null
 }
 
-export const listarConciliaciones = (token: string, cuentaId: string) =>
-  llamar<FilaConciliacion[]>('GET', `/conciliaciones?${new URLSearchParams({ cuentaId }).toString()}`, token)
+const ruta = (a: Ambito) => (a === 'billetera' ? '/billeteras/conciliaciones' : '/conciliaciones')
 
-export const detalleConciliacion = (token: string, id: string) =>
-  llamar<DetalleConciliacion>('GET', `/conciliaciones/${id}`, token)
+export const listarConciliaciones = (token: string, cuentaId: string, ambito: Ambito = 'banco') =>
+  llamar<FilaConciliacion[]>('GET', `${ruta(ambito)}?${new URLSearchParams({ cuentaId }).toString()}`, token)
 
-export const crearConciliacion = (token: string, datos: { cuentaId: string; fechaCorte: string; saldoBanco: string; notas?: string }) =>
-  llamar<{ id: string; codigo: string }>('POST', '/conciliaciones', token, datos)
+export const detalleConciliacion = (token: string, id: string, ambito: Ambito = 'banco') =>
+  llamar<DetalleConciliacion>('GET', `${ruta(ambito)}/${id}`, token)
 
-export const editarConciliacion = (token: string, id: string, datos: { saldoBanco: string; notas?: string }) =>
-  llamar<{ ok: boolean }>('PATCH', `/conciliaciones/${id}`, token, datos)
+export const crearConciliacion = (
+  token: string,
+  datos: { cuentaId: string; fechaCorte: string; saldoBanco: string; notas?: string },
+  ambito: Ambito = 'banco',
+) => llamar<{ id: string; codigo: string }>('POST', ruta(ambito), token, datos)
 
-export const marcarConciliacion = (token: string, id: string, movimientos: { id: string; cotejado: boolean }[]) =>
-  llamar<{ totales: TotalesConciliacion }>('PUT', `/conciliaciones/${id}/partidas`, token, { movimientos })
+export const editarConciliacion = (token: string, id: string, datos: { saldoBanco: string; notas?: string }, ambito: Ambito = 'banco') =>
+  llamar<{ ok: boolean }>('PATCH', `${ruta(ambito)}/${id}`, token, datos)
 
-export const cerrarConciliacion = (token: string, id: string) =>
-  llamar<{ ok: boolean; confirmados: number }>('POST', `/conciliaciones/${id}/cerrar`, token)
+export const marcarConciliacion = (token: string, id: string, movimientos: { id: string; cotejado: boolean }[], ambito: Ambito = 'banco') =>
+  llamar<{ totales: TotalesConciliacion }>('PUT', `${ruta(ambito)}/${id}/partidas`, token, { movimientos })
 
-export const descartarConciliacion = (token: string, id: string, motivo: string) =>
-  llamar<{ ok: boolean }>('POST', `/conciliaciones/${id}/descartar`, token, { motivo })
+export const cerrarConciliacion = (token: string, id: string, ambito: Ambito = 'banco') =>
+  llamar<{ ok: boolean; confirmados: number }>('POST', `${ruta(ambito)}/${id}/cerrar`, token)
+
+export const descartarConciliacion = (token: string, id: string, motivo: string, ambito: Ambito = 'banco') =>
+  llamar<{ ok: boolean }>('POST', `${ruta(ambito)}/${id}/descartar`, token, { motivo })

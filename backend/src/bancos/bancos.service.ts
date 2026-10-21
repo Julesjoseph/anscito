@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -115,9 +116,68 @@ export type DatosTransferencia = {
   fecha?: unknown;
 };
 
+// Bancos y Billeteras (MonCash / NatCash) son dos módulos con sus propios
+// permisos sobre la misma tabla de cuentas (tipo 'banco' o 'billetera').
+export type Ambito = 'banco' | 'billetera';
+
+const OTRO_MODULO: Record<Ambito, string> = {
+  banco: 'Es una billetera (MonCash / NatCash): está en el módulo Billeteras',
+  billetera: 'Es una cuenta de banco: está en el módulo Bancos',
+};
+
 @Injectable()
 export class BancosService {
   constructor(private readonly db: DatabaseService) {}
+
+  // Revisa que la cuenta, el movimiento o la conciliación sea del módulo
+  // desde el que se pide. Si no existe, sigue (el servicio dirá "no encontrada").
+  async exigirAmbito(
+    ambito: Ambito,
+    q: { cuentaId?: string; movimientoId?: string; conciliacionId?: string },
+  ) {
+    let r: { rows: { tipo: string }[] } | null = null;
+    if (q.cuentaId !== undefined && UUID.test(q.cuentaId))
+      r = await this.db.query('SELECT tipo FROM cuentas WHERE id = $1', [
+        q.cuentaId,
+      ]);
+    else if (q.movimientoId !== undefined && /^\d{1,18}$/.test(q.movimientoId))
+      r = await this.db.query(
+        `SELECT ct.tipo FROM cuenta_movimientos m JOIN cuentas ct ON ct.id = m.cuenta_id WHERE m.id = $1`,
+        [q.movimientoId],
+      );
+    else if (q.conciliacionId !== undefined && UUID.test(q.conciliacionId))
+      r = await this.db.query(
+        `SELECT ct.tipo FROM conciliaciones k JOIN cuentas ct ON ct.id = k.cuenta_id WHERE k.id = $1`,
+        [q.conciliacionId],
+      );
+    const tipo = r?.rows[0]?.tipo;
+    if (tipo && tipo !== ambito)
+      throw new ForbiddenException(OTRO_MODULO[ambito]);
+  }
+
+  // Una transferencia se hace desde el módulo de una de sus cuentas (una
+  // recarga de banco a billetera se puede hacer desde los dos).
+  async exigirAmbitoTransferencia(ambito: Ambito, d: DatosTransferencia) {
+    const ids = [d.origenCuentaId, d.destinoCuentaId]
+      .map((x) => texto(x).toLowerCase())
+      .filter((x) => UUID.test(x));
+    if (ids.length === 0) {
+      if (ambito === 'banco') return; // la validación normal pide la cuenta
+      throw new ForbiddenException(
+        'Desde Billeteras, el origen o el destino debe ser una billetera',
+      );
+    }
+    const r = await this.db.query<{ tipo: string }>(
+      'SELECT tipo FROM cuentas WHERE id = ANY($1::uuid[])',
+      [ids],
+    );
+    if (r.rowCount && !r.rows.some((x) => x.tipo === ambito))
+      throw new ForbiddenException(
+        ambito === 'billetera'
+          ? 'Desde Billeteras, el origen o el destino debe ser una billetera'
+          : 'Desde Bancos, el origen o el destino debe ser una cuenta de banco (las billeteras están en Billeteras)',
+      );
+  }
 
   private async config(c: Pick<PoolClient, 'query'>, clave: string) {
     const r = await c.query<{ valor: string }>(
@@ -882,7 +942,7 @@ export class BancosService {
 
   // ---------- Consultas ----------
 
-  private readonly SQL_LISTA = `SELECT x.id, x.cuenta_id, ct.nombre AS cuenta, ct.moneda, mo.simbolo,
+  private readonly SQL_LISTA = `SELECT x.id, x.cuenta_id, ct.nombre AS cuenta, ct.tipo AS cuenta_tipo, ct.moneda, mo.simbolo,
       x.tipo, x.signo, x.monto, x.tasa, x.monto_dop, x.fecha, x.created_at,
       x.estado, x.fecha_banco, x.motivo_confirmacion,
       x.beneficiario, x.comprobante, x.referencia, x.motivo, x.reverso_de,

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useContext, useEffect, useState } from 'react'
 import { AlertTriangle, Ban, CheckCircle2, Lock, Plus, RefreshCw } from 'lucide-react'
 import { SesionVencida } from './api'
+import { AmbitoCtx } from './ambito'
 import type { FilaCuenta } from './api'
 import {
   cerrarConciliacion,
@@ -65,6 +66,7 @@ type Props = {
 }
 
 export default function Conciliacion({ token, cuentas, puedeConciliar, onCambio, onSesionVencida }: Props) {
+  const ambito = useContext(AmbitoCtx)
   const [cuentaId, setCuentaId] = useState(cuentas.find((c) => c.is_active)?.id ?? '')
   const [lista, setLista] = useState<FilaConciliacion[] | null>(null)
   const [abiertaId, setAbiertaId] = useState<string | null>(null)
@@ -76,14 +78,14 @@ export default function Conciliacion({ token, cuentas, puedeConciliar, onCambio,
     if (!cuentaId) return
     setError('')
     try {
-      const l = await listarConciliaciones(token, cuentaId)
+      const l = await listarConciliaciones(token, cuentaId, ambito)
       setLista(l)
       setAbiertaId((actual) => actual ?? l.find((x) => x.estado === 'abierta')?.id ?? null)
     } catch (e) {
       if (e instanceof SesionVencida) onSesionVencida()
       else setError(mensajeDe(e))
     }
-  }, [token, cuentaId, onSesionVencida])
+  }, [token, cuentaId, onSesionVencida, ambito])
 
   useEffect(() => {
     void cargar()
@@ -210,6 +212,7 @@ function FormNueva({
   onListo: (id: string) => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [fecha, setFecha] = useState(hoy())
   const [saldo, setSaldo] = useState('')
   const [notas, setNotas] = useState('')
@@ -221,7 +224,7 @@ function FormNueva({
     setGuardando(true)
     setError('')
     try {
-      const r = await crearConciliacion(token, { cuentaId: cuenta.id, fechaCorte: fecha, saldoBanco: saldo.trim().replace(/,/g, ''), notas })
+      const r = await crearConciliacion(token, { cuentaId: cuenta.id, fechaCorte: fecha, saldoBanco: saldo.trim().replace(/,/g, ''), notas }, ambito)
       onListo(r.id)
     } catch (e) {
       if (e instanceof SesionVencida) onSesionVencida()
@@ -276,6 +279,7 @@ function Detalle({
   onCambio: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [d, setD] = useState<DetalleConciliacion | null>(null)
   const [saldo, setSaldo] = useState('')
   const [error, setError] = useState('')
@@ -286,14 +290,14 @@ function Detalle({
 
   const cargar = useCallback(async () => {
     try {
-      const x = await detalleConciliacion(token, id)
+      const x = await detalleConciliacion(token, id, ambito)
       setD(x)
       setSaldo(x.conciliacion.saldo_banco)
     } catch (e) {
       if (e instanceof SesionVencida) onSesionVencida()
       else setError(mensajeDe(e))
     }
-  }, [token, id, onSesionVencida])
+  }, [token, id, onSesionVencida, ambito])
 
   useEffect(() => {
     void cargar()
@@ -321,7 +325,7 @@ function Detalle({
 
   async function marcar(ids: string[], cotejado: boolean) {
     await correr(async () => {
-      const r = await marcarConciliacion(token, id, ids.map((x) => ({ id: x, cotejado })))
+      const r = await marcarConciliacion(token, id, ids.map((x) => ({ id: x, cotejado })), ambito)
       setD((prev) =>
         prev ? { ...prev, totales: r.totales, movimientos: prev.movimientos.map((m) => (ids.includes(m.id) ? { ...m, cotejado } : m)) } : prev,
       )
@@ -363,7 +367,7 @@ function Detalle({
                 disabled={ocupado || !MONTO.test(saldo.trim().replace(/,/g, '')) || saldo === d.conciliacion.saldo_banco}
                 onClick={() =>
                   void correr(async () => {
-                    await editarConciliacion(token, id, { saldoBanco: saldo.trim().replace(/,/g, ''), notas: d.conciliacion.notas ?? '' })
+                    await editarConciliacion(token, id, { saldoBanco: saldo.trim().replace(/,/g, ''), notas: d.conciliacion.notas ?? '' }, ambito)
                     await cargar()
                   })
                 }
@@ -473,7 +477,7 @@ function Detalle({
             disabled={ocupado || !cuadra}
             onClick={() =>
               void correr(async () => {
-                const r = await cerrarConciliacion(token, id)
+                const r = await cerrarConciliacion(token, id, ambito)
                 await cargar()
                 setAviso(`Conciliación cerrada.${r.confirmados ? ` ${r.confirmados} movimiento(s) quedaron confirmados.` : ''}`)
                 onCambio()
@@ -502,7 +506,7 @@ function Detalle({
                 disabled={ocupado || motivo.trim().length < 5}
                 onClick={() =>
                   void correr(async () => {
-                    await descartarConciliacion(token, id, motivo.trim())
+                    await descartarConciliacion(token, id, motivo.trim(), ambito)
                     setDescartar(false)
                     onCambio()
                     onCerrar()

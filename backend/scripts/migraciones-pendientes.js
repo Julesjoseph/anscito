@@ -38,6 +38,7 @@ const MIGRACIONES = [
   ['039', "SELECT to_regclass('public.conciliaciones') IS NOT NULL"],
   ['040', "SELECT NOT EXISTS (SELECT 1 FROM cuentas ct LEFT JOIN cuentas_contables cc ON cc.id = ct.cuenta_contable_id WHERE ct.cuenta_contable_id IS NULL OR cc.codigo IN ('110104', '110105', '110106', '110107'))"],
   ['041', "SELECT to_regclass('public.empleados') IS NOT NULL"],
+  ['042', "SELECT EXISTS (SELECT 1 FROM permisos WHERE codigo = 'billeteras.ver')"],
   // Cada migración nueva se agrega aquí con su comprobación, al publicarla.
 ].filter(([n]) => fs.readdirSync(DATABASE).some((x) => x.startsWith(`${n}_`) && x.endsWith('.sql')));
 // (Solo cuentan las que vienen en esta versión del código: las que todavía no

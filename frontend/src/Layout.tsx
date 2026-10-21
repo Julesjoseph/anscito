@@ -24,6 +24,7 @@ import {
   UserRound,
   Users,
   Wallet,
+  WalletCards,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { AvisoGastoFijo, Marca, Perfil } from './api'
@@ -145,6 +146,13 @@ const MODULOS: Modulo[] = [
     Icono: Landmark,
     listo: true,
     permiso: 'bancos.ver',
+  },
+  {
+    id: 'billeteras',
+    nombre: 'Billeteras',
+    Icono: WalletCards,
+    listo: true,
+    permiso: 'billeteras.ver',
   },
   {
     id: 'contabilidad',
@@ -366,6 +374,14 @@ export default function Layout({
           />
         ) : pagina === 'bancos' ? (
           <Bancos
+            token={token}
+            permisos={perfil.permisos}
+            onSesionVencida={onSalir}
+          />
+        ) : pagina === 'billeteras' ? (
+          <Bancos
+            key="billeteras"
+            ambito="billetera"
             token={token}
             permisos={perfil.permisos}
             onSesionVencida={onSalir}

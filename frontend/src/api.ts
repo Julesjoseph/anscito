@@ -1671,20 +1671,25 @@ export type DatosTransferencia = {
   fecha?: string
 }
 
-export const prepararBancos = (token: string) =>
-  llamar<PrepararBancos>('GET', '/bancos/preparar', token)
+// Bancos y Billeteras (MonCash / NatCash) usan las mismas funciones; cada
+// módulo tiene su ruta en el servidor y solo ve sus cuentas.
+export type Ambito = 'banco' | 'billetera'
+export const rutaCuentas = (a: Ambito) => (a === 'billetera' ? '/billeteras' : '/bancos')
 
-export const listarCuentas = (token: string) =>
-  llamar<FilaCuenta[]>('GET', '/bancos/cuentas', token)
+export const prepararBancos = (token: string, ambito: Ambito = 'banco') =>
+  llamar<PrepararBancos>('GET', `${rutaCuentas(ambito)}/preparar`, token)
 
-export const crearCuenta = (token: string, datos: DatosCuenta) =>
-  llamar<{ id: string }>('POST', '/bancos/cuentas', token, datos)
+export const listarCuentas = (token: string, ambito: Ambito = 'banco') =>
+  llamar<FilaCuenta[]>('GET', `${rutaCuentas(ambito)}/cuentas`, token)
 
-export const editarCuenta = (token: string, id: string, datos: DatosCuenta) =>
-  llamar<{ ok: boolean }>('PATCH', `/bancos/cuentas/${id}`, token, datos)
+export const crearCuenta = (token: string, datos: DatosCuenta, ambito: Ambito = 'banco') =>
+  llamar<{ id: string }>('POST', `${rutaCuentas(ambito)}/cuentas`, token, datos)
 
-export const estadoCuenta = (token: string, id: string, isActive: boolean, motivo?: string) =>
-  llamar<{ ok: boolean }>('PATCH', `/bancos/cuentas/${id}/estado`, token, {
+export const editarCuenta = (token: string, id: string, datos: DatosCuenta, ambito: Ambito = 'banco') =>
+  llamar<{ ok: boolean }>('PATCH', `${rutaCuentas(ambito)}/cuentas/${id}`, token, datos)
+
+export const estadoCuenta = (token: string, id: string, isActive: boolean, motivo?: string, ambito: Ambito = 'banco') =>
+  llamar<{ ok: boolean }>('PATCH', `${rutaCuentas(ambito)}/cuentas/${id}/estado`, token, {
     is_active: isActive,
     motivo,
   })
@@ -1693,7 +1698,8 @@ export const saldoInicialCuenta = (
   token: string,
   id: string,
   datos: { monto: string; tasa?: string; fecha?: string },
-) => llamar<{ id: string }>('POST', `/bancos/cuentas/${id}/saldo-inicial`, token, datos)
+  ambito: Ambito = 'banco',
+) => llamar<{ id: string }>('POST', `${rutaCuentas(ambito)}/cuentas/${id}/saldo-inicial`, token, datos)
 
 export type FiltrosMovimientosCuenta = {
   desde: string
@@ -1702,13 +1708,13 @@ export type FiltrosMovimientosCuenta = {
   pagina: number
 }
 
-export const movimientosCuenta = (token: string, id: string, f: FiltrosMovimientosCuenta) => {
+export const movimientosCuenta = (token: string, id: string, f: FiltrosMovimientosCuenta, ambito: Ambito = 'banco') => {
   const q = new URLSearchParams({ estado: f.estado, pagina: String(f.pagina) })
   if (f.desde) q.set('desde', f.desde)
   if (f.hasta) q.set('hasta', f.hasta)
   return llamar<PaginaMovimientosCuenta>(
     'GET',
-    `/bancos/cuentas/${id}/movimientos?${q.toString()}`,
+    `${rutaCuentas(ambito)}/cuentas/${id}/movimientos?${q.toString()}`,
     token,
   )
 }
@@ -1717,18 +1723,19 @@ export const registrarMovimientoCuenta = (
   token: string,
   id: string,
   datos: DatosMovimientoCuenta,
+  ambito: Ambito = 'banco',
 ) =>
   llamar<{ id: string; disponible: string }>(
     'POST',
-    `/bancos/cuentas/${id}/movimientos`,
+    `${rutaCuentas(ambito)}/cuentas/${id}/movimientos`,
     token,
     datos,
   )
 
-export const pendientesBancos = (token: string) =>
+export const pendientesBancos = (token: string, ambito: Ambito = 'banco') =>
   llamar<{ porConfirmar: MovimientoCuenta[]; noLlegaron: MovimientoCuenta[] }>(
     'GET',
-    '/bancos/pendientes',
+    `${rutaCuentas(ambito)}/pendientes`,
     token,
   )
 
@@ -1736,15 +1743,16 @@ export const confirmarMovimiento = (
   token: string,
   id: string,
   datos: { resultado: 'confirmado' | 'no_llego'; fechaBanco?: string; motivo?: string },
-) => llamar<{ ok: boolean }>('POST', `/bancos/movimientos/${id}/confirmar`, token, datos)
+  ambito: Ambito = 'banco',
+) => llamar<{ ok: boolean }>('POST', `${rutaCuentas(ambito)}/movimientos/${id}/confirmar`, token, datos)
 
-export const reversarMovimiento = (token: string, id: string, motivo: string) =>
-  llamar<{ id: string }>('POST', `/bancos/movimientos/${id}/reversar`, token, { motivo })
+export const reversarMovimiento = (token: string, id: string, motivo: string, ambito: Ambito = 'banco') =>
+  llamar<{ id: string }>('POST', `${rutaCuentas(ambito)}/movimientos/${id}/reversar`, token, { motivo })
 
-export const transferirDinero = (token: string, datos: DatosTransferencia) =>
+export const transferirDinero = (token: string, datos: DatosTransferencia, ambito: Ambito = 'banco') =>
   llamar<{ id: string; numero: string; montoDop: string }>(
     'POST',
-    '/bancos/transferencias',
+    `${rutaCuentas(ambito)}/transferencias`,
     token,
     datos,
   )

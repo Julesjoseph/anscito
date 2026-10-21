@@ -1,11 +1,19 @@
 import { Module } from '@nestjs/common';
-import { BancosController } from './bancos.controller';
+import { BancosController, BilleterasController } from './bancos.controller';
 import { BancosService } from './bancos.service';
-import { ConciliacionController } from './conciliacion.controller';
+import {
+  ConciliacionBilleterasController,
+  ConciliacionController,
+} from './conciliacion.controller';
 import { ConciliacionService } from './conciliacion.service';
 
 @Module({
-  controllers: [BancosController, ConciliacionController],
+  controllers: [
+    BancosController,
+    BilleterasController,
+    ConciliacionController,
+    ConciliacionBilleterasController,
+  ],
   providers: [BancosService, ConciliacionService],
   exports: [BancosService],
 })

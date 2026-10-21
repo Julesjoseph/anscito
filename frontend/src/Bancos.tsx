@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useContext, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   AlertTriangle,
@@ -38,6 +38,7 @@ import type {
   MovimientoCuenta,
   PaginaMovimientosCuenta,
   PrepararBancos,
+  Ambito,
 } from './api'
 import {
   AREA,
@@ -50,12 +51,15 @@ import {
   SelectorLinea,
 } from './componentes'
 import Conciliacion from './Conciliacion'
+import { AmbitoCtx, permisoDe } from './ambito'
 import { dinero, mensajeDe } from './formato'
 
 type Props = {
   token: string
   permisos: string[]
   onSesionVencida: () => void
+  // Bancos (cuentas de banco) o Billeteras (MonCash / NatCash).
+  ambito?: Ambito
 }
 
 const MONTO = /^\d{1,12}(\.\d{1,2})?$/
@@ -172,9 +176,10 @@ function FormCuenta({
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [codigo, setCodigo] = useState('')
-  const [tipo, setTipo] = useState<'banco' | 'billetera'>(cuenta?.tipo ?? 'banco')
-  const [moneda, setMoneda] = useState(cuenta?.moneda ?? 'DOP')
+  const tipo = cuenta?.tipo ?? ambito
+  const [moneda, setMoneda] = useState(cuenta?.moneda ?? (ambito === 'billetera' ? 'HTG' : 'DOP'))
   const [entidad, setEntidad] = useState(cuenta?.entidad ?? '')
   const [nombre, setNombre] = useState(cuenta?.nombre ?? '')
   const [tipoCuenta, setTipoCuenta] = useState(cuenta?.tipo_cuenta ?? 'corriente')
@@ -194,8 +199,8 @@ function FormCuenta({
     void enviar(
       () =>
         cuenta
-          ? editarCuenta(token, cuenta.id, datos)
-          : crearCuenta(token, { ...datos, codigo, tipo, moneda }),
+          ? editarCuenta(token, cuenta.id, datos, ambito)
+          : crearCuenta(token, { ...datos, codigo, tipo, moneda }, ambito),
       onListo,
     )
   }
@@ -204,26 +209,10 @@ function FormCuenta({
     <form onSubmit={guardar} className="flex flex-col gap-3 text-sm">
       {!cuenta && (
         <>
-          <div className="flex gap-2">
-            {(
-              [
-                ['banco', 'Cuenta de banco', Landmark],
-                ['billetera', 'MonCash / NatCash', Smartphone],
-              ] as const
-            ).map(([id, texto, Icono]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setTipo(id)
-                  if (id === 'billetera') setMoneda('HTG')
-                }}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 ${tipo === id ? 'border-[#C8102E] bg-red-50 font-medium text-[#C8102E]' : 'border-gray-300 hover:bg-gray-50'}`}
-              >
-                <Icono size={16} /> {texto}
-              </button>
-            ))}
-          </div>
+          <p className="flex items-center gap-2 font-medium text-gray-700">
+            {tipo === 'billetera' ? <Smartphone size={16} /> : <Landmark size={16} />}
+            {tipo === 'billetera' ? 'Billetera MonCash / NatCash' : 'Cuenta de banco'}
+          </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-gray-600">
               Código
@@ -292,6 +281,7 @@ function FormEstadoCuenta({
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [motivo, setMotivo] = useState('')
   const { error, guardando, enviar } = useEnviar(onSesionVencida)
   const desactivar = cuenta.is_active
@@ -299,7 +289,7 @@ function FormEstadoCuenta({
     <form
       onSubmit={(e) => {
         e.preventDefault()
-        void enviar(() => estadoCuenta(token, cuenta.id, !desactivar, desactivar ? motivo : undefined), onListo)
+        void enviar(() => estadoCuenta(token, cuenta.id, !desactivar, desactivar ? motivo : undefined, ambito), onListo)
       }}
       className="flex flex-col gap-3 text-sm"
     >
@@ -345,6 +335,7 @@ function FormSaldoInicial({
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [monto, setMonto] = useState('')
   const [tasa, setTasa] = useState('')
   const [dia, setDia] = useState(hoy())
@@ -354,7 +345,7 @@ function FormSaldoInicial({
     <form
       onSubmit={(e) => {
         e.preventDefault()
-        void enviar(() => saldoInicialCuenta(token, cuenta.id, { monto: monto.trim(), tasa: extranjera ? tasa.trim() : undefined, fecha: dia }), onListo)
+        void enviar(() => saldoInicialCuenta(token, cuenta.id, { monto: monto.trim(), tasa: extranjera ? tasa.trim() : undefined, fecha: dia }, ambito), onListo)
       }}
       className="flex flex-col gap-3 text-sm"
     >
@@ -393,6 +384,7 @@ function FormMovimiento({
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [tipo, setTipo] = useState<'pago' | 'cargo' | 'interes' | 'ingreso'>('pago')
   const [monto, setMonto] = useState('')
   const [tasa, setTasa] = useState('')
@@ -425,7 +417,7 @@ function FormMovimiento({
               comprobante: comprobante.trim() || undefined,
               referencia: referencia.trim() || undefined,
               motivo,
-            }),
+            }, ambito),
           onListo,
         )
       }}
@@ -541,6 +533,7 @@ function FormConfirmar({
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [resultado, setResultado] = useState<'confirmado' | 'no_llego'>('confirmado')
   const [dia, setDia] = useState(hoy())
   const [motivo, setMotivo] = useState('')
@@ -555,7 +548,7 @@ function FormConfirmar({
               resultado,
               fechaBanco: resultado === 'confirmado' ? dia : undefined,
               motivo: motivo.trim() || undefined,
-            }),
+            }, ambito),
           onListo,
         )
       }}
@@ -614,13 +607,14 @@ function FormReversar({
   onListo: () => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [motivo, setMotivo] = useState('')
   const { error, guardando, enviar } = useEnviar(onSesionVencida)
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault()
-        void enviar(() => reversarMovimiento(token, mov.id, motivo), onListo)
+        void enviar(() => reversarMovimiento(token, mov.id, motivo, ambito), onListo)
       }}
       className="flex flex-col gap-3 text-sm"
     >
@@ -656,8 +650,9 @@ function TablaMovimientos({
   onConfirmar: (m: MovimientoCuenta) => void
   onReversar: (m: MovimientoCuenta) => void
 }) {
-  const puedeConfirmar = permisos.includes('bancos.confirmar')
-  const puedeReversar = permisos.includes('bancos.gestionar')
+  const ambito = useContext(AmbitoCtx)
+  const puedeConfirmar = permisos.includes(permisoDe(ambito, 'confirmar'))
+  const puedeReversar = permisos.includes(permisoDe(ambito, 'gestionar'))
   const reversable = (m: MovimientoCuenta) =>
     puedeReversar &&
     m.estado === 'confirmado' &&
@@ -734,19 +729,20 @@ function VerCuenta({
   onAccion: (a: { tipo: 'confirmar' | 'reversar'; mov: MovimientoCuenta }) => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [filtros, setFiltros] = useState<FiltrosMovimientosCuenta>({ desde: '', hasta: '', estado: 'todos', pagina: 1 })
   const [datos, setDatos] = useState<PaginaMovimientosCuenta | null>(null)
   const [error, setError] = useState('')
 
   const cargar = useCallback(async () => {
     try {
-      setDatos(await movimientosCuenta(token, id, filtros))
+      setDatos(await movimientosCuenta(token, id, filtros, ambito))
       setError('')
     } catch (e) {
       if (e instanceof SesionVencida) onSesionVencida()
       else setError(mensajeDe(e))
     }
-  }, [token, id, filtros, onSesionVencida])
+  }, [token, id, filtros, onSesionVencida, ambito])
 
   useEffect(() => {
     const espera = setTimeout(() => void cargar(), 0)
@@ -816,6 +812,7 @@ function FormTransferencia({
   onListo: (numero: string) => void
   onSesionVencida: () => void
 }) {
+  const ambito = useContext(AmbitoCtx)
   const [origen, setOrigen] = useState('')
   const [destino, setDestino] = useState('')
   const [montoSale, setMontoSale] = useState('')
@@ -889,7 +886,7 @@ function FormTransferencia({
         referencia: referencia.trim() || undefined,
         motivo: motivo.trim() || undefined,
         fecha: dia,
-      })
+      }, ambito)
       setMontoSale('')
       setMontoEntra('')
       setReferencia('')
@@ -976,7 +973,16 @@ type Modal =
   | { tipo: 'movimiento'; cuenta: FilaCuenta }
   | { tipo: 'ver'; cuenta: FilaCuenta }
 
-export default function Bancos({ token, permisos, onSesionVencida }: Props) {
+export default function Bancos(props: Props) {
+  const ambito = props.ambito ?? 'banco'
+  return (
+    <AmbitoCtx.Provider value={ambito}>
+      <PantallaCuentas {...props} ambito={ambito} />
+    </AmbitoCtx.Provider>
+  )
+}
+
+function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & { ambito: Ambito }) {
   const [seccion, setSeccion] = useState<'cuentas' | 'pendientes' | 'transferir' | 'conciliacion'>('cuentas')
   const [prep, setPrep] = useState<PrepararBancos | null>(null)
   const [cuentas, setCuentas] = useState<FilaCuenta[] | null>(null)
@@ -986,13 +992,13 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
   const [accion, setAccion] = useState<{ tipo: 'confirmar' | 'reversar'; mov: MovimientoCuenta } | null>(null)
   const [version, setVersion] = useState(0)
   const [aviso, setAviso] = useState('')
-  const gestionar = permisos.includes('bancos.gestionar')
+  const gestionar = permisos.includes(permisoDe(ambito, 'gestionar'))
   // Las cuentas desactivadas se ocultan salvo que se pidan.
   const [verInactivas, setVerInactivas] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
-      const [p, c, pe] = await Promise.all([prepararBancos(token), listarCuentas(token), pendientesBancos(token)])
+      const [p, c, pe] = await Promise.all([prepararBancos(token, ambito), listarCuentas(token, ambito), pendientesBancos(token, ambito)])
       setPrep(p)
       setCuentas(c)
       setPendientes(pe)
@@ -1001,7 +1007,7 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
       if (e instanceof SesionVencida) onSesionVencida()
       else setError(mensajeDe(e))
     }
-  }, [token, onSesionVencida])
+  }, [token, onSesionVencida, ambito])
 
   useEffect(() => {
     const espera = setTimeout(() => void cargar(), 0)
@@ -1038,9 +1044,11 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
   return (
     <div>
       <div className="mb-4">
-        <h1 className="mb-1 text-xl font-medium">Bancos</h1>
+        <h1 className="mb-1 text-xl font-medium">{ambito === 'billetera' ? 'Billeteras' : 'Bancos'}</h1>
         <p className="text-sm text-gray-500">
-          Cuentas de banco y billeteras MonCash / NatCash. Lo que entra por ventas o depósitos queda “por confirmar” hasta verlo en el estado de cuenta.
+          {ambito === 'billetera'
+            ? 'Billeteras MonCash / NatCash del negocio (en gourdes). Recargarlas desde un banco o la caja es una transferencia entre cuentas propias, no un gasto.'
+            : 'Cuentas de banco. Lo que entra por ventas o depósitos queda “por confirmar” hasta verlo en el estado de cuenta. Las billeteras MonCash / NatCash están en Billeteras.'}
         </p>
       </div>
       <div className="mb-4 flex gap-1 border-b border-gray-200">
@@ -1048,7 +1056,7 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
           [
             ['cuentas', 'Cuentas', true],
             ['pendientes', `Por confirmar${nPendientes ? ` (${nPendientes})` : ''}`, true],
-            ['transferir', 'Transferir', permisos.includes('bancos.transferir')],
+            ['transferir', 'Transferir', permisos.includes(permisoDe(ambito, 'transferir'))],
             ['conciliacion', 'Conciliación', true],
           ] as const
         )
@@ -1137,7 +1145,7 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
                   <button type="button" onClick={() => setModal({ tipo: 'ver', cuenta: c })} className={BOTON_SECUNDARIO}>
                     <span className="inline-flex items-center gap-2"><Eye size={16} /> Movimientos</span>
                   </button>
-                  {c.is_active && permisos.includes('bancos.movimientos') && (
+                  {c.is_active && permisos.includes(permisoDe(ambito, 'movimientos')) && (
                     <button type="button" onClick={() => setModal({ tipo: 'movimiento', cuenta: c })} className={BOTON_PRINCIPAL}>
                       <Plus size={16} /> Registrar
                     </button>
@@ -1183,7 +1191,7 @@ export default function Bancos({ token, permisos, onSesionVencida }: Props) {
         <Conciliacion
           token={token}
           cuentas={cuentas}
-          puedeConciliar={permisos.includes('bancos.confirmar')}
+          puedeConciliar={permisos.includes(permisoDe(ambito, 'confirmar'))}
           onCambio={cambio}
           onSesionVencida={onSesionVencida}
         />
