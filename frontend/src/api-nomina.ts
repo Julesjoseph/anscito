@@ -1,6 +1,6 @@
 // Nómina: empleados, adelantos, nóminas (regular, regalía y vacaciones) y
 // valores de ley.
-import { llamar } from './api'
+import { API_URL, SesionVencida, llamar } from './api'
 
 export type Frecuencia = 'semanal' | 'quincenal' | 'mensual'
 export type TipoNomina = 'regular' | 'regalia' | 'vacaciones'
@@ -238,3 +238,29 @@ export const nuevoParametro = (
   token: string,
   d: { clave: keyof ParametrosNomina; valor: string; vigenteDesde: string; motivo: string },
 ) => llamar<{ clave: string }>('POST', '/nomina/parametros', token, d)
+
+// ---------- Volantes de pago (PDF) ----------
+
+// Volantes de toda la nómina o, con lineaId, de un empleado. Se abren en otra
+// pestaña (la pestaña se abre en el mismo clic para que no la bloquee el navegador).
+export async function abrirVolantes(token: string, id: string, lineaId?: string) {
+  const pestana = window.open('', '_blank')
+  try {
+    const q = lineaId ? `?${new URLSearchParams({ lineaId }).toString()}` : ''
+    const res = await fetch(`${API_URL}/nomina/nominas/${id}/volantes${q}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (res.status === 401) throw new SesionVencida('Sesión vencida')
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      throw new Error(data?.message ?? 'No se pudo generar el volante')
+    }
+    const url = URL.createObjectURL(await res.blob())
+    if (pestana) pestana.location.href = url
+    else window.location.href = url
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (e) {
+    pestana?.close()
+    throw e
+  }
+}

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, Pencil, Plus, Power, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Pencil, Plus, Power, Printer, Search, Trash2 } from 'lucide-react'
 import { SesionVencida } from './api'
 import {
+  abrirVolantes,
   agregarEmpleadoNomina,
   anularAdelanto,
   anularNomina,
@@ -1006,6 +1007,11 @@ function Detalle({ token, permisos, prep, id, onVolver, onCambio, onSesionVencid
               Pagar {dinero(t.neto)}
             </button>
           )}
+          {(n.estado === 'pagada' || n.estado === 'anulada') && (
+            <button type="button" onClick={() => void abrirVolantes(token, n.id).catch(manejar)} className={BOTON_SECUNDARIO}>
+              <span className="inline-flex items-center gap-2"><Printer size={16} /> Volantes de pago</span>
+            </button>
+          )}
           {n.estado === 'pagada' && pagar && (
             <button type="button" onClick={() => abrir({ tipo: 'anular' })} className={BOTON_PELIGRO}>
               Anular
@@ -1072,6 +1078,11 @@ function Detalle({ token, permisos, prep, id, onVolver, onCambio, onSesionVencid
                   </td>
                   <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{dinero(l.neto)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {(n.estado === 'pagada' || n.estado === 'anulada') && (
+                      <button type="button" onClick={() => void abrirVolantes(token, n.id, l.id).catch(manejar)} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100" title="Volante de pago" aria-label={`Volante de pago de ${l.nombre}`}>
+                        <Printer size={16} />
+                      </button>
+                    )}
                     {borrador && preparar && (
                       <>
                         <button type="button" onClick={() => abrir({ tipo: 'linea', linea: l })} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100" title="Anotar extras y descuentos" aria-label={`Editar ${l.nombre}`}>

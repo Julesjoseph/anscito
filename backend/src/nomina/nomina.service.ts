@@ -24,6 +24,7 @@ import {
   valorHora,
 } from './calculo';
 import type { Frecuencia, Parametros } from './calculo';
+import { generarVolantes } from './volante-pdf';
 
 // Nómina (primera parte, sin TSS ni ISR: decisión del dueño, todavía ningún
 // empleado está inscrito). Empleados con sueldo mensual y su frecuencia de
@@ -1620,5 +1621,112 @@ export class NominaService {
       });
       return { id, codigo };
     });
+  }
+
+  // ---------- Volantes de pago ----------
+
+  // PDF con el volante de cada empleado de una nómina pagada (o anulada,
+  // marcado). Con lineaId, solo el de ese empleado.
+  async volantesPdf(id: string, lineaId?: string) {
+    if (!UUID.test(id)) throw new NotFoundException('Nómina no encontrada');
+    const linea = texto(lineaId).toLowerCase();
+    if (linea && !UUID.test(linea))
+      throw new NotFoundException('Empleado no encontrado en la nómina');
+    const n = await this.db.query<{
+      numero: string;
+      tipo: TipoNomina;
+      frecuencia: Frecuencia | null;
+      desde: string;
+      hasta: string;
+      estado: string;
+      fecha_pago: string | null;
+    }>(
+      `SELECT numero, tipo, frecuencia, to_char(desde, 'DD/MM/YYYY') AS desde,
+              to_char(hasta, 'DD/MM/YYYY') AS hasta, estado,
+              to_char(fecha_pago, 'DD/MM/YYYY') AS fecha_pago
+       FROM nominas WHERE id = $1`,
+      [id],
+    );
+    if (n.rowCount === 0) throw new NotFoundException('Nómina no encontrada');
+    const cab = n.rows[0];
+    if (cab.estado !== 'pagada' && cab.estado !== 'anulada')
+      throw new BadRequestException(
+        'El volante se imprime cuando la nómina está pagada',
+      );
+    const l = await this.db.query<
+      Linea & {
+        nombre: string;
+        numero: string;
+        documento: string | null;
+        cargo: string | null;
+        debe: string;
+      }
+    >(
+      `SELECT l.*, e.nombre, e.numero, e.documento, e.cargo,
+              COALESCE((SELECT sum(${SQL_SALDO_ADELANTO}) FROM empleado_adelantos a
+                        WHERE a.empleado_id = e.id AND a.estado = 'activo'), 0)::numeric(14,2) AS debe
+       FROM nomina_lineas l JOIN empleados e ON e.id = l.empleado_id
+       WHERE l.nomina_id = $1 AND ($2 = '' OR l.id::text = $2)
+       ORDER BY lower(e.nombre)`,
+      [id, linea],
+    );
+    if (l.rowCount === 0)
+      throw new NotFoundException('Empleado no encontrado en la nómina');
+    const empresa = (
+      await this.db.query<{
+        nombre_comercial: string;
+        razon_social: string | null;
+        rnc: string | null;
+        direccion: string | null;
+        telefono: string | null;
+        logo: Buffer | null;
+        logo_tipo: string | null;
+      }>(
+        `SELECT nombre_comercial, razon_social, rnc, direccion, telefono, logo, logo_tipo
+         FROM empresa WHERE id = 1`,
+      )
+    ).rows[0];
+    const codigo = numeroNomina(cab.numero);
+    const pdf = await generarVolantes({
+      empresa,
+      nomina: {
+        codigo,
+        tipo: NOMBRE_TIPO[cab.tipo],
+        frecuencia: cab.frecuencia
+          ? { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' }[
+              cab.frecuencia
+            ]
+          : null,
+        desde: cab.desde,
+        hasta: cab.hasta,
+        estado: cab.estado,
+        fechaPago: cab.fecha_pago,
+      },
+      volantes: l.rows.map((x) => ({
+        codigo: numeroEmpleado(x.numero),
+        nombre: x.nombre,
+        documento: x.documento,
+        cargo: x.cargo,
+        sueldoMensual: x.sueldo_mensual,
+        formaPago: x.forma_pago,
+        dias: x.dias,
+        sueldo: x.sueldo,
+        horasExtra: x.horas_extra,
+        horasExtraAlto: x.horas_extra_alto,
+        montoExtra: x.monto_extra,
+        comisiones: x.comisiones,
+        bonos: x.bonos,
+        adelantos: x.adelantos,
+        otrosDescuentos: x.otros_descuentos,
+        motivoDescuento: x.motivo_descuento,
+        neto: x.neto,
+        debeAdelantos: x.debe,
+      })),
+    });
+    const nombre =
+      l.rowCount === 1 && linea
+        ? `volante-${codigo}-${numeroEmpleado(l.rows[0].numero)}.pdf`
+        : `volantes-${codigo}.pdf`;
+    return { pdf, nombre };
   }
 }

@@ -8,8 +8,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UsuarioActual } from '../auth/jwt-auth.guard';
 import { PermisosGuard } from '../auth/permisos.guard';
@@ -127,6 +129,23 @@ export class NominaController {
   @RequierePermiso('nomina.ver')
   detalle(@Param('id') id: string) {
     return this.nomina.detalleNomina(id);
+  }
+
+  // Volantes de pago (PDF): de toda la nómina o, con lineaId, de un empleado.
+  @Get('nominas/:id/volantes')
+  @RequierePermiso('nomina.ver')
+  async volantes(
+    @Param('id') id: string,
+    @Query('lineaId') lineaId: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { pdf, nombre } = await this.nomina.volantesPdf(id, lineaId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${nombre}"`,
+      'Cache-Control': 'no-store',
+    });
+    res.send(pdf);
   }
 
   @Post('nominas')

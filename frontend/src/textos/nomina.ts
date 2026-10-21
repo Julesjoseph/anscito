@@ -4,6 +4,8 @@ import type { Frase, Patron } from './tipos'
 export const FRASES_NOMINA: Frase[] = [
   ['Sueldos, horas extra, comisiones, adelantos, regalía y vacaciones. Todavía sin TSS ni ISR.', 'Salaries, overtime, commissions, advances, Christmas bonus and vacation. No TSS or ISR yet.', 'Salaires, heures supplémentaires, commissions, avances, prime de Noël et congés. Pas encore de TSS ni d’ISR.', 'Salè, èdtan siplemantè, komisyon, avans, bonis Nwèl ak vakans. Poko gen TSS ni ISR.'],
   ['Nóminas', 'Payrolls', 'Paies', 'Pewòl yo'],
+  ['Volantes de pago', 'Payslips', 'Bulletins de paie', 'Fich peman'],
+  ['Volante de pago', 'Payslip', 'Bulletin de paie', 'Fich peman'],
   ['Empleados', 'Employees', 'Employés', 'Anplwaye'],
   ['Empleado', 'Employee', 'Employé', 'Anplwaye'],
   ['Adelantos y préstamos', 'Advances and loans', 'Avances et prêts', 'Avans ak prè'],
@@ -134,6 +136,7 @@ export const FRASES_NOMINA: Frase[] = [
 ]
 
 export const PATRONES_NOMINA: Patron[] = [
+  { es: /^Volante de pago de (.+)$/, en: (n) => `Payslip for ${n}`, fr: (n) => `Bulletin de paie de ${n}`, ht: (n) => `Fich peman ${n}` },
   { es: /^Se guardaron los cambios de (.+)\.$/, en: (n) => `${n}’s changes were saved.`, fr: (n) => `Les modifications de ${n} ont été enregistrées.`, ht: (n) => `Chanjman ${n} yo anrejistre.` },
   { es: /^Empleado (EMP-\d+) creado\.$/, en: (c) => `Employee ${c} created.`, fr: (c) => `Employé ${c} créé.`, ht: (c) => `Anplwaye ${c} kreye.` },
   { es: /^(.+) quedó inactivo\.$/, en: (n) => `${n} is now inactive.`, fr: (n) => `${n} est maintenant inactif.`, ht: (n) => `${n} vin inaktif.` },
