@@ -1171,7 +1171,7 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {porMoneda.map((m) => (
                 <div key={m.codigo} className="rounded-xl border border-gray-200 bg-white p-4">
-                  <div className="text-sm text-gray-500">{m.nombre} · {m.cuentas} cuenta{m.cuentas === 1 ? '' : 's'}</div>
+                  <div className="text-sm text-gray-500">{`${m.nombre} · ${m.cuentas} cuenta${m.cuentas === 1 ? '' : 's'}`}</div>
                   <div className="text-2xl font-medium">{enMoneda(m.simbolo, m.confirmado)}</div>
                   <div className="text-xs text-gray-500">Confirmado{m.porConfirmar !== '0.00' && ` · por confirmar ${enMoneda(m.simbolo, m.porConfirmar)}`}</div>
                 </div>

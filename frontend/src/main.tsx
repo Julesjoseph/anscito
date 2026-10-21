@@ -4,9 +4,12 @@ import './index.css'
 import App from './App.tsx'
 import { MODO_DEMO } from './entorno'
 import { aplicarTema, leerTema } from './tema'
+import { leerIdioma } from './idioma'
+import { iniciarTraductor } from './traductor'
 
 // El modo día/noche guardado se pone antes de dibujar (sin parpadeo).
 aplicarTema(leerTema())
+document.documentElement.lang = leerIdioma()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -18,3 +21,6 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+// Traduce las pantallas al idioma elegido (diccionario en src/textos).
+iniciarTraductor()

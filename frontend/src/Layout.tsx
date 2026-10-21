@@ -38,6 +38,8 @@ import Panel from './Panel'
 import Reportes from './Reportes'
 import { LogoMarca } from './marca'
 import { aplicarTema, leerTema } from './tema'
+import { useIdioma } from './idioma'
+import type { ClaveTexto } from './idioma'
 import type { Tema } from './tema'
 import Bancos from './Bancos'
 import Caja from './Caja'
@@ -256,6 +258,7 @@ export default function Layout({
 }: Props) {
   const [pagina, setPagina] = useState('panel')
   const [tema, setTema] = useState<Tema>(leerTema)
+  const { t } = useIdioma()
   function cambiarTema() {
     const nuevo = tema === 'noche' ? 'dia' : 'noche'
     aplicarTema(nuevo)
@@ -277,7 +280,7 @@ export default function Layout({
           <LogoMarca marca={marca} tamano="chico" />
           <div className="leading-tight">
             <div className="text-sm font-medium">{marca.nombre_comercial}</div>
-            <div className="text-xs text-gray-500">Administración</div>
+            <div className="text-xs text-gray-500">{t('menu.administracion')}</div>
           </div>
         </div>
 
@@ -285,11 +288,11 @@ export default function Layout({
           <button
             type="button"
             onClick={cambiarTema}
-            title="Se recuerda en este equipo"
+            title={t('menu.se_recuerda')}
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 border-transparent text-gray-600 hover:bg-gray-50"
           >
             {tema === 'noche' ? <Sun size={18} /> : <Moon size={18} />}
-            {tema === 'noche' ? 'Modo día' : 'Modo noche'}
+            {tema === 'noche' ? t('menu.modo_dia') : t('menu.modo_noche')}
           </button>
           {visibles.map(({ id, nombre, Icono, listo }) => {
             const activo = pagina === id
@@ -299,7 +302,7 @@ export default function Layout({
                 type="button"
                 disabled={!listo}
                 onClick={() => setPagina(id)}
-                title={listo ? undefined : 'Disponible próximamente'}
+                title={listo ? undefined : t('menu.proximamente')}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 ${
                   activo
                     ? 'border-[#C8102E] bg-gray-100 font-medium text-gray-900'
@@ -309,7 +312,7 @@ export default function Layout({
                 }`}
               >
                 <Icono size={18} />
-                {nombre}
+                {t(`menu.${id}` as ClaveTexto) || nombre}
               </button>
             )
           })}
@@ -320,7 +323,7 @@ export default function Layout({
             {perfil.nombre} {perfil.apellido}
           </div>
           <div className="text-xs text-gray-500 mb-3">
-            {perfil.roles.join(', ') || 'Sin rol'}
+            {perfil.roles.join(', ') || t('menu.sin_rol')}
           </div>
           <button
             type="button"
@@ -328,7 +331,7 @@ export default function Layout({
             className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
           >
             <LogOut size={16} />
-            Salir
+            {t('menu.salir')}
           </button>
         </div>
       </aside>

@@ -17,9 +17,10 @@ import {
   Wallet,
 } from 'lucide-react'
 import { SesionVencida, resumenPanel } from './api'
+import { localeDe, useIdioma } from './idioma'
 import type { PeriodoPanel, ResumenPanel } from './api'
 import { dolares, verTasa } from './dolar'
-import { CajaError } from './componentes'
+import { CajaError, SelectorIdioma } from './componentes'
 import { cantidad, dinero, mensajeDe } from './formato'
 
 type Props = {
@@ -97,6 +98,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
   const [datos, setDatos] = useState<ResumenPanel | null>(null)
   const [error, setError] = useState('')
   const [cargando, setCargando] = useState(false)
+  const { idioma } = useIdioma()
 
   const cargar = useCallback(async () => {
     setCargando(true)
@@ -137,10 +139,13 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="mb-1 text-xl font-medium">Resumen</h1>
+          <div className="mb-1 flex flex-wrap items-center gap-3">
+            <h1 className="text-xl font-medium">Resumen</h1>
+            <SelectorIdioma />
+          </div>
           {datos && (
             <p className="text-sm text-gray-500">
-              Desde el {new Date(datos.desde).toLocaleDateString('es-DO', { timeZone: 'America/Santo_Domingo', day: 'numeric', month: 'long', year: 'numeric' })} hasta
+              Desde el {new Date(datos.desde).toLocaleDateString(localeDe(idioma), { timeZone: 'America/Santo_Domingo', day: 'numeric', month: 'long', year: 'numeric' })} hasta
               ahora
             </p>
           )}
@@ -192,7 +197,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               icono={<TrendingUp size={16} />}
               detalle={
                 <>
-                  {v.cantidad} venta{v.cantidad === 1 ? '' : 's'}
+                  {`${v.cantidad} venta${v.cantidad === 1 ? '' : 's'}`}
                   {v.anuladas.cantidad > 0 && ` · ${v.anuladas.cantidad} anulada${v.anuladas.cantidad === 1 ? '' : 's'} (no suman)`}
                 </>
               }
@@ -285,12 +290,12 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
                 <>
                   {cxp.vencidas.cantidad > 0 && (
                     <span className="block text-red-700">
-                      {cxp.vencidas.cantidad} vencida{cxp.vencidas.cantidad === 1 ? '' : 's'}: {dinero(cxp.vencidas.monto)}
+                      {`${cxp.vencidas.cantidad} vencida${cxp.vencidas.cantidad === 1 ? '' : 's'}: ${dinero(cxp.vencidas.monto)}`}
                     </span>
                   )}
                   {cxp.porVencer.cantidad > 0 && (
                     <span className="block">
-                      {cxp.porVencer.cantidad} vence{cxp.porVencer.cantidad === 1 ? '' : 'n'} en {cxp.dias} días: {dinero(cxp.porVencer.monto)}
+                      {`${cxp.porVencer.cantidad} vence${cxp.porVencer.cantidad === 1 ? '' : 'n'} en ${cxp.dias} días: ${dinero(cxp.porVencer.monto)}`}
                     </span>
                   )}
                   {cxp.gastosFijos.map((g) => (
@@ -400,7 +405,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
               valor={dinero(serv.total)}
               detalle={
                 <>
-                  {cantidad(serv.cantidad)} servicio(s) en {serv.ventas} venta{serv.ventas === 1 ? '' : 's'}
+                  {`${cantidad(serv.cantidad)} servicio(s) en ${serv.ventas} venta${serv.ventas === 1 ? '' : 's'}`}
                   {serv.ganancia !== undefined && <span className="block">Ganancia {dinero(serv.ganancia)} (sin ITBIS)</span>}
                   {serv.mas_vendido && (
                     <span className="block">
@@ -452,7 +457,7 @@ export default function Panel({ token, onIr, onSesionVencida }: Props) {
                     : `${datos.cxc.clientes} cliente${datos.cxc.clientes === 1 ? '' : 's'} le deben`}
                   {datos.cxc.vencido !== '0.00' && (
                     <span className="block text-red-700">
-                      Vencido: {dinero(datos.cxc.vencido)} ({datos.cxc.clientesVencidos} cliente{datos.cxc.clientesVencidos === 1 ? '' : 's'})
+                      {`Vencido: ${dinero(datos.cxc.vencido)} (${datos.cxc.clientesVencidos} cliente${datos.cxc.clientesVencidos === 1 ? '' : 's'})`}
                     </span>
                   )}
                   <span className="block">Incluye recargos (ahora, no depende del período)</span>

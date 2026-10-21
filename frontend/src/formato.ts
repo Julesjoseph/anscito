@@ -1,7 +1,9 @@
+import { tr } from './idioma'
+
 // Funciones de formato compartidas por las pantallas.
 
 export function mensajeDe(err: unknown): string {
-  if (err instanceof TypeError) return 'No se pudo conectar con el servidor'
+  if (err instanceof TypeError) return tr('comun.sin_conexion')
   return (err as Error).message
 }
 

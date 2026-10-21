@@ -1028,7 +1028,7 @@ function Productos({ token, permisos, onSesionVencida }: Props) {
               <tfoot className="border-t-2 border-gray-200 bg-gray-50 font-medium">
                 <tr>
                   <td className="px-3 py-3" colSpan={datos.verCostos ? 11 : 10}>
-                    Totales de {datos.total} producto{datos.total === 1 ? '' : 's'}
+                    {`Totales de ${datos.total} producto${datos.total === 1 ? '' : 's'}`}
                     <div className="text-xs font-normal text-gray-500">
                       Existencia actual × costo y × precio, sin ITBIS
                     </div>

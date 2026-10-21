@@ -747,7 +747,7 @@ function FormNuevaNomina({ token, prep, onListo, onSesionVencida }: { token: str
           >
             {(['semanal', 'quincenal', 'mensual'] as Frecuencia[]).map((f) => (
               <option key={f} value={f}>
-                {f === 'semanal' ? 'Cada semana' : f === 'quincenal' ? 'Cada quincena' : 'Cada mes'} ({cuantos(f)} empleado{cuantos(f) === 1 ? '' : 's'})
+                {`${f === 'semanal' ? 'Cada semana' : f === 'quincenal' ? 'Cada quincena' : 'Cada mes'} (${cuantos(f)} empleado${cuantos(f) === 1 ? '' : 's'})`}
               </option>
             ))}
           </select>

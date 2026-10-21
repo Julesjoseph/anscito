@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { FileSpreadsheet, FileText, X } from 'lucide-react'
+import { FileSpreadsheet, FileText, Languages, X } from 'lucide-react'
+import { IDIOMAS, cambiarIdioma, useIdioma } from './idioma'
+import type { Idioma } from './idioma'
 
 // Piezas visuales compartidas por las pantallas nuevas.
 
@@ -39,6 +41,7 @@ export function Ventana({
   ancho?: string
   children: ReactNode
 }) {
+  const { t } = useIdioma()
   return (
     <div
       className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4"
@@ -54,7 +57,7 @@ export function Ventana({
           <button
             type="button"
             onClick={onCerrar}
-            aria-label="Cerrar"
+            aria-label={t('comun.cerrar')}
             className="text-gray-400 hover:text-gray-700"
           >
             <X size={18} />
@@ -101,6 +104,7 @@ export function BotonesDescarga({
   onError: (e: unknown) => void
 }) {
   const [bajando, setBajando] = useState<'' | 'xlsx' | 'pdf'>('')
+  const { t } = useIdioma()
   async function descargar(formato: 'xlsx' | 'pdf') {
     setBajando(formato)
     try {
@@ -117,20 +121,43 @@ export function BotonesDescarga({
         type="button"
         onClick={() => void descargar('xlsx')}
         disabled={bajando !== ''}
-        title="Descargar la lista en Excel"
+        title={t('comun.excel_titulo')}
         className="inline-flex h-10 items-center gap-2 rounded-lg border border-green-700 bg-white px-3 text-sm font-medium text-green-800 hover:bg-green-50 disabled:opacity-50"
       >
-        <FileSpreadsheet size={16} /> {bajando === 'xlsx' ? 'Preparando…' : 'Excel'}
+        <FileSpreadsheet size={16} /> {bajando === 'xlsx' ? t('comun.preparando') : 'Excel'}
       </button>
       <button
         type="button"
         onClick={() => void descargar('pdf')}
         disabled={bajando !== ''}
-        title="Descargar la lista en PDF"
+        title={t('comun.pdf_titulo')}
         className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#C8102E] bg-white px-3 text-sm font-medium text-[#C8102E] hover:bg-red-50 disabled:opacity-50"
       >
-        <FileText size={16} /> {bajando === 'pdf' ? 'Preparando…' : 'PDF'}
+        <FileText size={16} /> {bajando === 'pdf' ? t('comun.preparando') : 'PDF'}
       </button>
     </div>
+  )
+}
+
+// Lista para elegir el idioma de las pantallas (se recuerda en este equipo).
+export function SelectorIdioma({ className = '' }: { className?: string }) {
+  const { idioma, t } = useIdioma()
+  return (
+    <label className={`flex items-center gap-2 text-sm text-gray-600 ${className}`}>
+      <Languages size={16} aria-hidden="true" />
+      <span className="sr-only">{t('menu.idioma')}</span>
+      <select
+        value={idioma}
+        onChange={(e) => cambiarIdioma(e.target.value as Idioma)}
+        className="rounded-lg border border-gray-300 bg-transparent px-2 py-1 text-sm text-gray-700"
+        aria-label={t('menu.idioma')}
+      >
+        {IDIOMAS.map(([id, nombre]) => (
+          <option key={id} value={id}>
+            {nombre}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
