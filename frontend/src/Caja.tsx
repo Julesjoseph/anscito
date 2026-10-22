@@ -1435,7 +1435,7 @@ export default function Caja(props: Props) {
           Las ventas en efectivo entran solas.
         </p>
       </div>
-      <div className="mb-4 flex gap-1 border-b border-gray-200">
+      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
         {(
           [
             ['cajas', 'Cajas'],

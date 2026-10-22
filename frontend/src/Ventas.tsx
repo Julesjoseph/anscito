@@ -760,7 +760,62 @@ function NuevaVenta({
               Busque y agregue productos o servicios.
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <>
+            {/* Celular: una tarjeta por artículo (cantidad, descuento y total a la vista). */}
+            <ul className="divide-y divide-gray-100 sm:hidden">
+              {lineas.map((l, i) => {
+                const calc = vigente?.datos?.lineas[i]
+                const excede = l.art.tipo === 'producto' && CANT.test(l.cantidad) && Number(l.cantidad) > Number(l.art.existencia)
+                const pctMal = l.pct.trim() !== '' && (!/^\d{1,3}(\.\d{1,2})?$/.test(l.pct.trim()) || Number(l.pct) > Number(maximo))
+                return (
+                  <li key={`${l.art.tipo}:${l.art.id}`} className="p-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium">{l.art.nombre}</div>
+                        <div className="text-xs text-gray-500">
+                          <span className="font-mono">{l.art.codigo}</span> · {dinero(precioPesos(l.art))}
+                          {l.art.tipo === 'producto' && ` · stock ${verCantidad(l.art.existencia)}`}
+                        </div>
+                        {excede && <div className="text-xs text-red-600">Hay solo {verCantidad(l.art.existencia)}</div>}
+                      </div>
+                      <button type="button" onClick={() => setLineas(lineas.filter((_, j) => j !== i))} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:text-red-600" aria-label="Quitar">
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button type="button" onClick={() => sumar(i, -1)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50" aria-label="Uno menos">
+                        <Minus size={16} />
+                      </button>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={l.cantidad}
+                        onChange={(e) => cambiar(i, { cantidad: e.target.value })}
+                        className="h-10 w-16 rounded-lg border border-gray-300 px-2 text-center"
+                        aria-label="Cantidad"
+                      />
+                      <button type="button" onClick={() => sumar(i, 1)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50" aria-label="Uno más">
+                        <Plus size={16} />
+                      </button>
+                      {prep.puedeDescontar && (
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={l.pct}
+                          onChange={(e) => cambiar(i, { pct: e.target.value })}
+                          placeholder="Desc. %"
+                          className={`h-10 w-20 rounded-lg border px-2 text-center ${pctMal ? 'border-red-400' : 'border-gray-300'}`}
+                          aria-label="Descuento en porcentaje"
+                        />
+                      )}
+                      <span className="ml-auto font-medium whitespace-nowrap">{calc ? dinero(calc.total) : '…'}</span>
+                    </div>
+                    {pctMal && <div className="mt-1 text-xs text-red-600">Máx. {Number(maximo)}%</div>}
+                  </li>
+                )
+              })}
+            </ul>
+            <table className="hidden w-full text-sm sm:table">
               <thead className="border-b border-gray-200 text-left text-gray-500">
                 <tr>
                   <th className="px-3 py-2 font-medium">Artículo</th>
@@ -838,6 +893,7 @@ function NuevaVenta({
                 })}
               </tbody>
             </table>
+            </>
           )}
         </div>
         {vigente?.error && <CajaError>{vigente.error}</CajaError>}
@@ -1746,7 +1802,7 @@ export default function Ventas(props: Props) {
         <p className="text-sm text-gray-500">Registre ventas de productos y servicios; el inventario se descuenta solo.</p>
       </div>
       {puedeVender && puedeVer && (
-        <div className="mb-4 flex gap-1 border-b border-gray-200">
+        <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
           {(
             [
               ['nueva', 'Nueva venta'],

@@ -1137,7 +1137,7 @@ function PantallaCuentas({ token, permisos, onSesionVencida, ambito }: Props & {
             : 'Cuentas de banco. Lo que entra por ventas o depósitos queda “por confirmar” hasta verlo en el estado de cuenta. Las billeteras MonCash / NatCash están en Billeteras.'}
         </p>
       </div>
-      <div className="mb-4 flex gap-1 border-b border-gray-200">
+      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
         {(
           [
             ['cuentas', 'Cuentas', true],

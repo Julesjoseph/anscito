@@ -1132,6 +1132,7 @@ function VerCompra({
           </dl>
 
           {d.lineas.length > 0 && (
+            <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="text-xs text-gray-500">
                 <tr>
@@ -1152,6 +1153,7 @@ function VerCompra({
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           <dl className="ml-auto flex w-full max-w-xs flex-col gap-1">

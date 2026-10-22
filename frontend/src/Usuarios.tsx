@@ -59,12 +59,12 @@ function Ventana({
 }) {
   return (
     <div
-      className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-center sm:px-4"
       role="dialog"
       aria-modal="true"
       aria-label={titulo}
     >
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6">
+      <div className="h-full w-full max-w-md overflow-y-auto bg-white p-4 sm:h-auto sm:max-h-[90vh] sm:rounded-xl sm:border sm:border-gray-200 sm:p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-medium">{titulo}</h2>
           <button

@@ -576,7 +576,7 @@ export default function Empresa(props: Props) {
         <p className="text-sm text-gray-500">Datos de la empresa y sus sucursales.</p>
       </div>
       {verSucursales && (
-        <div className="mb-4 flex gap-1 border-b border-gray-200">
+        <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
           {(
             [
               ['datos', 'Datos de la empresa'],

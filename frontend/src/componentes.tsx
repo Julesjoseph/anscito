@@ -44,21 +44,22 @@ export function Ventana({
   const { t } = useIdioma()
   return (
     <div
-      className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-center sm:px-4"
       role="dialog"
       aria-modal="true"
       aria-label={titulo}
     >
+      {/* En el celular ocupa toda la pantalla; desde sm, centrada. */}
       <div
-        className={`max-h-[90vh] w-full ${ancho} overflow-y-auto rounded-xl border border-gray-200 bg-white p-6`}
+        className={`h-full w-full ${ancho} overflow-y-auto bg-white p-4 sm:h-auto sm:max-h-[90vh] sm:rounded-xl sm:border sm:border-gray-200 sm:p-6`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between gap-2">
           <h2 className="text-lg font-medium">{titulo}</h2>
           <button
             type="button"
             onClick={onCerrar}
             aria-label={t('comun.cerrar')}
-            className="text-gray-400 hover:text-gray-700"
+            className="-mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700"
           >
             <X size={18} />
           </button>

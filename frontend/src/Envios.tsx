@@ -514,7 +514,7 @@ function NuevoEnvio({
             </div>
           ) : (
             <>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <input
                   type="search"
                   value={buscarRem}
@@ -523,7 +523,7 @@ function NuevoEnvio({
                     if (e.key === 'Enter') void buscarRemitente(e)
                   }}
                   placeholder="Nombre, teléfono o documento"
-                  className={`${CAMPO} flex-1`}
+                  className={`${CAMPO} min-w-0 flex-1 basis-full sm:basis-0`}
                 />
                 <button type="button" onClick={(e) => void buscarRemitente(e)} className={BOTON_SECUNDARIO} aria-label="Buscar remitente">
                   <Search size={16} />
@@ -592,7 +592,7 @@ function NuevoEnvio({
             </div>
           ) : (
             <>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <input
                   type="search"
                   value={buscarBen}
@@ -601,7 +601,7 @@ function NuevoEnvio({
                     if (e.key === 'Enter') void buscarBeneficiario(e)
                   }}
                   placeholder="Nombre o teléfono"
-                  className={`${CAMPO} flex-1`}
+                  className={`${CAMPO} min-w-0 flex-1 basis-full sm:basis-0`}
                 />
                 <button type="button" onClick={(e) => void buscarBeneficiario(e)} className={BOTON_SECUNDARIO} aria-label="Buscar beneficiario">
                   <Search size={16} />
@@ -931,7 +931,49 @@ function ListaEnvios({ token, permisos, prep, version, onCambio, onSesionVencida
           {datos.total} envío(s) · confirmados: enviado {dinero(datos.resumen.enviado)}, comisión {dinero(datos.resumen.comision)}, cobrado {dinero(datos.resumen.total)}
         </p>
       )}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      {/* Celular: una tarjeta por envío, con los botones a la vista. */}
+      <ul className="flex flex-col gap-2 md:hidden">
+        {datos?.filas.map((f) => (
+          <li key={f.id} className="rounded-xl border border-gray-200 bg-white p-3 text-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <span className="font-mono">{f.numero_texto}</span>
+                <span className="block text-xs text-gray-500">{fechaHora(f.fecha)} · {f.agente_codigo}</span>
+              </div>
+              <EstadoEtiqueta estado={f.estado} />
+            </div>
+            <div className="mt-2 flex items-end justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate">{f.beneficiario_nombre}</div>
+                <span className="block font-mono text-xs text-gray-500">{f.beneficiario_telefono}</span>
+                <span className="block truncate text-xs text-gray-400">de {f.remitente_nombre}</span>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="font-medium whitespace-nowrap">{gourdes(f.monto_recibir)}</div>
+                <span className="block text-xs whitespace-nowrap text-gray-500">{dinero(f.total_pagar)}</span>
+              </div>
+            </div>
+            {f.codigo_externo && <span className="mt-1 block font-mono text-xs text-gray-500">{f.codigo_externo}</span>}
+            <div className="mt-3 flex gap-2">
+              {f.estado === 'pendiente' && puedeConfirmar && (
+                <>
+                  <button type="button" onClick={() => setAccion({ tipo: 'confirmar', envio: f })} className="h-10 flex-1 rounded-lg bg-green-700 px-3 text-sm font-medium text-white hover:bg-green-800">
+                    Confirmar
+                  </button>
+                  <button type="button" onClick={() => setAccion({ tipo: 'rechazar', envio: f })} className="h-10 flex-1 rounded-lg border border-red-300 px-3 text-sm text-red-700 hover:bg-red-50">
+                    Rechazar
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={() => setAccion({ tipo: 'ver', envio: f })} className="flex h-10 items-center justify-center gap-1 rounded-lg border border-gray-300 px-3 text-sm text-gray-600 hover:bg-gray-50" aria-label={`Ver ${f.numero_texto}`}>
+                <Eye size={16} /> Ver
+              </button>
+            </div>
+          </li>
+        ))}
+        {datos && datos.filas.length === 0 && <li className="rounded-xl border border-gray-200 bg-white px-3 py-6 text-center text-sm text-gray-400">No hay envíos con esos filtros.</li>}
+      </ul>
+      <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white md:block">
         <table className="w-full text-left text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500">
             <tr>

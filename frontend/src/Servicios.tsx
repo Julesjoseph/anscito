@@ -882,7 +882,7 @@ export default function Servicios({ token, permisos, onSesionVencida }: Props) {
       </div>
 
       {verImpuestos && (
-        <div className="mb-4 flex gap-1 border-b border-gray-200">
+        <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
           {(
             [
               ['catalogo', 'Catálogo'],

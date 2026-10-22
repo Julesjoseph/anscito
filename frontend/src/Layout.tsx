@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   BookOpen,
   Calculator,
@@ -13,6 +13,7 @@ import {
   Landmark,
   LayoutDashboard,
   LogOut,
+  Menu,
   Moon,
   Package,
   PackagePlus,
@@ -27,6 +28,7 @@ import {
   Users,
   Wallet,
   WalletCards,
+  X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { AvisoGastoFijo, Marca, Perfil } from './api'
@@ -259,6 +261,21 @@ export default function Layout({
   const [pagina, setPagina] = useState('panel')
   const [tema, setTema] = useState<Tema>(leerTema)
   const { t } = useIdioma()
+  // En el celular (menos de 768 px) el menú es un cajón que se abre con ☰.
+  const [menuAbierto, setMenuAbierto] = useState(false)
+  useEffect(() => {
+    if (!menuAbierto) return
+    const cerrar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuAbierto(false)
+    }
+    window.addEventListener('keydown', cerrar)
+    return () => window.removeEventListener('keydown', cerrar)
+  }, [menuAbierto])
+  function ir(id: string) {
+    setPagina(id)
+    setMenuAbierto(false)
+    window.scrollTo(0, 0)
+  }
   function cambiarTema() {
     const nuevo = tema === 'noche' ? 'dia' : 'noche'
     aplicarTema(nuevo)
@@ -274,14 +291,49 @@ export default function Layout({
   )
 
   return (
-    <div className="min-h-screen flex bg-gray-100">
-      <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col">
+    <div className="min-h-screen bg-gray-100 md:flex">
+      {/* Celular: barra de arriba con el botón del menú y la pantalla actual. */}
+      <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-gray-200 bg-white px-3 md:hidden">
+        <button
+          type="button"
+          onClick={() => setMenuAbierto(true)}
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-700 hover:bg-gray-100"
+          aria-label={t('menu.abrir')}
+          aria-expanded={menuAbierto}
+        >
+          <Menu size={22} />
+        </button>
+        <LogoMarca marca={marca} tamano="chico" />
+        <div className="min-w-0 truncate text-sm font-medium">
+          {(() => {
+            const m = visibles.find((x) => x.id === pagina)
+            return m ? t(`menu.${m.id}` as ClaveTexto) || m.nombre : marca.nombre_comercial
+          })()}
+        </div>
+      </header>
+      {menuAbierto && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMenuAbierto(false)} aria-hidden="true" />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] shrink-0 flex-col overflow-y-auto border-r border-gray-200 bg-white transition-transform duration-200 md:static md:z-auto md:w-60 md:max-w-none md:translate-x-0 md:overflow-visible md:transition-none ${
+          menuAbierto ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div className="flex items-center gap-2 px-4 py-4">
           <LogoMarca marca={marca} tamano="chico" />
-          <div className="leading-tight">
+          <div className="min-w-0 flex-1 leading-tight">
             <div className="text-sm font-medium">{marca.nombre_comercial}</div>
             <div className="text-xs text-gray-500">{t('menu.administracion')}</div>
           </div>
+          <button
+            type="button"
+            onClick={() => setMenuAbierto(false)}
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 md:hidden"
+            aria-label={t('menu.cerrar')}
+          >
+            <X size={20} />
+          </button>
         </div>
 
         <nav className="flex-1 px-2 py-2 flex flex-col gap-1">
@@ -289,7 +341,7 @@ export default function Layout({
             type="button"
             onClick={cambiarTema}
             title={t('menu.se_recuerda')}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 border-transparent text-gray-600 hover:bg-gray-50"
+            className="flex min-h-10 items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 border-transparent text-gray-600 hover:bg-gray-50"
           >
             {tema === 'noche' ? <Sun size={18} /> : <Moon size={18} />}
             {tema === 'noche' ? t('menu.modo_dia') : t('menu.modo_noche')}
@@ -301,9 +353,9 @@ export default function Layout({
                 key={id}
                 type="button"
                 disabled={!listo}
-                onClick={() => setPagina(id)}
+                onClick={() => ir(id)}
                 title={listo ? undefined : t('menu.proximamente')}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 ${
+                className={`flex min-h-10 items-center gap-3 px-3 py-2 rounded-lg text-sm text-left border-l-4 ${
                   activo
                     ? 'border-[#C8102E] bg-gray-100 font-medium text-gray-900'
                     : listo
@@ -328,7 +380,7 @@ export default function Layout({
           <button
             type="button"
             onClick={onSalir}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+            className="flex min-h-10 items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
           >
             <LogOut size={16} />
             {t('menu.salir')}
@@ -336,7 +388,7 @@ export default function Layout({
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0 p-6">
+      <main className="min-w-0 flex-1 p-4 md:p-6">
         {pagina === 'usuarios' ? (
      <Usuarios
   token={token}

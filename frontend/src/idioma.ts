@@ -73,6 +73,8 @@ const TEXTOS = {
   'menu.idioma': { es: 'Idioma', en: 'Language', fr: 'Langue', ht: 'Lang' },
   'menu.sin_rol': { es: 'Sin rol', en: 'No role', fr: 'Aucun rôle', ht: 'Pa gen wòl' },
   'menu.salir': { es: 'Salir', en: 'Sign out', fr: 'Déconnexion', ht: 'Soti' },
+  'menu.abrir': { es: 'Abrir el menú', en: 'Open the menu', fr: 'Ouvrir le menu', ht: 'Louvri meni an' },
+  'menu.cerrar': { es: 'Cerrar el menú', en: 'Close the menu', fr: 'Fermer le menu', ht: 'Fèmen meni an' },
   'menu.proximamente': {
     es: 'Disponible próximamente',
     en: 'Coming soon',
